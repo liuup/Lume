@@ -103,18 +103,17 @@ pub fn run() {
             // Warm up PDFium lazily
             if GLOBAL_PDFIUM.get().is_none() {
                 let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::path::PathBuf::from("./"));
+                let resource_dir_str = resource_dir.to_str().unwrap_or("./");
                 
-                let lib_path = resource_dir.join("libpdfium.dylib");
-                let lib_path_str = lib_path.to_str().unwrap_or("./");
-                
-                let bindings = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(lib_path_str))
+                let bindings = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(resource_dir_str))
                     .or_else(|_| Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./")))
                     .or_else(|_| Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./src-tauri/")))
                     .or_else(|_| Pdfium::bind_to_system_library())
                     .expect("Failed to bind to libpdfium");
+
                 
                 let pdfium = Box::leak(Box::new(Pdfium::new(bindings)));
-                GLOBAL_PDFIUM.set(GlobalPdfium(pdfium)).unwrap();
+                let _ = GLOBAL_PDFIUM.set(GlobalPdfium(pdfium));
             }
             Ok(())
         })
