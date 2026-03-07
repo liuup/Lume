@@ -6,20 +6,13 @@ use std::io::Cursor;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
+use std::sync::OnceLock;
+
 struct GlobalPdfium(&'static Pdfium);
 unsafe impl Sync for GlobalPdfium {}
 unsafe impl Send for GlobalPdfium {}
 
-lazy_static::lazy_static! {
-    static ref GLOBAL_PDFIUM: GlobalPdfium = {
-        // macOS path logic for the packaged app. For simplicity in dev, we look in the current executing dir or src-tauri.
-        let bindings = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
-            .or_else(|_| Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./src-tauri/")))
-            .or_else(|_| Pdfium::bind_to_system_library())
-            .expect("Failed to bind to libpdfium");
-        GlobalPdfium(Box::leak(Box::new(Pdfium::new(bindings))))
-    };
-}
+static GLOBAL_PDFIUM: OnceLock<GlobalPdfium> = OnceLock::new();
 
 struct ThreadSafeDoc(Option<PdfDocument<'static>>);
 unsafe impl Send for ThreadSafeDoc {}
@@ -33,7 +26,11 @@ struct AppState {
 fn load_pdf(path: String, state: State<'_, AppState>) -> Result<u16, String> {
     // Load PDF from path via PDFium directly.
     // This expects the file path to be accessible by C library.
-    let doc = GLOBAL_PDFIUM
+    let pdfium = GLOBAL_PDFIUM
+        .get()
+        .expect("PDFium not initialized");
+
+    let doc = pdfium
         .0
         .load_pdf_from_file(&path, None)
         .map_err(|e| format!("Failed to open PDF: {:?}", e))?;
@@ -101,10 +98,26 @@ async fn render_page(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Warm up PDFium lazily by accessing it once to ensure bindings are loaded.
-    let _ = GLOBAL_PDFIUM.0;
-
     tauri::Builder::default()
+        .setup(|app| {
+            // Warm up PDFium lazily
+            if GLOBAL_PDFIUM.get().is_none() {
+                let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::path::PathBuf::from("./"));
+                
+                let lib_path = resource_dir.join("libpdfium.dylib");
+                let lib_path_str = lib_path.to_str().unwrap_or("./");
+                
+                let bindings = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(lib_path_str))
+                    .or_else(|_| Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./")))
+                    .or_else(|_| Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./src-tauri/")))
+                    .or_else(|_| Pdfium::bind_to_system_library())
+                    .expect("Failed to bind to libpdfium");
+                
+                let pdfium = Box::leak(Box::new(Pdfium::new(bindings)));
+                GLOBAL_PDFIUM.set(GlobalPdfium(pdfium)).unwrap();
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
