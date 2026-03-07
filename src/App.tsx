@@ -79,7 +79,7 @@ function App() {
         )}
 
         {pdfPath && !isLoading && (
-          <div className="w-full max-w-5xl mx-auto pb-16">
+          <div className="w-full h-full pb-16 overflow-y-auto">
             <PdfViewer totalPages={totalPages} dimensions={dimensions} scale={scale} activeTool={activeTool} />
           </div>
         )}

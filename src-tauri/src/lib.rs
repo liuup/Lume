@@ -53,9 +53,18 @@ fn get_pdf_dimensions(state: State<'_, AppState>) -> Result<Vec<PageDimensions>,
 
     let mut dimensions = Vec::new();
     for page in doc.pages().iter() {
+        // Correctly account for rotation: if 90 or 270 degrees, swap width and height
+        let rotation = page.rotation().map(|r| r.as_degrees()).unwrap_or(0.0);
+        let mut w = page.width().value;
+        let mut h = page.height().value;
+
+        if rotation == 90.0 || rotation == 270.0 {
+            std::mem::swap(&mut w, &mut h);
+        }
+
         dimensions.push(PageDimensions {
-            width: page.width().value,
-            height: page.height().value,
+            width: w,
+            height: h,
         });
     }
 
@@ -176,17 +185,25 @@ async fn render_page(
     scale: f32,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    // Asynchronous command to not block the main thread for heavy image rendering.
-    // However, our Mutex blocks. We can duplicate the document reference or just hold it briefly to get the page.
     let image = {
         let doc_guard = state.document.lock().unwrap();
         let doc = doc_guard.0.as_ref().ok_or("No PDF loaded")?;
         let page = doc.pages().get(page_index).map_err(|e| e.to_string())?;
 
+        // Explicitly calculate width/height with rotation in mind
+        let rotation = page.rotation().map(|r| r.as_degrees()).unwrap_or(0.0);
+        let (base_w, base_h) = if rotation == 90.0 || rotation == 270.0 {
+            (page.height().value, page.width().value)
+        } else {
+            (page.width().value, page.height().value)
+        };
+
+        let target_w = (base_w * scale).round() as i32;
+        let target_h = (base_h * scale).round() as i32;
+
         let mut render_config = PdfRenderConfig::new();
-        // Base resolution scaling. For retina display clarity, we usually scale > 1.0.
-        // Example: If scale is 2.0, a 72DPI standard page becomes 144DPI.
-        render_config = render_config.scale_page_by_factor(scale);
+        // Use explicit target size for better robustness across different PDFium versions
+        render_config = render_config.set_target_size(target_w, target_h);
 
         let bitmap = page
             .render_with_config(&render_config)
@@ -194,7 +211,6 @@ async fn render_page(
         bitmap.as_image()
     };
 
-    // We do image conversion and base64 encoding outside the generic lock to keep UI fast.
     let mut cursor = Cursor::new(Vec::new());
     image
         .write_to(&mut cursor, ImageFormat::WebP)

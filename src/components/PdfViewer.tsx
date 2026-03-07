@@ -14,7 +14,7 @@ export function PdfViewer({ totalPages, dimensions, scale, activeTool }: PdfView
   if (dimensions.length === 0) return null;
 
   return (
-    <div className="flex flex-col items-center py-12 space-y-12">
+    <div className="flex flex-col items-center py-12 space-y-12 min-w-full">
       {Array.from({ length: totalPages }).map((_, i) => (
         <PageRender 
           key={`page-${i}`} 
