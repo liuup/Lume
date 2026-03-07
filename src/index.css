@@ -3,7 +3,28 @@
 @tailwind utilities;
 
 @layer base {
-  body {
-    background-color: #f3f4f6;
+  html {
+    scroll-behavior: smooth;
   }
+  body {
+    @apply bg-zinc-50 text-zinc-900 font-sans antialiased selection:bg-indigo-100 selection:text-indigo-900;
+  }
+}
+
+/* Custom scrollbar for webkit */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-zinc-300 rounded-full border-2 border-solid border-transparent bg-clip-padding hover:bg-zinc-400;
+}
+
+.canvas-pattern {
+  background-color: #f4f4f5;
+  background-image: radial-gradient(#d4d4d8 1px, transparent 1px);
+  background-size: 20px 20px;
 }

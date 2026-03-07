@@ -11,11 +11,10 @@ interface PdfViewerProps {
 }
 
 export function PdfViewer({ totalPages, dimensions, scale, activeTool }: PdfViewerProps) {
-  // If dimensions aren't loaded yet, don't render.
   if (dimensions.length === 0) return null;
 
   return (
-    <div className="flex flex-col items-center py-8 space-y-6">
+    <div className="flex flex-col items-center py-12 space-y-12">
       {Array.from({ length: totalPages }).map((_, i) => (
         <PageRender 
           key={`page-${i}`} 
@@ -41,26 +40,23 @@ function PageRender({ pageIndex, dimension, scale, activeTool }: PageRenderProps
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
 
-  // Intersection Observer for Lazy Loading
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        // use rootMargin to preload pages right outside the viewport
         if (entries[0].isIntersecting) {
           setIsVisible(true);
         }
       },
-      { rootMargin: "400px" } 
+      { rootMargin: "600px" } 
     );
 
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
-  // Fetch Page Image over IPC
   useEffect(() => {
     if (!isVisible) return;
     let isMounted = true;
@@ -69,7 +65,7 @@ function PageRender({ pageIndex, dimension, scale, activeTool }: PageRenderProps
       try {
         const base64 = await invoke<string>("render_page", { 
           pageIndex, 
-          scale 
+          scale: scale * (window.devicePixelRatio || 1) // High resolution rendering
         });
         if (isMounted) {
           setImgSrc(base64);
@@ -87,28 +83,37 @@ function PageRender({ pageIndex, dimension, scale, activeTool }: PageRenderProps
   const height = dimension.height * scale;
 
   return (
-    <div 
-      ref={containerRef}
-      className="bg-white shadow-xl relative select-none shrink-0 border border-gray-100"
-      style={{ width, height }}
-    >
-      {imgSrc ? (
-        <img 
-          src={imgSrc} 
-          alt={`Page ${pageIndex + 1}`} 
-          className="absolute inset-0 w-full h-full object-contain pointer-events-none" 
-        />
-      ) : (
-        <div className="absolute inset-0 flex items-center justify-center text-gray-300 font-mono">
-          Page {pageIndex + 1}
-        </div>
-      )}
+    <div className="flex flex-col items-center space-y-3 group">
+      <div className="flex items-center justify-between w-full px-2">
+         <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+           Page {pageIndex + 1}
+         </span>
+      </div>
       
-      {/* 
-        Phase 5 annotation layer mounts right here on top of the image container. 
-        It has precise width and height matching the page.
-      */}
-      <AnnotationLayer pageIndex={pageIndex} width={width} height={height} scale={scale} activeTool={activeTool} />
+      <div 
+        ref={containerRef}
+        className="bg-white shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1),0_1px_4px_rgba(0,0,0,0.05)] relative select-none shrink-0 border border-zinc-200/50 rounded-sm overflow-hidden transition-shadow hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.15)]"
+        style={{ width, height }}
+      >
+        {imgSrc ? (
+          <img 
+            src={imgSrc} 
+            alt={`Page ${pageIndex + 1}`} 
+            className="absolute inset-0 w-full h-full object-contain pointer-events-none transition-opacity duration-300 ease-in" 
+            onLoad={(e) => (e.currentTarget.style.opacity = "1")}
+            style={{ opacity: 0 }}
+          />
+        ) : (
+          <div className="absolute inset-0 flex flex-col items-center justify-center space-y-4">
+            <div className="w-8 h-8 border-2 border-zinc-200 border-t-zinc-400 rounded-full animate-spin" />
+            <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-tighter">
+              Loading Page {pageIndex + 1}
+            </div>
+          </div>
+        )}
+        
+        <AnnotationLayer pageIndex={pageIndex} width={width} height={height} scale={scale} activeTool={activeTool} />
+      </div>
     </div>
   );
 }

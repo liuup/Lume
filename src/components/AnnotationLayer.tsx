@@ -78,14 +78,12 @@ export function AnnotationLayer({ pageIndex, width, height, scale, activeTool }:
       const sw = Math.abs(selectionEnd.x - selectionStart.x) * scale;
       const sh = Math.abs(selectionEnd.y - selectionStart.y) * scale;
 
-      ctx.strokeStyle = "rgba(255, 183, 77, 0.7)";
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = "rgba(79, 70, 229, 0.5)"; // Indigo-600 with alpha
+      ctx.lineWidth = 1;
       ctx.strokeRect(sx, sy, sw, sh);
-      ctx.setLineDash([]);
 
       // Light selection area fill
-      ctx.fillStyle = "rgba(255, 243, 128, 0.12)";
+      ctx.fillStyle = "rgba(79, 70, 229, 0.08)";
       ctx.fillRect(sx, sy, sw, sh);
     }
 
