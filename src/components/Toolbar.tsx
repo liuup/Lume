@@ -13,35 +13,29 @@ interface ToolbarProps {
 
 export function Toolbar({ onOpenPdf, onZoomIn, onZoomOut, scale, hasPdf, activeTool, onToolChange }: ToolbarProps) {
   return (
-    <div className="h-14 bg-white border-b border-gray-300 flex items-center justify-between px-4 shadow-sm z-10 shrink-0">
-      <div className="flex items-center space-x-6">
-        <h1 className="font-bold text-xl text-blue-600 tracking-tight">Lume</h1>
-        
-        <button 
-          onClick={onOpenPdf}
-          className="flex items-center space-x-2 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md transition"
-        >
-          <FileUp size={18} />
-          <span className="text-sm font-medium">Open PDF</span>
-        </button>
-      </div>
+    <div className="h-14 bg-white border-b border-gray-300 flex items-center space-x-6 px-4 shadow-sm z-10 shrink-0">
+      <button 
+        onClick={onOpenPdf}
+        className="flex items-center space-x-2 bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1.5 rounded-md transition"
+      >
+        <FileUp size={18} />
+        <span className="text-sm font-medium">Open PDF</span>
+      </button>
 
       {hasPdf && (
-        <div className="flex items-center space-x-2 bg-gray-50 p-1 border border-gray-200 rounded-lg shadow-inner">
-          <button onClick={onZoomOut} className="p-1.5 text-gray-500 hover:text-gray-800 hover:bg-gray-200 rounded transition">
+        <div className="flex items-center space-x-1 bg-gray-50 p-1 border border-gray-200 rounded-lg shadow-inner">
+          <button onClick={onZoomOut} className="p-1.5 text-gray-500 hover:text-gray-800 hover:bg-gray-200 rounded transition" title="Zoom Out">
             <ZoomOut size={18} />
           </button>
-          <span className="text-sm font-mono text-gray-600 w-12 text-center">
+          <span className="text-sm font-mono text-gray-600 w-12 text-center select-none">
             {Math.round(scale * 100)}%
           </span>
-          <button onClick={onZoomIn} className="p-1.5 text-gray-500 hover:text-gray-800 hover:bg-gray-200 rounded transition">
+          <button onClick={onZoomIn} className="p-1.5 text-gray-500 hover:text-gray-800 hover:bg-gray-200 rounded transition" title="Zoom In">
             <ZoomIn size={18} />
           </button>
-        </div>
-      )}
 
-      {hasPdf ? (
-        <div className="flex items-center space-x-2 border border-gray-200 bg-gray-50 p-1 rounded-lg">
+          <div className="w-px h-5 bg-gray-300 mx-2" />
+
           <button 
             onClick={() => onToolChange("none")}
             className={`p-1.5 rounded transition ${activeTool === 'none' ? 'bg-white shadow text-gray-800' : 'text-gray-500 hover:text-gray-800'}`}
@@ -64,7 +58,7 @@ export function Toolbar({ onOpenPdf, onZoomIn, onZoomOut, scale, hasPdf, activeT
             <Pencil size={18} />
           </button>
         </div>
-      ) : <div />}
+      )}
     </div>
   );
 }

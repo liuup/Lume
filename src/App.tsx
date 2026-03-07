@@ -3,7 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Toolbar } from "./components/Toolbar";
 import { PdfViewer } from "./components/PdfViewer";
-import "./App.css";
 
 export type PageDimension = { width: number; height: number };
 export type ToolType = 'none' | 'draw' | 'highlight';
