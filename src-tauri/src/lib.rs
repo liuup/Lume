@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::ImageFormat;
 use pdfium_render::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
@@ -60,6 +60,114 @@ fn get_pdf_dimensions(state: State<'_, AppState>) -> Result<Vec<PageDimensions>,
     }
 
     Ok(dimensions)
+}
+
+#[derive(Deserialize)]
+struct SelectionRect {
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+}
+
+#[derive(Serialize)]
+struct TextRect {
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
+/// Given a page index and a selection rectangle (in unscaled PDF point coordinates,
+/// with origin at top-left and Y increasing downward), returns the bounding rectangles
+/// of all text characters within that selection.
+#[tauri::command]
+fn get_text_rects(
+    page_index: u16,
+    selection: SelectionRect,
+    state: State<'_, AppState>,
+) -> Result<Vec<TextRect>, String> {
+    let doc_guard = state.document.lock().unwrap();
+    let doc = doc_guard.0.as_ref().ok_or("No PDF loaded")?;
+    let page = doc.pages().get(page_index).map_err(|e| e.to_string())?;
+
+    let page_height = page.height().value;
+
+    // Convert from top-left origin (frontend) to bottom-left origin (PDF)
+    // Frontend: y increases downward; PDF: y increases upward
+    let pdf_bottom = page_height - selection.bottom;
+    let pdf_top = page_height - selection.top;
+    let pdf_left = selection.left;
+    let pdf_right = selection.right;
+
+    let rect = PdfRect::new_from_values(
+        pdf_bottom, pdf_left, pdf_top, pdf_right,
+    );
+
+    let text = page.text().map_err(|e| e.to_string())?;
+    let chars = text.chars_inside_rect(rect).map_err(|e| e.to_string())?;
+
+    let mut rects = Vec::new();
+    for ch in chars.iter() {
+        if let Ok(bounds) = ch.loose_bounds() {
+            // Convert back from PDF coords (bottom-left origin) to frontend coords (top-left origin)
+            let x = bounds.left().value;
+            let y = page_height - bounds.top().value;
+            let w = bounds.right().value - bounds.left().value;
+            let h = bounds.top().value - bounds.bottom().value;
+            if w > 0.0 && h > 0.0 {
+                rects.push(TextRect { x, y, width: w, height: h });
+            }
+        }
+    }
+
+    // Merge character rects that are on the same line into larger rects
+    // This creates clean line-level highlight rectangles
+    let merged = merge_text_rects(rects);
+
+    Ok(merged)
+}
+
+/// Merge individual character rectangles into line-level rectangles.
+/// Characters on the same line (similar y and height) get merged into a single rect.
+fn merge_text_rects(mut rects: Vec<TextRect>) -> Vec<TextRect> {
+    if rects.is_empty() {
+        return rects;
+    }
+
+    // Sort by y position (top), then by x position (left)
+    rects.sort_by(|a, b| {
+        a.y.partial_cmp(&b.y)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal))
+    });
+
+    let mut merged: Vec<TextRect> = Vec::new();
+
+    for r in rects {
+        if let Some(last) = merged.last_mut() {
+            // If same line (y position within tolerance) and overlapping/adjacent horizontally
+            let y_tolerance = last.height * 0.3;
+            if (last.y - r.y).abs() < y_tolerance
+                && (last.height - r.height).abs() < y_tolerance
+                && r.x <= last.x + last.width + 2.0
+            {
+                // Extend the last rect to include this one
+                let new_right = f32::max(last.x + last.width, r.x + r.width);
+                let new_left = f32::min(last.x, r.x);
+                let new_top = f32::min(last.y, r.y);
+                let new_bottom = f32::max(last.y + last.height, r.y + r.height);
+                last.x = new_left;
+                last.y = new_top;
+                last.width = new_right - new_left;
+                last.height = new_bottom - new_top;
+                continue;
+            }
+        }
+        merged.push(r);
+    }
+
+    merged
 }
 
 #[tauri::command]
@@ -125,7 +233,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_pdf,
             get_pdf_dimensions,
-            render_page
+            render_page,
+            get_text_rects
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

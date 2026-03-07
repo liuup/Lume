@@ -1,4 +1,4 @@
-import { FileUp, ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2 } from "lucide-react";
+import { FileUp, ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type } from "lucide-react";
 import { ToolType } from "../App";
 
 interface ToolbarProps {
@@ -46,9 +46,16 @@ export function Toolbar({ onOpenPdf, onZoomIn, onZoomOut, scale, hasPdf, activeT
           <button 
             onClick={() => onToolChange("highlight")}
             className={`p-1.5 rounded transition ${activeTool === 'highlight' ? 'bg-yellow-100/50 shadow text-yellow-600' : 'text-yellow-600 hover:bg-yellow-50'}`}
-            title="Highlight Text"
+            title="Freehand Highlight"
           >
             <Highlighter size={18} />
+          </button>
+          <button 
+            onClick={() => onToolChange("text-highlight")}
+            className={`p-1.5 rounded transition ${activeTool === 'text-highlight' ? 'bg-amber-100/50 shadow text-amber-600' : 'text-amber-600 hover:bg-amber-50'}`}
+            title="Select Text to Highlight"
+          >
+            <Type size={18} />
           </button>
           <button 
             onClick={() => onToolChange("draw")}

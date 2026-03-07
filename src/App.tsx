@@ -5,7 +5,7 @@ import { Toolbar } from "./components/Toolbar";
 import { PdfViewer } from "./components/PdfViewer";
 
 export type PageDimension = { width: number; height: number };
-export type ToolType = 'none' | 'draw' | 'highlight';
+export type ToolType = 'none' | 'draw' | 'highlight' | 'text-highlight';
 
 function App() {
   const [pdfPath, setPdfPath] = useState<string | null>(null);
