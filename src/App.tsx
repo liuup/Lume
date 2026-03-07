@@ -212,55 +212,71 @@ function App() {
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-50">
       {/* ── Top title-bar / tab strip ── */}
-      <div className="h-[40px] flex items-end border-b border-zinc-200 bg-zinc-100/60 shrink-0 select-none">
-        {/* Left: traffic-light gap + draggable empty area */}
-        <div
-          className="flex items-end h-full pl-[76px] pr-1 flex-1 min-w-0 cursor-default"
+      <div 
+        className="h-[38px] flex items-end border-b border-zinc-200 bg-zinc-200/40 shrink-0 select-none"
+        onPointerDown={(e) => {
+          if (e.target === e.currentTarget && e.button === 0) {
+            getCurrentWindow().startDragging();
+          }
+        }}
+      >
+        {/* Left: traffic-light gap (draggable) */}
+        <div 
+          className="w-[76px] h-full shrink-0 cursor-default" 
           onPointerDown={(e) => {
-            // Only start dragging if the user clicked directly on this element (the empty space)
-            if (e.currentTarget === e.target && e.button === 0) {
+            if (e.button === 0) getCurrentWindow().startDragging();
+          }}
+        />
+
+        {/* Tabs */}
+        <div 
+          className="flex items-end space-x-1.5 overflow-x-auto overflow-y-hidden no-scrollbar flex-1 min-w-0 h-full cursor-default"
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget && e.button === 0) {
               getCurrentWindow().startDragging();
             }
           }}
         >
-          {/* Tabs – sit inside the drag region but stop propagation so clicks don't drag */}
-          <div className="flex items-end space-x-1 overflow-x-auto no-scrollbar h-full pb-0">
-            {openTabs.map(tab => {
-              const isActive = tab.id === activeTabId;
-              return (
-                <div
-                  key={tab.id}
-                  onClick={() => setActiveTabId(tab.id)}
+          {openTabs.map(tab => {
+            const isActive = tab.id === activeTabId;
+            return (
+              <div
+                key={tab.id}
+                onClick={() => setActiveTabId(tab.id)}
+                onPointerDown={(e) => e.stopPropagation()} // Prevent dragging when clicking a tab
+                className={[
+                  "group flex items-center gap-1.5 px-3 h-[28px] min-w-[100px] max-w-[180px]",
+                  "rounded-t-md border-x border-t text-[12px] font-medium transition-colors relative cursor-default",
+                  isActive
+                    ? "bg-zinc-50 border-zinc-200 text-zinc-900 z-10"
+                    : "bg-transparent border-transparent text-zinc-500 hover:bg-zinc-200/60 hover:text-zinc-700",
+                ].join(" ")}
+              >
+                {/* Visual cover line to detach the active tab from the bottom border */}
+                {isActive && <div className="absolute -bottom-[1px] left-0 right-0 h-[2px] bg-zinc-50" />}
+                
+                <span className="truncate flex-1" title={tab.pdf.meta.title || tab.pdf.name}>
+                  {tab.pdf.meta.title || tab.pdf.name}
+                </span>
+                
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCloseTab(tab.id, e);
+                  }}
                   onPointerDown={(e) => e.stopPropagation()}
-                  className={[
-                    "group flex items-center gap-1.5 px-3 h-[30px] min-w-[100px] max-w-[180px]",
-                    "rounded-t-md border-x border-t text-[12px] font-medium cursor-default transition-colors relative",
-                    isActive
-                      ? "bg-zinc-50 border-zinc-200 text-zinc-900 translate-y-[1px]"
-                      : "bg-zinc-200/40 border-transparent text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-700",
-                  ].join(" ")}
+                  className="shrink-0 p-0.5 rounded-sm hover:bg-zinc-300 text-zinc-400 hover:text-zinc-600 transition-colors"
                 >
-                  {/* Cover the bottom border for the active tab so it merges with content */}
-                  {isActive && <div className="absolute bottom-[-1px] left-0 right-0 h-[1px] bg-zinc-50" />}
-                  <span className="truncate flex-1" title={tab.pdf.meta.title || tab.pdf.name}>
-                    {tab.pdf.meta.title || tab.pdf.name}
-                  </span>
-                  <button
-                    onClick={(e) => handleCloseTab(tab.id, e)}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className="shrink-0 p-0.5 rounded hover:bg-zinc-300/60 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <X size={11} />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+                  <X size={12} />
+                </button>
+              </div>
+            );
+          })}
         </div>
 
-        {/* Right: extra drag area */}
-        <div
-          className="w-4 h-full cursor-default"
+        {/* Right: extra draggable space */}
+        <div 
+          className="w-12 h-full shrink-0 cursor-default" 
           onPointerDown={(e) => {
             if (e.button === 0) getCurrentWindow().startDragging();
           }}

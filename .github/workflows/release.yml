@@ -3,48 +3,48 @@ name: "Build and Release Lume"
 on:
   push:
     tags:
-      - "v*" # 触发条件：当推送到 GitHub 上的 tag 以 v 开头时（比如 v0.1.0）
-  workflow_dispatch: # 允许你在 GitHub Actions 页面手动点击按钮运行
+      - "v*" # Trigger on pushes to tags starting with "v" (e.g., v0.1.0)
+  workflow_dispatch: # Allow manual trigger from the GitHub Actions page
 
 jobs:
   release:
     permissions:
-      contents: write # 允许向 Releases 页面上传文件
+      contents: write # Allow workflow to create releases
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: "macos-latest" # Mac 端编译 (M1/arm64)
+          - platform: "macos-latest" # Build on macOS (M1/arm64)
             args: "--target aarch64-apple-darwin"
-          - platform: "windows-latest" # Windows 端编译 (x64)
+          - platform: "windows-latest" # Build on Windows (x64)
             args: ""
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - name: 检出代码
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 设置 Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: 设置 Rust
+      - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          # 如果是 macOS，添加 aarch64 (M1/M2) 的编译目标
+          # Target for macOS (aarch64)
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
-      # 自动下载并提取 macOS 版的 PDFium 动态链接库
-      - name: 注入 PDFium (macOS)
+      # Download and extract the macOS PDFium dynamic library
+      - name: Inject PDFium (macOS)
         if: matrix.platform == 'macos-latest'
         run: |
           curl -L -o pdfium.tgz https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-arm64.tgz
           tar -xzf pdfium.tgz lib/libpdfium.dylib
           mv lib/libpdfium.dylib src-tauri/libpdfium.dylib
 
-      # 自动下载并提取 Windows 版的 PDFium 动态链接库
-      - name: 注入 PDFium (Windows)
+      # Download and extract the Windows PDFium dynamic library
+      - name: Inject PDFium (Windows)
         if: matrix.platform == 'windows-latest'
         shell: bash
         run: |
@@ -52,17 +52,17 @@ jobs:
           tar -xzf pdfium.tgz bin/pdfium.dll
           mv bin/pdfium.dll src-tauri/pdfium.dll
 
-      - name: 安装前端依赖
+      - name: Install frontend dependencies
         run: npm install
 
-      - name: 使用 Tauri Action 编译并发布
+      - name: Build and Publish with Tauri Action
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__ # 自动读取 tauri.conf.json 里的 version
+          tagName: v__VERSION__ # Automatically extracts version from tauri.conf.json
           releaseName: "Lume v__VERSION__"
-          releaseBody: "Lume 跨平台 PDF 阅读器新版本构建完毕。"
-          releaseDraft: true # 发布为草稿，供你确认后再公开发布
+          releaseBody: "New release of Lume, the cross-platform PDF reader."
+          releaseDraft: true # Create a draft release so you can review before publishing
           prerelease: false
           args: ${{ matrix.args }}
