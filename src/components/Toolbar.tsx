@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type, PanelRight } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type, PanelRight, ChevronDown } from "lucide-react";
 import { ToolType } from "../App";
 
 interface ToolbarProps {
@@ -11,6 +11,8 @@ interface ToolbarProps {
   onToolChange: (tool: ToolType) => void;
   isRightPanelOpen: boolean;
   onToggleRightPanel: () => void;
+  onFitWidth: () => void;
+  onFitHeight: () => void;
 }
 
 export function Toolbar({
@@ -22,16 +24,30 @@ export function Toolbar({
   onToolChange,
   isRightPanelOpen,
   onToggleRightPanel,
+  onFitWidth,
+  onFitHeight,
 }: ToolbarProps) {
+  const [showZoomMenu, setShowZoomMenu] = useState(false);
+  const zoomMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (zoomMenuRef.current && !zoomMenuRef.current.contains(e.target as Node)) {
+        setShowZoomMenu(false);
+      }
+    };
+    if (showZoomMenu) window.addEventListener("click", handleClick);
+    return () => window.removeEventListener("click", handleClick);
+  }, [showZoomMenu]);
   if (!hasPdf) return null;
 
   return (
     <header className="h-14 bg-white/80 backdrop-blur-md border-b border-zinc-200 flex items-center justify-between px-4 z-20 shrink-0 sticky top-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-      {/* Left spacer (mirrors right toggle button width) */}
-      <div className="w-9" />
+      {/* Left flexible spacer for dragging */}
+      <div className="flex-1 h-full cursor-default" data-tauri-drag-region />
 
       {/* Center — zoom + tools */}
-      <div className="flex items-center bg-zinc-100/80 p-1 rounded-2xl border border-zinc-200/50">
+      <div className="flex items-center bg-zinc-100/80 p-1 rounded-2xl border border-zinc-200/50 shrink-0">
         {/* Zoom controls */}
         <div className="flex items-center space-x-1 px-1">
           <TooltipButton
@@ -41,10 +57,28 @@ export function Toolbar({
           >
             <ZoomOut size={16} />
           </TooltipButton>
-          <div className="w-14 text-center">
-            <span className="text-xs font-semibold text-zinc-600 select-none">
-              {Math.round(scale * 100)}%
-            </span>
+          <div className="relative" ref={zoomMenuRef}>
+            <button 
+              onClick={() => setShowZoomMenu(!showZoomMenu)}
+              className="w-16 h-8 flex items-center justify-center space-x-1 hover:bg-white rounded-md transition-colors"
+              title="Zoom Options"
+            >
+              <span className="text-[11px] font-semibold text-zinc-600 select-none">
+                {Math.round(scale * 100)}%
+              </span>
+              <ChevronDown size={11} className="text-zinc-400" />
+            </button>
+            
+            {showZoomMenu && (
+              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 w-32 bg-white border border-zinc-200 rounded-xl shadow-lg py-1.5 z-50">
+                <button className="w-full text-left px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors" onClick={() => { onFitWidth(); setShowZoomMenu(false); }}>
+                  Fit to Width
+                </button>
+                <button className="w-full text-left px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors" onClick={() => { onFitHeight(); setShowZoomMenu(false); }}>
+                  Fit to Height
+                </button>
+              </div>
+            )}
           </div>
           <TooltipButton
             onClick={onZoomIn}
@@ -69,7 +103,7 @@ export function Toolbar({
             active={activeTool === "text-highlight"}
             onClick={() => onToolChange("text-highlight")}
             icon={<Type size={16} />}
-            tooltip="Text Highlight — drag to select and highlight text"
+            tooltip="Text Note — click anywhere on the PDF to type a note"
             activeClass="text-indigo-600 bg-white"
           />
           <ToolButton
@@ -89,18 +123,20 @@ export function Toolbar({
         </div>
       </div>
 
-      {/* Right — panel toggle */}
-      <TooltipButton
-        onClick={onToggleRightPanel}
-        tooltip={isRightPanelOpen ? "Hide Info Panel" : "Show Info Panel"}
-        className={`p-2 rounded-xl transition-all active:scale-90 ${
-          isRightPanelOpen
-            ? "text-indigo-600 bg-indigo-50 hover:bg-indigo-100"
-            : "text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
-        }`}
-      >
-        <PanelRight size={16} />
-      </TooltipButton>
+      {/* Right flexible spacer for dragging */}
+      <div className="flex-1 h-full flex justify-end items-center" data-tauri-drag-region>
+        <TooltipButton
+          onClick={onToggleRightPanel}
+          tooltip={isRightPanelOpen ? "Hide Info Panel" : "Show Info Panel"}
+          className={`p-2 rounded-xl transition-all active:scale-90 relative z-10 ${
+            isRightPanelOpen
+              ? "text-indigo-600 bg-indigo-50 hover:bg-indigo-100"
+              : "text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+          }`}
+        >
+          <PanelRight size={16} />
+        </TooltipButton>
+      </div>
     </header>
   );
 }

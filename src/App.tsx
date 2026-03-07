@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Toolbar } from "./components/Toolbar";
 import { PdfViewer } from "./components/PdfViewer";
 import { PdfListSidebar } from "./components/layout/PdfListSidebar";
 import { MetaPanel } from "./components/layout/MetaPanel";
+import { X } from "lucide-react";
 
 export type PageDimension = { width: number; height: number };
 export type ToolType = 'none' | 'draw' | 'highlight' | 'text-highlight';
@@ -42,10 +44,21 @@ const DEFAULT_FOLDER: FolderNode = {
   pdfs: [],
 };
 
+export interface OpenTab {
+  id: string;
+  pdf: PdfEntry;
+  totalPages: number;
+  dimensions: PageDimension[];
+}
+
 function App() {
-  const [pdfPath, setPdfPath] = useState<string | null>(null);
-  const [totalPages, setTotalPages] = useState<number>(0);
-  const [dimensions, setDimensions] = useState<PageDimension[]>([]);
+  const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+
+  const activeTab = openTabs.find(t => t.id === activeTabId) || null;
+  const pdfPath = activeTab?.pdf.path || null;
+  const totalPages = activeTab?.totalPages || 0;
+  const dimensions = activeTab?.dimensions || [];
   const [scale, setScale] = useState<number>(1.5);
   const [activeTool, setActiveTool] = useState<ToolType>('none');
   const [isLoading, setIsLoading] = useState(false);
@@ -55,6 +68,8 @@ function App() {
   const [selectedFolderId, setSelectedFolderId] = useState<string>("root");
   const [selectedPdfId, setSelectedPdfId] = useState<string | null>(null);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+
+  const mainRef = useRef<HTMLElement>(null);
 
   const zoomIn = () => setScale(s => Math.min(s + 0.25, 4.0));
   const zoomOut = () => setScale(s => Math.max(s - 0.25, 0.5));
@@ -70,7 +85,7 @@ function App() {
   }
 
   // Add a PDF entry into the selected folder
-  function addPdfToFolder(path: string) {
+  function addPdfToFolder(path: string): PdfEntry {
     const fileName = path.split("/").pop() ?? path;
     const newPdf: PdfEntry = {
       id: uid(),
@@ -93,6 +108,7 @@ function App() {
     });
 
     setSelectedPdfId(newPdf.id);
+    return newPdf;
   }
 
   // Handle adding a PDF via the open dialog (called from sidebar)
@@ -107,11 +123,16 @@ function App() {
         setIsLoading(true);
         const pages: number = await invoke("load_pdf", { path: selected });
         const dims: PageDimension[] = await invoke("get_pdf_dimensions");
-        addPdfToFolder(selected);
-        // Also open it immediately
-        setPdfPath(selected);
-        setTotalPages(pages);
-        setDimensions(dims);
+        const newPdf = addPdfToFolder(selected);
+        
+        setOpenTabs(prev => [...prev, {
+          id: newPdf.id,
+          pdf: newPdf,
+          totalPages: pages,
+          dimensions: dims
+        }]);
+        setActiveTabId(newPdf.id);
+        
         setIsLoading(false);
       }
     } catch (err) {
@@ -122,13 +143,23 @@ function App() {
 
   // Called when user double-clicks a PDF in the list — opens it in the viewer
   const handleOpenPdf = async (pdf: PdfEntry) => {
+    if (openTabs.find(t => t.id === pdf.id)) {
+      setActiveTabId(pdf.id);
+      return;
+    }
     try {
       setIsLoading(true);
       const pages: number = await invoke("load_pdf", { path: pdf.path });
       const dims: PageDimension[] = await invoke("get_pdf_dimensions");
-      setPdfPath(pdf.path);
-      setTotalPages(pages);
-      setDimensions(dims);
+      
+      setOpenTabs(prev => [...prev, {
+        id: pdf.id,
+        pdf,
+        totalPages: pages,
+        dimensions: dims
+      }]);
+      setActiveTabId(pdf.id);
+      
       setIsLoading(false);
     } catch (err) {
       console.error("Failed to open PDF", err);
@@ -147,30 +178,117 @@ function App() {
     return null;
   }
 
+  const handleCloseTab = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setOpenTabs(prev => {
+      const next = prev.filter(t => t.id !== id);
+      if (activeTabId === id) {
+        setActiveTabId(next.length > 0 ? next[next.length - 1].id : null);
+      }
+      return next;
+    });
+  };
+
+  const fitWidth = () => {
+    if (!mainRef.current || dimensions.length === 0) return;
+    const cw = mainRef.current.clientWidth;
+    // Leave roughly 64px padding (32px each side)
+    const padding = 64; 
+    const s = Math.max(0.25, Math.min(4.0, (cw - padding) / dimensions[0].width));
+    setScale(s);
+  };
+
+  const fitHeight = () => {
+    if (!mainRef.current || dimensions.length === 0) return;
+    const ch = mainRef.current.clientHeight;
+    // Leave some padding
+    const padding = 64;
+    const s = Math.max(0.25, Math.min(4.0, (ch - padding) / dimensions[0].height));
+    setScale(s);
+  };
+
   const selectedPdf = selectedPdfId ? findPdf(folderTree, selectedPdfId) : null;
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-zinc-50">
-      <PdfListSidebar
-        folderTree={folderTree}
-        selectedFolderId={selectedFolderId}
-        selectedPdfId={selectedPdfId}
-        onSelectFolder={setSelectedFolderId}
-        onSelectPdf={setSelectedPdfId}
-        onOpenPdf={handleOpenPdf}
-        onAddPdf={handleAddPdf}
-        onAddFolder={(parentId) => {
-          const name = window.prompt("Folder name:");
-          if (!name?.trim()) return;
-          const newFolder: FolderNode = { id: uid(), name: name.trim(), children: [], pdfs: [] };
-          setFolderTree(prev => {
-            const clone = JSON.parse(JSON.stringify(prev)) as FolderNode[];
-            const parent = findFolder(clone, parentId);
-            if (parent) parent.children.push(newFolder);
-            return clone;
-          });
-        }}
-      />
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-50">
+      {/* ── Top title-bar / tab strip ── */}
+      <div className="h-[40px] flex items-end border-b border-zinc-200 bg-zinc-100/60 shrink-0 select-none">
+        {/* Left: traffic-light gap + draggable empty area */}
+        <div
+          className="flex items-end h-full pl-[76px] pr-1 flex-1 min-w-0 cursor-default"
+          onPointerDown={(e) => {
+            // Only start dragging if the user clicked directly on this element (the empty space)
+            if (e.currentTarget === e.target && e.button === 0) {
+              getCurrentWindow().startDragging();
+            }
+          }}
+        >
+          {/* Tabs – sit inside the drag region but stop propagation so clicks don't drag */}
+          <div className="flex items-end space-x-1 overflow-x-auto no-scrollbar h-full pb-0">
+            {openTabs.map(tab => {
+              const isActive = tab.id === activeTabId;
+              return (
+                <div
+                  key={tab.id}
+                  onClick={() => setActiveTabId(tab.id)}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className={[
+                    "group flex items-center gap-1.5 px-3 h-[30px] min-w-[100px] max-w-[180px]",
+                    "rounded-t-md border-x border-t text-[12px] font-medium cursor-default transition-colors relative",
+                    isActive
+                      ? "bg-zinc-50 border-zinc-200 text-zinc-900 translate-y-[1px]"
+                      : "bg-zinc-200/40 border-transparent text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-700",
+                  ].join(" ")}
+                >
+                  {/* Cover the bottom border for the active tab so it merges with content */}
+                  {isActive && <div className="absolute bottom-[-1px] left-0 right-0 h-[1px] bg-zinc-50" />}
+                  <span className="truncate flex-1" title={tab.pdf.meta.title || tab.pdf.name}>
+                    {tab.pdf.meta.title || tab.pdf.name}
+                  </span>
+                  <button
+                    onClick={(e) => handleCloseTab(tab.id, e)}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="shrink-0 p-0.5 rounded hover:bg-zinc-300/60 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Right: extra drag area */}
+        <div
+          className="w-4 h-full cursor-default"
+          onPointerDown={(e) => {
+            if (e.button === 0) getCurrentWindow().startDragging();
+          }}
+        />
+      </div>
+
+      {/* 主工作区 - Main Workspace Split */}
+      <div className="flex flex-1 min-h-0">
+        <PdfListSidebar
+          folderTree={folderTree}
+          selectedFolderId={selectedFolderId}
+          selectedPdfId={selectedPdfId}
+          onSelectFolder={setSelectedFolderId}
+          onSelectPdf={setSelectedPdfId}
+          onOpenPdf={handleOpenPdf}
+          onAddPdf={handleAddPdf}
+          onAddFolder={(parentId) => {
+            const name = window.prompt("Folder name:");
+            if (!name?.trim()) return;
+            const newFolder: FolderNode = { id: uid(), name: name.trim(), children: [], pdfs: [] };
+            setFolderTree(prev => {
+              const clone = JSON.parse(JSON.stringify(prev)) as FolderNode[];
+              const parent = findFolder(clone, parentId);
+              if (parent) parent.children.push(newFolder);
+              return clone;
+            });
+          }}
+        />
 
       <div className="flex flex-col flex-1 min-w-0 relative">
         <Toolbar
@@ -182,9 +300,11 @@ function App() {
           onToolChange={setActiveTool}
           isRightPanelOpen={isRightPanelOpen}
           onToggleRightPanel={() => setIsRightPanelOpen(v => !v)}
+          onFitWidth={fitWidth}
+          onFitHeight={fitHeight}
         />
 
-        <main className="flex-1 overflow-y-auto relative flex justify-center canvas-pattern">
+        <main ref={mainRef} className="flex-1 overflow-y-auto relative flex justify-center canvas-pattern">
           {isLoading && (
             <div className="absolute inset-0 flex items-center justify-center z-10">
               <div className="bg-white/80 backdrop-blur-md px-6 py-4 rounded-2xl shadow-lg border border-zinc-200/50 text-zinc-700 font-medium flex items-center space-x-3">
@@ -213,11 +333,12 @@ function App() {
         </main>
       </div>
 
-      <MetaPanel
-        selectedPdf={selectedPdf}
-        isOpen={isRightPanelOpen}
-        onClose={() => setIsRightPanelOpen(false)}
-      />
+        <MetaPanel
+          selectedPdf={selectedPdf}
+          isOpen={isRightPanelOpen}
+          onClose={() => setIsRightPanelOpen(false)}
+        />
+      </div>
     </div>
   );
 }

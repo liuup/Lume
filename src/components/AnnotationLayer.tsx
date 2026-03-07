@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { ToolType } from "../App";
 
 interface AnnotationLayerProps {
@@ -11,124 +10,131 @@ interface AnnotationLayerProps {
 }
 
 interface Point {
-  x: number; // Unscaled original X
-  y: number; // Unscaled original Y
+  x: number; // Unscaled
+  y: number; // Unscaled
 }
 
 interface Path {
   tool: ToolType;
-  color: string;
   points: Point[];
 }
 
-interface HighlightRect {
-  x: number;       // Unscaled PDF point X
-  y: number;       // Unscaled PDF point Y
-  width: number;   // Unscaled width
-  height: number;  // Unscaled height
+/** A committed text annotation (stores unscaled position + content). */
+interface TextAnnotation {
+  x: number;        // unscaled
+  y: number;        // unscaled (top of text baseline area)
+  text: string;
+  /** Font size in unscaled PDF points. 13 pt reads comfortably at typical zoom levels. */
+  fontSize: number;
 }
 
-export function AnnotationLayer({ pageIndex, width, height, scale, activeTool }: AnnotationLayerProps) {
+/** The live in-progress text input (before the user blurs / presses Escape). */
+interface ActiveTextInput {
+  x: number;  // unscaled
+  y: number;  // unscaled
+}
+
+// Base font size in unscaled PDF points. At scale 1.5 → ~20px on screen, readable as a margin note.
+const BASE_FONT_SIZE = 13;
+const FONT_FAMILY = "system-ui, -apple-system, sans-serif";
+
+export function AnnotationLayer({ pageIndex: _pageIndex, width, height, scale, activeTool }: AnnotationLayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
   const [paths, setPaths] = useState<Path[]>([]);
   const [currentPath, setCurrentPath] = useState<Path | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
 
-  // Text-highlight specific state
-  const [textHighlights, setTextHighlights] = useState<HighlightRect[][]>([]);
-  const [selectionStart, setSelectionStart] = useState<Point | null>(null);
-  const [selectionEnd, setSelectionEnd] = useState<Point | null>(null);
-  const [isSelecting, setIsSelecting] = useState(false);
+  const [textAnnotations, setTextAnnotations] = useState<TextAnnotation[]>([]);
+  const [activeTextInput, setActiveTextInput] = useState<ActiveTextInput | null>(null);
 
-  // Redraw all paths and highlights when they change or when the canvas resizes (scale changes)
+  // ── Canvas redraw ────────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // High resolution canvas strategy for retina displays
     const dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
-
-    // Clear background entirely (it's transparent)
     ctx.clearRect(0, 0, width, height);
 
-    // Draw text highlights first (below freehand strokes)
-    for (const highlight of textHighlights) {
-      for (const rect of highlight) {
-        ctx.fillStyle = "rgba(255, 243, 128, 0.45)"; // Light yellow
-        ctx.globalCompositeOperation = "multiply";
-        ctx.fillRect(
-          rect.x * scale,
-          rect.y * scale,
-          rect.width * scale,
-          rect.height * scale
-        );
-        ctx.globalCompositeOperation = "source-over";
-      }
+    // Draw committed text annotations
+    const scaledFontSize = BASE_FONT_SIZE * scale;
+    const lineHeight = scaledFontSize * 1.35;
+    ctx.font = `${scaledFontSize}px ${FONT_FAMILY}`;
+    ctx.fillStyle = "rgba(20, 20, 20, 0.92)";
+    ctx.globalCompositeOperation = "source-over";
+
+    for (const ann of textAnnotations) {
+      const lines = ann.text.split("\n");
+      const x = ann.x * scale;
+      const y = ann.y * scale + scaledFontSize; // baseline offset
+      lines.forEach((line, i) => {
+        ctx.fillText(line, x, y + i * lineHeight);
+      });
     }
 
-    // Draw selection preview rectangle if actively selecting
-    if (isSelecting && selectionStart && selectionEnd) {
-      const sx = Math.min(selectionStart.x, selectionEnd.x) * scale;
-      const sy = Math.min(selectionStart.y, selectionEnd.y) * scale;
-      const sw = Math.abs(selectionEnd.x - selectionStart.x) * scale;
-      const sh = Math.abs(selectionEnd.y - selectionStart.y) * scale;
-
-      ctx.strokeStyle = "rgba(79, 70, 229, 0.5)"; // Indigo-600 with alpha
-      ctx.lineWidth = 1;
-      ctx.strokeRect(sx, sy, sw, sh);
-
-      // Light selection area fill
-      ctx.fillStyle = "rgba(79, 70, 229, 0.08)";
-      ctx.fillRect(sx, sy, sw, sh);
-    }
-
-    // Draw freehand paths
-    const allPaths = [...paths];
-    if (currentPath) allPaths.push(currentPath);
-
+    // Draw freehand paths (highlight / draw)
+    const allPaths = [...paths, ...(currentPath ? [currentPath] : [])];
     for (const path of allPaths) {
       if (path.points.length < 2) continue;
-      
       ctx.beginPath();
-      const start = path.points[0];
-      ctx.moveTo(start.x * scale, start.y * scale);
-
+      ctx.moveTo(path.points[0].x * scale, path.points[0].y * scale);
       for (let i = 1; i < path.points.length; i++) {
-        const p = path.points[i];
-        ctx.lineTo(p.x * scale, p.y * scale);
+        ctx.lineTo(path.points[i].x * scale, path.points[i].y * scale);
       }
-
       if (path.tool === "highlight") {
-        ctx.strokeStyle = "rgba(255, 235, 59, 0.45)"; // Transparent yellow
+        ctx.strokeStyle = "rgba(255, 235, 59, 0.45)";
         ctx.lineWidth = 14 * scale;
         ctx.lineCap = "square";
         ctx.lineJoin = "bevel";
         ctx.globalCompositeOperation = "multiply";
-      } else if (path.tool === "draw") {
-        ctx.strokeStyle = "rgba(43, 108, 208, 0.85)"; // Blue ink
+      } else {
+        ctx.strokeStyle = "rgba(43, 108, 208, 0.85)";
         ctx.lineWidth = 2 * scale;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
         ctx.globalCompositeOperation = "source-over";
       }
-
       ctx.stroke();
-      ctx.globalCompositeOperation = "source-over"; // Reset
+      ctx.globalCompositeOperation = "source-over";
     }
-  }, [paths, currentPath, width, height, scale, textHighlights, isSelecting, selectionStart, selectionEnd]);
+  }, [paths, currentPath, width, height, scale, textAnnotations]);
 
+  // Auto-focus textarea when it appears
+  useEffect(() => {
+    if (activeTextInput) {
+      // Small delay so the element is mounted and positioned before focus
+      setTimeout(() => textareaRef.current?.focus(), 30);
+    }
+  }, [activeTextInput]);
+
+  // ── Commit the active text input ─────────────────────────────────────────────
+  const commitTextInput = useCallback(() => {
+    if (!activeTextInput || !textareaRef.current) return;
+    const text = textareaRef.current.value.trim();
+    if (text) {
+      setTextAnnotations(prev => [
+        ...prev,
+        { x: activeTextInput.x, y: activeTextInput.y, text, fontSize: BASE_FONT_SIZE },
+      ]);
+    }
+    setActiveTextInput(null);
+  }, [activeTextInput]);
+
+  // ── Pointer events ────────────────────────────────────────────────────────────
   const getUnscaledPoint = (e: React.MouseEvent<HTMLCanvasElement>): Point | null => {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / scale;
-    const y = (e.clientY - rect.top) / scale;
-    return { x, y };
+    return {
+      x: (e.clientX - rect.left) / scale,
+      y: (e.clientY - rect.top) / scale,
+    };
   };
 
   const handlePointerDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -137,116 +143,107 @@ export function AnnotationLayer({ pageIndex, width, height, scale, activeTool }:
     if (!point) return;
 
     if (activeTool === "text-highlight") {
-      // Start text selection
-      setIsSelecting(true);
-      setSelectionStart(point);
-      setSelectionEnd(point);
+      // If there's already an active input, commit it first
+      commitTextInput();
+      // Then open a new one at the click position
+      setActiveTextInput({ x: point.x, y: point.y });
       return;
     }
 
-    // Freehand drawing/highlighting
+    // Freehand
     setIsDrawing(true);
-    setCurrentPath({
-      tool: activeTool,
-      color: activeTool === "highlight" ? "yellow" : "blue",
-      points: [point],
-    });
+    setCurrentPath({ tool: activeTool, points: [point] });
   };
 
   const handlePointerMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (activeTool === "text-highlight" && isSelecting) {
-      const point = getUnscaledPoint(e);
-      if (!point) return;
-      setSelectionEnd(point);
-      return;
-    }
-
     if (!isDrawing || !currentPath || activeTool === "none") return;
     const point = getUnscaledPoint(e);
     if (!point) return;
-
-    setCurrentPath({
-      ...currentPath,
-      points: [...currentPath.points, point],
-    });
+    setCurrentPath({ ...currentPath, points: [...currentPath.points, point] });
   };
 
-  const handlePointerUp = async () => {
-    if (activeTool === "text-highlight" && isSelecting && selectionStart && selectionEnd) {
-      setIsSelecting(false);
-
-      // Build the selection rect in unscaled PDF coordinates
-      const left = Math.min(selectionStart.x, selectionEnd.x);
-      const top = Math.min(selectionStart.y, selectionEnd.y);
-      const right = Math.max(selectionStart.x, selectionEnd.x);
-      const bottom = Math.max(selectionStart.y, selectionEnd.y);
-
-      // Don't process tiny selections (accidental clicks)
-      if (right - left < 3 || bottom - top < 3) {
-        setSelectionStart(null);
-        setSelectionEnd(null);
-        return;
-      }
-
-      try {
-        // Call Rust backend to get precise text character rectangles
-        const rects: HighlightRect[] = await invoke("get_text_rects", {
-          pageIndex,
-          selection: { left, top, right, bottom },
-        });
-
-        if (rects.length > 0) {
-          setTextHighlights(prev => [...prev, rects]);
-        }
-      } catch (err) {
-        console.error("Failed to get text rects:", err);
-      }
-
-      setSelectionStart(null);
-      setSelectionEnd(null);
-      return;
-    }
-
+  const handlePointerUp = () => {
     if (isDrawing && currentPath) {
-      setPaths([...paths, currentPath]);
+      setPaths(prev => [...prev, currentPath]);
       setCurrentPath(null);
       setIsDrawing(false);
     }
   };
 
-  const handlePointerLeave = () => {
-    if (activeTool === "text-highlight" && isSelecting) {
-      // Complete the selection on pointer leave
-      handlePointerUp();
-      return;
+  const handlePointerLeave = handlePointerUp;
+
+  // ── Textarea key handling ─────────────────────────────────────────────────────
+  const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Escape") {
+      setActiveTextInput(null); // discard
     }
-    if (isDrawing && currentPath) {
-      setPaths([...paths, currentPath]);
-      setCurrentPath(null);
-      setIsDrawing(false);
-    }
+    // Enter alone does NOT commit (allows multiline); Shift+Enter would be natural for newlines.
+    // Commit only on blur or Escape.
   };
 
-  // Turn off pointer events when "none" tool is selected so the user can easily scroll via panning if needed.
-  // When highlight/draw/text-highlight is active, we steal pointer events to draw onto canvas.
   const isInteractive = activeTool !== "none";
 
+  // Scaled textarea position and font size
+  const scaledFontSize = BASE_FONT_SIZE * scale;
+
   return (
-    <canvas
-      ref={canvasRef}
-      className="absolute inset-0 z-10 touch-none"
-      style={{
-        width, 
-        height, 
-        pointerEvents: isInteractive ? "auto" : "none",
-        cursor: activeTool === "text-highlight" ? "text" : 
-                activeTool === "highlight" ? "text" : 
-                (activeTool === "draw" ? "crosshair" : "default")
-      }}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerLeave={handlePointerLeave}
-    />
+    <div className="absolute inset-0 z-10">
+      {/* Canvas for freehand + committed text */}
+      <canvas
+        ref={canvasRef}
+        className="absolute inset-0 touch-none"
+        style={{
+          width,
+          height,
+          pointerEvents: isInteractive && !activeTextInput ? "auto" : "none",
+          cursor:
+            activeTool === "text-highlight" ? "text" :
+            activeTool === "highlight" ? "text" :
+            activeTool === "draw" ? "crosshair" : "default",
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerLeave}
+      />
+
+      {/* Live text input overlay — only rendered when the user has clicked to type */}
+      {activeTextInput && (
+        <textarea
+          ref={textareaRef}
+          onKeyDown={handleTextareaKeyDown}
+          onBlur={commitTextInput}
+          // Stop canvas events leaking through so scrolling stays possible on blur
+          onClick={e => e.stopPropagation()}
+          rows={1}
+          style={{
+            position: "absolute",
+            left: activeTextInput.x * scale,
+            top: activeTextInput.y * scale,
+            fontSize: scaledFontSize,
+            lineHeight: 1.35,
+            fontFamily: FONT_FAMILY,
+            color: "rgba(20, 20, 20, 0.92)",
+            background: "rgba(255, 251, 200, 0.45)",      // very subtle yellow tint
+            border: "1.5px solid rgba(99, 102, 241, 0.55)", // indigo dashed-feel outline
+            borderRadius: 3,
+            outline: "none",
+            resize: "none",
+            minWidth: 120,
+            maxWidth: width - activeTextInput.x * scale - 8,
+            padding: "2px 4px",
+            overflow: "hidden",
+            zIndex: 20,
+            boxShadow: "0 2px 10px rgba(0,0,0,0.08)",
+          }}
+          // Auto-grow height as user types
+          onInput={e => {
+            const el = e.currentTarget;
+            el.style.height = "auto";
+            el.style.height = el.scrollHeight + "px";
+          }}
+        />
+      )}
+    </div>
   );
 }

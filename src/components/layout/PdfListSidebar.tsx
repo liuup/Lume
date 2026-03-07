@@ -59,23 +59,6 @@ export function PdfListSidebar({
 
   return (
     <aside className="w-64 bg-zinc-50 border-r border-zinc-200 flex flex-col h-full shrink-0">
-      {/* Header */}
-      <div className="h-14 border-b border-zinc-200 flex items-center justify-between px-4 shrink-0">
-        <div className="flex items-center space-x-2">
-          <div className="w-6 h-6 bg-indigo-600 rounded-md flex items-center justify-center shadow-sm">
-            <span className="text-white font-bold text-xs">L</span>
-          </div>
-          <h2 className="font-semibold text-zinc-800 tracking-tight">Lume</h2>
-        </div>
-        <button
-          onClick={onAddPdf}
-          className="p-1.5 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
-          title="Open PDF"
-        >
-          <FileUp size={17} />
-        </button>
-      </div>
-
       {/* Search */}
       <div className="p-3 border-b border-zinc-200 shrink-0">
         <div className="relative">
@@ -122,6 +105,17 @@ export function PdfListSidebar({
             />
           ))
         )}
+      </div>
+
+      {/* Bottom Action Bar */}
+      <div className="p-3 border-t border-zinc-200 shrink-0">
+        <button
+          onClick={onAddPdf}
+          className="w-full flex items-center justify-center space-x-2 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 transition-colors shadow-sm active:scale-[0.98]"
+        >
+          <FileUp size={15} />
+          <span>Import PDF</span>
+        </button>
       </div>
     </aside>
   );
