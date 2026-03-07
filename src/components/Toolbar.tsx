@@ -13,6 +13,9 @@ interface ToolbarProps {
   onToggleRightPanel: () => void;
   onFitWidth: () => void;
   onFitHeight: () => void;
+  currentPage: number;
+  totalPages: number;
+  onPageJump: (page: number) => void;
 }
 
 export function Toolbar({
@@ -26,9 +29,18 @@ export function Toolbar({
   onToggleRightPanel,
   onFitWidth,
   onFitHeight,
+  currentPage,
+  totalPages,
+  onPageJump,
 }: ToolbarProps) {
   const [showZoomMenu, setShowZoomMenu] = useState(false);
   const zoomMenuRef = useRef<HTMLDivElement>(null);
+  
+  const [pageInput, setPageInput] = useState(currentPage.toString());
+
+  useEffect(() => {
+    setPageInput(currentPage.toString());
+  }, [currentPage]);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -39,15 +51,45 @@ export function Toolbar({
     if (showZoomMenu) window.addEventListener("click", handleClick);
     return () => window.removeEventListener("click", handleClick);
   }, [showZoomMenu]);
+  
   if (!hasPdf) return null;
+
+  const handlePageSubmit = () => {
+    let p = parseInt(pageInput, 10);
+    if (isNaN(p) || p < 1) p = 1;
+    if (p > totalPages) p = totalPages;
+    setPageInput(p.toString());
+    onPageJump(p);
+  };
 
   return (
     <header className="h-14 bg-white/80 backdrop-blur-md border-b border-zinc-200 flex items-center justify-between px-4 z-20 shrink-0 sticky top-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
       {/* Left flexible spacer for dragging */}
       <div className="flex-1 h-full cursor-default" data-tauri-drag-region />
 
-      {/* Center — zoom + tools */}
+      {/* Center — zoom + tools + pages */}
       <div className="flex items-center bg-zinc-100/80 p-1 rounded-2xl border border-zinc-200/50 shrink-0">
+        
+        {/* Page navigation */}
+        <div className="flex items-center space-x-1.5 px-2">
+          <input 
+            type="text" 
+            className="w-10 h-7 text-center text-[11px] font-semibold text-zinc-700 bg-white border border-zinc-200/80 rounded-lg focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 shadow-sm transition-shadow"
+            value={pageInput}
+            onChange={(e) => setPageInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                 handlePageSubmit();
+                 (e.target as HTMLInputElement).blur();
+              }
+            }}
+            onBlur={handlePageSubmit}
+          />
+          <span className="text-[11px] text-zinc-500 font-semibold select-none pr-1">/ {totalPages}</span>
+        </div>
+
+        <div className="w-px h-5 bg-zinc-300 mx-1 opacity-50" />
+
         {/* Zoom controls */}
         <div className="flex items-center space-x-1 px-1">
           <TooltipButton

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { PageDimension, ToolType } from "../App";
 import { AnnotationLayer } from "./AnnotationLayer";
+import { TextLayer } from "./TextLayer";
 
 interface PdfViewerProps {
   totalPages: number;
@@ -50,7 +51,7 @@ function PageRender({ pageIndex, dimension, scale, activeTool }: PageRenderProps
           setIsVisible(true);
         }
       },
-      { rootMargin: "600px" } 
+      { rootMargin: "3000px" } 
     );
 
     observer.observe(el);
@@ -83,7 +84,7 @@ function PageRender({ pageIndex, dimension, scale, activeTool }: PageRenderProps
   const height = dimension.height * scale;
 
   return (
-    <div className="flex flex-col items-center space-y-3 group">
+    <div id={`pdf-page-${pageIndex + 1}`} data-page-number={pageIndex + 1} className="flex flex-col items-center space-y-3 group">
       <div className="flex items-center justify-between w-full px-2">
          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
            Page {pageIndex + 1}
@@ -92,7 +93,7 @@ function PageRender({ pageIndex, dimension, scale, activeTool }: PageRenderProps
       
       <div 
         ref={containerRef}
-        className="bg-white shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1),0_1px_4px_rgba(0,0,0,0.05)] relative select-none shrink-0 border border-zinc-200/50 rounded-sm overflow-hidden transition-shadow hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.15)]"
+        className="bg-white shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1),0_1px_4px_rgba(0,0,0,0.05)] relative select-text shrink-0 border border-zinc-200/50 rounded-sm overflow-hidden transition-shadow hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.15)]"
         style={{ width, height }}
       >
         {imgSrc ? (
@@ -112,6 +113,7 @@ function PageRender({ pageIndex, dimension, scale, activeTool }: PageRenderProps
           </div>
         )}
         
+        <TextLayer pageIndex={pageIndex} scale={scale} width={width} height={height} isVisible={isVisible} />
         <AnnotationLayer pageIndex={pageIndex} width={width} height={height} scale={scale} activeTool={activeTool} />
       </div>
     </div>

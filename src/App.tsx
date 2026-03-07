@@ -1,6 +1,5 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Toolbar } from "./components/Toolbar";
 import { PdfViewer } from "./components/PdfViewer";
 import { PdfListSidebar } from "./components/layout/PdfListSidebar";
@@ -49,6 +48,7 @@ export interface OpenTab {
   pdf: PdfEntry;
   totalPages: number;
   dimensions: PageDimension[];
+  currentPage: number;
 }
 
 function App() {
@@ -59,6 +59,7 @@ function App() {
   const pdfPath = activeTab?.pdf.path || null;
   const totalPages = activeTab?.totalPages || 0;
   const dimensions = activeTab?.dimensions || [];
+  const currentPage = activeTab?.currentPage || 1;
   const [scale, setScale] = useState<number>(1.5);
   const [activeTool, setActiveTool] = useState<ToolType>('none');
   const [isLoading, setIsLoading] = useState(false);
@@ -68,6 +69,27 @@ function App() {
   const [selectedFolderId, setSelectedFolderId] = useState<string>("root");
   const [selectedPdfId, setSelectedPdfId] = useState<string | null>(null);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+
+  // Sync background Rust PDF context when switching tabs
+  useEffect(() => {
+    if (!pdfPath) return;
+    let isMounted = true;
+    (async () => {
+      try {
+        setIsLoading(true);
+        // Important: we just reload without modifying frontend page counts/dimensions 
+        // since those were already cached in `openTabs` state when the tab was created.
+        await invoke("load_pdf", { path: pdfPath });
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      } catch (err) {
+        console.error("Failed to switch PDF context", err);
+        if (isMounted) setIsLoading(false);
+      }
+    })();
+    return () => { isMounted = false; };
+  }, [pdfPath]);
 
   const mainRef = useRef<HTMLElement>(null);
 
@@ -129,7 +151,8 @@ function App() {
           id: newPdf.id,
           pdf: newPdf,
           totalPages: pages,
-          dimensions: dims
+          dimensions: dims,
+          currentPage: 1
         }]);
         setActiveTabId(newPdf.id);
         
@@ -156,7 +179,8 @@ function App() {
         id: pdf.id,
         pdf,
         totalPages: pages,
-        dimensions: dims
+        dimensions: dims,
+        currentPage: 1
       }]);
       setActiveTabId(pdf.id);
       
@@ -183,7 +207,9 @@ function App() {
     setOpenTabs(prev => {
       const next = prev.filter(t => t.id !== id);
       if (activeTabId === id) {
-        setActiveTabId(next.length > 0 ? next[next.length - 1].id : null);
+        const nextActiveId = next.length > 0 ? next[next.length - 1].id : null;
+        setActiveTabId(nextActiveId);
+        if (nextActiveId) setSelectedPdfId(nextActiveId);
       }
       return next;
     });
@@ -207,53 +233,82 @@ function App() {
     setScale(s);
   };
 
+  const scrollTimeout = useRef<number | null>(null);
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (!activeTabId) return;
+    if (scrollTimeout.current) return;
+    
+    const target = e.currentTarget;
+    // Use requestAnimationFrame or setTimeout for throttling
+    scrollTimeout.current = window.setTimeout(() => {
+      scrollTimeout.current = null;
+      const rect = target.getBoundingClientRect();
+      const center = rect.top + rect.height / 2;
+      let closestPage = 1;
+      let minDistance = Infinity;
+      
+      const pageNodes = target.querySelectorAll('[data-page-number]');
+      pageNodes.forEach(node => {
+        const nodeRect = node.getBoundingClientRect();
+        const nodeCenter = nodeRect.top + nodeRect.height / 2;
+        const dist = Math.abs(nodeCenter - center);
+        if (dist < minDistance) {
+          minDistance = dist;
+          closestPage = parseInt(node.getAttribute('data-page-number') || '1', 10);
+        }
+      });
+      
+      if (closestPage !== currentPage) {
+        setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, currentPage: closestPage } : t));
+      }
+    }, 100);
+  };
+
+  const handlePageJump = (page: number) => {
+    const el = document.getElementById(`pdf-page-${page}`);
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' });
+      setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, currentPage: page } : t));
+    }
+  };
+
   const selectedPdf = selectedPdfId ? findPdf(folderTree, selectedPdfId) : null;
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-50">
       {/* ── Top title-bar / tab strip ── */}
       <div 
-        className="h-[38px] flex items-end border-b border-zinc-200 bg-zinc-200/40 shrink-0 select-none"
-        onPointerDown={(e) => {
-          if (e.target === e.currentTarget && e.button === 0) {
-            getCurrentWindow().startDragging();
-          }
-        }}
+        data-tauri-drag-region="true"
+        className="h-[36px] flex items-center border-b border-zinc-200 bg-zinc-200/40 shrink-0 select-none"
       >
         {/* Left: traffic-light gap (draggable) */}
         <div 
+          data-tauri-drag-region="true"
           className="w-[76px] h-full shrink-0 cursor-default" 
-          onPointerDown={(e) => {
-            if (e.button === 0) getCurrentWindow().startDragging();
-          }}
         />
 
         {/* Tabs */}
         <div 
-          className="flex items-end space-x-1.5 overflow-x-auto overflow-y-hidden no-scrollbar flex-1 min-w-0 h-full cursor-default"
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget && e.button === 0) {
-              getCurrentWindow().startDragging();
-            }
-          }}
+          data-tauri-drag-region="true"
+          className="flex items-center space-x-1.5 overflow-x-auto overflow-y-hidden no-scrollbar flex-1 min-w-0 h-full cursor-default"
         >
           {openTabs.map(tab => {
             const isActive = tab.id === activeTabId;
             return (
               <div
                 key={tab.id}
-                onClick={() => setActiveTabId(tab.id)}
-                onPointerDown={(e) => e.stopPropagation()} // Prevent dragging when clicking a tab
+                onClick={() => {
+                  setActiveTabId(tab.id);
+                  setSelectedPdfId(tab.id);
+                }}
                 className={[
-                  "group flex items-center gap-1.5 px-3 h-[28px] min-w-[100px] max-w-[180px]",
-                  "rounded-t-md border-x border-t text-[12px] font-medium transition-colors relative cursor-default",
+                  "group flex items-center gap-1.5 px-3 h-[26px] min-w-[100px] max-w-[180px]",
+                  "rounded-md text-[12px] font-medium transition-colors relative cursor-default",
                   isActive
-                    ? "bg-zinc-50 border-zinc-200 text-zinc-900 z-10"
-                    : "bg-transparent border-transparent text-zinc-500 hover:bg-zinc-200/60 hover:text-zinc-700",
+                    ? "bg-white shadow-sm border border-zinc-200/60 text-zinc-900 z-10"
+                    : "bg-transparent border border-transparent text-zinc-500 hover:bg-zinc-200/60 hover:text-zinc-700",
                 ].join(" ")}
               >
-                {/* Visual cover line to detach the active tab from the bottom border */}
-                {isActive && <div className="absolute -bottom-[1px] left-0 right-0 h-[2px] bg-zinc-50" />}
                 
                 <span className="truncate flex-1" title={tab.pdf.meta.title || tab.pdf.name}>
                   {tab.pdf.meta.title || tab.pdf.name}
@@ -264,7 +319,6 @@ function App() {
                     e.stopPropagation();
                     handleCloseTab(tab.id, e);
                   }}
-                  onPointerDown={(e) => e.stopPropagation()}
                   className="shrink-0 p-0.5 rounded-sm hover:bg-zinc-300 text-zinc-400 hover:text-zinc-600 transition-colors"
                 >
                   <X size={12} />
@@ -276,10 +330,8 @@ function App() {
 
         {/* Right: extra draggable space */}
         <div 
+          data-tauri-drag-region="true"
           className="w-12 h-full shrink-0 cursor-default" 
-          onPointerDown={(e) => {
-            if (e.button === 0) getCurrentWindow().startDragging();
-          }}
         />
       </div>
 
@@ -318,32 +370,41 @@ function App() {
           onToggleRightPanel={() => setIsRightPanelOpen(v => !v)}
           onFitWidth={fitWidth}
           onFitHeight={fitHeight}
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageJump={handlePageJump}
         />
 
-        <main ref={mainRef} className="flex-1 overflow-y-auto relative flex justify-center canvas-pattern">
-          {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center z-10">
-              <div className="bg-white/80 backdrop-blur-md px-6 py-4 rounded-2xl shadow-lg border border-zinc-200/50 text-zinc-700 font-medium flex items-center space-x-3">
-                <div className="w-5 h-5 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-                <span>Loading Document...</span>
-              </div>
+        <main ref={mainRef} className="flex-1 overflow-y-hidden relative flex justify-center canvas-pattern">
+          {/* Main Content Area */}
+          {activeTab ? (
+            <div className="flex-1 w-full bg-zinc-200/50 overflow-y-auto min-h-0 relative" onScroll={handleScroll}>
+              {isLoading && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-200/50 backdrop-blur-sm">
+                  <div className="flex flex-col items-center space-y-4">
+                    <div className="w-8 h-8 border-2 border-zinc-400 border-t-zinc-600 rounded-full animate-spin" />
+                    <div className="text-sm font-medium text-zinc-600">Switching document...</div>
+                  </div>
+                </div>
+              )}
+              {!isLoading && (
+                <PdfViewer 
+                  key={activeTabId}
+                  totalPages={totalPages} 
+                  dimensions={dimensions} 
+                  scale={scale} 
+                  activeTool={activeTool}
+                />
+              )}
             </div>
-          )}
-
-          {!pdfPath && !isLoading && (
+          ) : (
             <div className="h-full flex flex-col items-center justify-center text-zinc-400 space-y-6">
               <div className="w-24 h-24 bg-white rounded-[2rem] flex items-center justify-center shadow-sm border border-zinc-200/60 transition-transform hover:scale-105">
                 <svg className="w-10 h-10 text-zinc-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </div>
               <p className="font-medium text-zinc-500 text-lg tracking-tight">Double-click a PDF to start reading.</p>
-            </div>
-          )}
-
-          {pdfPath && !isLoading && (
-            <div className="w-full h-full pb-16">
-              <PdfViewer totalPages={totalPages} dimensions={dimensions} scale={scale} activeTool={activeTool} />
             </div>
           )}
         </main>

@@ -187,7 +187,7 @@ export function AnnotationLayer({ pageIndex: _pageIndex, width, height, scale, a
   const scaledFontSize = BASE_FONT_SIZE * scale;
 
   return (
-    <div className="absolute inset-0 z-10">
+    <div className="absolute inset-0 z-10 pointer-events-none">
       {/* Canvas for freehand + committed text */}
       <canvas
         ref={canvasRef}

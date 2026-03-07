@@ -87,6 +87,15 @@ struct TextRect {
     height: f32,
 }
 
+#[derive(Serialize)]
+struct TextNode {
+    text: String,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+}
+
 /// Given a page index and a selection rectangle (in unscaled PDF point coordinates,
 /// with origin at top-left and Y increasing downward), returns the bounding rectangles
 /// of all text characters within that selection.
@@ -180,6 +189,73 @@ fn merge_text_rects(mut rects: Vec<TextRect>) -> Vec<TextRect> {
 }
 
 #[tauri::command]
+fn get_page_text(
+    page_index: u16,
+    state: State<'_, AppState>,
+) -> Result<Vec<TextNode>, String> {
+    let doc_guard = state.document.lock().unwrap();
+    let doc = doc_guard.0.as_ref().ok_or("No PDF loaded")?;
+    let page = doc.pages().get(page_index).map_err(|e| e.to_string())?;
+
+    let page_height = page.height().value;
+    let text_obj = page.text().map_err(|e| e.to_string())?;
+    let chars = text_obj.chars();
+
+    let mut nodes: Vec<TextNode> = Vec::new();
+    let mut current_node: Option<TextNode> = None;
+
+    for ch in chars.iter() {
+        if let Ok(bounds) = ch.loose_bounds() {
+            let ch_str = ch.unicode_string().unwrap_or_default();
+            let x = bounds.left().value;
+            let y = page_height - bounds.top().value;
+            let w = bounds.right().value - bounds.left().value;
+            let h = bounds.top().value - bounds.bottom().value;
+
+            if w <= 0.0 || h <= 0.0 {
+                continue;
+            }
+
+            if let Some(mut node) = current_node.take() {
+                // If on the same line and very close horizontally (like a word or sentence fragment)
+                let y_tolerance = f32::max(node.height, h) * 0.3;
+                let horizontal_gap = x - (node.x + node.width);
+                
+                // Allow up to roughly the height of a character as a gap to still be considered the same text span
+                // (This naturally merges words separated by spaces on the same line)
+                if (node.y - y).abs() < y_tolerance && x >= node.x && horizontal_gap < node.height * 1.5 {
+                    // It's part of the same text run
+                    
+                    // PDFium character strings sometimes don't include the literal "space" char but just have a gap.
+                    // We can intelligently inject a space if the gap is larger than a tiny threshold,
+                    // but usually the raw text extraction includes spaces if they exist in the text layer.
+                    node.text.push_str(&ch_str);
+                    
+                    let new_right = f32::max(node.x + node.width, x + w);
+                    node.y = f32::min(node.y, y); // top
+                    let new_bottom = f32::max(node.y + node.height, y + h);
+                    node.width = new_right - node.x;
+                    node.height = new_bottom - node.y;
+                    current_node = Some(node);
+                } else {
+                    // Broken run (new line, or huge gap like columns)
+                    nodes.push(node);
+                    current_node = Some(TextNode { text: ch_str, x, y, width: w, height: h });
+                }
+            } else {
+                current_node = Some(TextNode { text: ch_str, x, y, width: w, height: h });
+            }
+        }
+    }
+
+    if let Some(node) = current_node {
+        nodes.push(node);
+    }
+
+    Ok(nodes)
+}
+
+#[tauri::command]
 async fn render_page(
     page_index: u16,
     scale: f32,
@@ -249,8 +325,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_pdf,
             get_pdf_dimensions,
-            render_page,
-            get_text_rects
+            get_text_rects,
+            get_page_text,
+            render_page
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
