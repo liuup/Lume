@@ -3,8 +3,9 @@ use image::ImageFormat;
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::io::Cursor;
-use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tauri::{Manager, State};
 
 use std::sync::OnceLock;
 
@@ -14,18 +15,23 @@ unsafe impl Send for GlobalPdfium {}
 
 static GLOBAL_PDFIUM: OnceLock<GlobalPdfium> = OnceLock::new();
 
-struct ThreadSafeDoc(Option<PdfDocument<'static>>);
+struct ThreadSafeDoc(PdfDocument<'static>);
 unsafe impl Send for ThreadSafeDoc {}
 unsafe impl Sync for ThreadSafeDoc {}
 
 struct AppState {
-    document: Mutex<ThreadSafeDoc>,
+    documents: Arc<Mutex<HashMap<String, Arc<Mutex<ThreadSafeDoc>>>>>,
 }
 
 #[tauri::command]
 fn load_pdf(path: String, state: State<'_, AppState>) -> Result<u16, String> {
+    let mut docs = state.documents.lock().unwrap();
+    if let Some(doc_arc) = docs.get(&path) {
+        let doc_lock = doc_arc.lock().unwrap();
+        return Ok(doc_lock.0.pages().len());
+    }
+
     // Load PDF from path via PDFium directly.
-    // This expects the file path to be accessible by C library.
     let pdfium = GLOBAL_PDFIUM
         .get()
         .expect("PDFium not initialized");
@@ -36,7 +42,7 @@ fn load_pdf(path: String, state: State<'_, AppState>) -> Result<u16, String> {
         .map_err(|e| format!("Failed to open PDF: {:?}", e))?;
 
     let pages = doc.pages().len();
-    *state.document.lock().unwrap() = ThreadSafeDoc(Some(doc));
+    docs.insert(path, Arc::new(Mutex::new(ThreadSafeDoc(doc))));
     Ok(pages)
 }
 
@@ -47,9 +53,13 @@ struct PageDimensions {
 }
 
 #[tauri::command]
-fn get_pdf_dimensions(state: State<'_, AppState>) -> Result<Vec<PageDimensions>, String> {
-    let doc_guard = state.document.lock().unwrap();
-    let doc = doc_guard.0.as_ref().ok_or("No PDF loaded")?;
+fn get_pdf_dimensions(path: String, state: State<'_, AppState>) -> Result<Vec<PageDimensions>, String> {
+    let doc_arc = {
+        let docs = state.documents.lock().unwrap();
+        docs.get(&path).cloned().ok_or("PDF not loaded")?
+    };
+    let doc_lock = doc_arc.lock().unwrap();
+    let doc = &doc_lock.0;
 
     let mut dimensions = Vec::new();
     for page in doc.pages().iter() {
@@ -101,12 +111,17 @@ struct TextNode {
 /// of all text characters within that selection.
 #[tauri::command]
 fn get_text_rects(
+    path: String,
     page_index: u16,
     selection: SelectionRect,
     state: State<'_, AppState>,
 ) -> Result<Vec<TextRect>, String> {
-    let doc_guard = state.document.lock().unwrap();
-    let doc = doc_guard.0.as_ref().ok_or("No PDF loaded")?;
+    let doc_arc = {
+        let docs = state.documents.lock().unwrap();
+        docs.get(&path).cloned().ok_or("No PDF loaded")?
+    };
+    let doc_lock = doc_arc.lock().unwrap();
+    let doc = &doc_lock.0;
     let page = doc.pages().get(page_index).map_err(|e| e.to_string())?;
 
     let page_height = page.height().value;
@@ -190,11 +205,16 @@ fn merge_text_rects(mut rects: Vec<TextRect>) -> Vec<TextRect> {
 
 #[tauri::command]
 fn get_page_text(
+    path: String,
     page_index: u16,
     state: State<'_, AppState>,
 ) -> Result<Vec<TextNode>, String> {
-    let doc_guard = state.document.lock().unwrap();
-    let doc = doc_guard.0.as_ref().ok_or("No PDF loaded")?;
+    let doc_arc = {
+        let docs = state.documents.lock().unwrap();
+        docs.get(&path).cloned().ok_or("No PDF loaded")?
+    };
+    let doc_lock = doc_arc.lock().unwrap();
+    let doc = &doc_lock.0;
     let page = doc.pages().get(page_index).map_err(|e| e.to_string())?;
 
     let page_height = page.height().value;
@@ -223,14 +243,16 @@ fn get_page_text(
                 
                 // Allow up to roughly the height of a character as a gap to still be considered the same text span
                 // (This naturally merges words separated by spaces on the same line)
-                if (node.y - y).abs() < y_tolerance && x >= node.x && horizontal_gap < node.height * 1.5 {
+                if (node.y - y).abs() < y_tolerance && x >= node.x && horizontal_gap < node.height * 3.0 {
                     // It's part of the same text run
-                    
+
                     // PDFium character strings sometimes don't include the literal "space" char but just have a gap.
-                    // We can intelligently inject a space if the gap is larger than a tiny threshold,
-                    // but usually the raw text extraction includes spaces if they exist in the text layer.
+                    // We intelligently inject a space if the gap is larger than a tiny threshold
+                    if horizontal_gap > node.height * 0.25 && !node.text.ends_with(' ') && !ch_str.starts_with(' ') {
+                        node.text.push(' ');
+                    }
                     node.text.push_str(&ch_str);
-                    
+
                     let new_right = f32::max(node.x + node.width, x + w);
                     node.y = f32::min(node.y, y); // top
                     let new_bottom = f32::max(node.y + node.height, y + h);
@@ -257,43 +279,66 @@ fn get_page_text(
 
 #[tauri::command]
 async fn render_page(
+    path: String,
     page_index: u16,
     scale: f32,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let image = {
-        let doc_guard = state.document.lock().unwrap();
-        let doc = doc_guard.0.as_ref().ok_or("No PDF loaded")?;
-        let page = doc.pages().get(page_index).map_err(|e| e.to_string())?;
+    let doc_arc = {
+        let docs = state.documents.lock().unwrap();
+        docs.get(&path).cloned().ok_or("No PDF loaded")?
+    };
+    
+    // Offload CPU-bound rendering to a worker thread
+    let base64_str = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let image = {
+            let doc_lock = doc_arc.lock().unwrap();
+            let doc = &doc_lock.0;
+            let page = doc.pages().get(page_index).map_err(|e| e.to_string())?;
 
-        // Explicitly calculate width/height with rotation in mind
-        let rotation = page.rotation().map(|r| r.as_degrees()).unwrap_or(0.0);
-        let (base_w, base_h) = if rotation == 90.0 || rotation == 270.0 {
-            (page.height().value, page.width().value)
-        } else {
-            (page.width().value, page.height().value)
+            // Explicitly calculate width/height with rotation in mind
+            let rotation = page.rotation().map(|r| r.as_degrees()).unwrap_or(0.0);
+            let (base_w, base_h) = if rotation == 90.0 || rotation == 270.0 {
+                (page.height().value, page.width().value)
+            } else {
+                (page.width().value, page.height().value)
+            };
+
+            let mut target_w = (base_w * scale).round() as i32;
+            let mut target_h = (base_h * scale).round() as i32;
+
+            // Cap the maximum dimensions to prevent out-of-memory errors on high zoom
+            let max_dim = 4000;
+            if target_w > max_dim || target_h > max_dim {
+                let scale_factor = max_dim as f32 / target_w.max(target_h) as f32;
+                target_w = (target_w as f32 * scale_factor).round() as i32;
+                target_h = (target_h as f32 * scale_factor).round() as i32;
+            }
+
+            let mut render_config = PdfRenderConfig::new();
+            // Use explicit target size for better robustness across different PDFium versions
+            render_config = render_config.set_target_size(target_w, target_h);
+
+            let bitmap = page
+                .render_with_config(&render_config)
+                .map_err(|e| e.to_string())?;
+            bitmap.as_image()
         };
 
-        let target_w = (base_w * scale).round() as i32;
-        let target_h = (base_h * scale).round() as i32;
-
-        let mut render_config = PdfRenderConfig::new();
-        // Use explicit target size for better robustness across different PDFium versions
-        render_config = render_config.set_target_size(target_w, target_h);
-
-        let bitmap = page
-            .render_with_config(&render_config)
+        let mut cursor = Cursor::new(Vec::new());
+        // Jpeg encoding is extremely fast and suitable for document previews
+        // If quality degrades too much for text, we can use PNG with fast compression.
+        image
+            .write_to(&mut cursor, ImageFormat::Jpeg)
             .map_err(|e| e.to_string())?;
-        bitmap.as_image()
-    };
 
-    let mut cursor = Cursor::new(Vec::new());
-    image
-        .write_to(&mut cursor, ImageFormat::WebP)
-        .map_err(|e| e.to_string())?;
+        let base64_str = STANDARD.encode(cursor.into_inner());
+        Ok(base64_str)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
-    let base64_str = STANDARD.encode(cursor.into_inner());
-    Ok(format!("data:image/webp;base64,{}", base64_str))
+    Ok(format!("data:image/jpeg;base64,{}", base64_str))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -320,7 +365,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(AppState {
-            document: Mutex::new(ThreadSafeDoc(None)),
+            documents: Arc::new(Mutex::new(HashMap::new())),
         })
         .invoke_handler(tauri::generate_handler![
             load_pdf,

@@ -10,6 +10,7 @@ export interface TextNode {
 }
 
 interface TextLayerProps {
+  pdfPath: string;
   pageIndex: number;
   scale: number;
   width: number;
@@ -17,7 +18,7 @@ interface TextLayerProps {
   isVisible: boolean;
 }
 
-export function TextLayer({ pageIndex, scale, width, height, isVisible }: TextLayerProps) {
+export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible }: TextLayerProps) {
   const [textNodes, setTextNodes] = useState<TextNode[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -27,7 +28,7 @@ export function TextLayer({ pageIndex, scale, width, height, isVisible }: TextLa
 
     async function loadText() {
       try {
-        const nodes = await invoke<TextNode[]>("get_page_text", { pageIndex });
+        const nodes = await invoke<TextNode[]>("get_page_text", { path: pdfPath, pageIndex });
         if (isMounted) {
           setTextNodes(nodes);
           setIsLoaded(true);
@@ -41,7 +42,7 @@ export function TextLayer({ pageIndex, scale, width, height, isVisible }: TextLa
     return () => {
       isMounted = false;
     };
-  }, [isVisible, pageIndex, isLoaded]);
+  }, [isVisible, pageIndex, isLoaded, pdfPath]);
 
   // We only render when we have both visibility and data
   if (!isVisible || textNodes.length === 0) return null;
@@ -62,7 +63,7 @@ export function TextLayer({ pageIndex, scale, width, height, isVisible }: TextLa
         const scaledHeight = node.height * scale;
         
         // Font size approx based on rect height, typically slightly smaller to fit baseline well
-        const fontSize = scaledHeight * 0.9;
+        const fontSize = scaledHeight;
 
         return (
           <span
@@ -75,13 +76,12 @@ export function TextLayer({ pageIndex, scale, width, height, isVisible }: TextLa
               width: scaledWidth,
               height: scaledHeight,
               fontSize: `${fontSize}px`,
-              lineHeight: 1,
+              lineHeight: `${scaledHeight}px`,
               fontFamily: 'sans-serif',
               whiteSpace: 'pre',
               pointerEvents: 'auto',
-              // We anchor text to its bottom/height to align standard web fonts closely with PDF baselines
-              display: 'flex',
-              alignItems: 'flex-end',
+              display: 'inline-block',
+              overflow: 'hidden', // prevent text spillage from confusing the browser's selection bounds
             }}
           >
             {node.text}

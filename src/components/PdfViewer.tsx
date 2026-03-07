@@ -5,13 +5,14 @@ import { AnnotationLayer } from "./AnnotationLayer";
 import { TextLayer } from "./TextLayer";
 
 interface PdfViewerProps {
+  pdfPath: string;
   totalPages: number;
   dimensions: PageDimension[];
   scale: number;
   activeTool: ToolType;
 }
 
-export function PdfViewer({ totalPages, dimensions, scale, activeTool }: PdfViewerProps) {
+export function PdfViewer({ pdfPath, totalPages, dimensions, scale, activeTool }: PdfViewerProps) {
   if (dimensions.length === 0) return null;
 
   return (
@@ -19,6 +20,7 @@ export function PdfViewer({ totalPages, dimensions, scale, activeTool }: PdfView
       {Array.from({ length: totalPages }).map((_, i) => (
         <PageRender 
           key={`page-${i}`} 
+          pdfPath={pdfPath}
           pageIndex={i} 
           dimension={dimensions[i]} 
           scale={scale} 
@@ -30,13 +32,14 @@ export function PdfViewer({ totalPages, dimensions, scale, activeTool }: PdfView
 }
 
 interface PageRenderProps {
+  pdfPath: string;
   pageIndex: number;
   dimension: PageDimension;
   scale: number;
   activeTool: ToolType;
 }
 
-function PageRender({ pageIndex, dimension, scale, activeTool }: PageRenderProps) {
+function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool }: PageRenderProps) {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
@@ -62,9 +65,10 @@ function PageRender({ pageIndex, dimension, scale, activeTool }: PageRenderProps
     if (!isVisible) return;
     let isMounted = true;
 
-    async function loadPage() {
+    const timer = setTimeout(async () => {
       try {
         const base64 = await invoke<string>("render_page", { 
+          path: pdfPath,
           pageIndex, 
           scale: scale * (window.devicePixelRatio || 1) // High resolution rendering
         });
@@ -74,11 +78,13 @@ function PageRender({ pageIndex, dimension, scale, activeTool }: PageRenderProps
       } catch (err) {
         console.error(`Failed to load page ${pageIndex}`, err);
       }
-    }
+    }, 150);
 
-    loadPage();
-    return () => { isMounted = false; };
-  }, [isVisible, pageIndex, scale]);
+    return () => { 
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [isVisible, pageIndex, scale, pdfPath]);
 
   const width = dimension.width * scale;
   const height = dimension.height * scale;
@@ -113,7 +119,7 @@ function PageRender({ pageIndex, dimension, scale, activeTool }: PageRenderProps
           </div>
         )}
         
-        <TextLayer pageIndex={pageIndex} scale={scale} width={width} height={height} isVisible={isVisible} />
+        <TextLayer pdfPath={pdfPath} pageIndex={pageIndex} scale={scale} width={width} height={height} isVisible={isVisible} />
         <AnnotationLayer pageIndex={pageIndex} width={width} height={height} scale={scale} activeTool={activeTool} />
       </div>
     </div>
