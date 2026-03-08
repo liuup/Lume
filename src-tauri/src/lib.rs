@@ -744,7 +744,7 @@ fn metadata_cache_path(path: &Path) -> PathBuf {
         .and_then(|value| value.to_str())
         .unwrap_or("document.pdf");
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    parent.join(format!(".{}.lume-meta.json", file_name))
+    parent.join(format!(".{}.Lume-meta.json", file_name))
 }
 
 fn file_signature(path: &Path) -> Option<(u64, u64)> {
@@ -1929,5 +1929,5 @@ pub fn run() {
             render_page
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .expect("error while running Lume");
 }

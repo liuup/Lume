@@ -55,9 +55,9 @@ npm run tauri dev
 
 打包完成后，`tauri build` 命令会输出所有 Mac 端需要的分发文件：
 
-- **应用程序:** `src-tauri/target/release/bundle/macos/tauri-app.app`
+- **应用程序:** `src-tauri/target/release/bundle/macos/Lume.app`
   可以直接拖拽到 "应用程序 (Applications)" 文件夹中。
-- **DMG 安装包:** `src-tauri/target/release/bundle/dmg/tauri-app_0.1.0_aarch64.dmg`
+- **DMG 安装包:** `src-tauri/target/release/bundle/dmg/Lume_0.1.0_aarch64.dmg`
   用于分享和分发给其他用户。
 
 **注意：** 苹果系统原生开启了 Gatekeeper 防止未签名的软件运行。首次打开打包后的应用如果提示“无法验证开发者”，请**进入系统设置 -> 隐私与安全性**，往下滑找到对应的拦截项，点击 **“仍要打开”**。
