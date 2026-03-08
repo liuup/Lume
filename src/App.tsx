@@ -15,6 +15,8 @@ export interface PdfMeta {
   authors: string;
   year: string;
   abstract: string;
+  doi: string;
+  arxivId: string;
   tags: string[];
 }
 
@@ -28,18 +30,15 @@ export interface PdfEntry {
 export interface FolderNode {
   id: string;
   name: string;
+  path: string;
   children: FolderNode[];
   pdfs: PdfEntry[];
-}
-
-// Generate a simple unique id
-function uid(): string {
-  return Math.random().toString(36).slice(2);
 }
 
 const DEFAULT_FOLDER: FolderNode = {
   id: "root",
   name: "My Library",
+  path: "",
   children: [],
   pdfs: [],
 };
@@ -67,7 +66,7 @@ function App() {
 
   // Library state
   const [folderTree, setFolderTree] = useState<FolderNode[]>([DEFAULT_FOLDER]);
-  const [selectedFolderId, setSelectedFolderId] = useState<string>("root");
+  const [selectedFolderId, setSelectedFolderId] = useState<string>(DEFAULT_FOLDER.id);
   const [selectedPdfId, setSelectedPdfId] = useState<string | null>(null);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
 
@@ -107,29 +106,67 @@ function App() {
     return null;
   }
 
-  // Add a PDF entry into the selected folder
-  function addPdfToFolder(path: string): PdfEntry {
+  function createPdfEntry(path: string): PdfEntry {
     const fileName = path.split("/").pop() ?? path;
-    const newPdf: PdfEntry = {
-      id: uid(),
-      name: fileName.replace(/\.pdf$/i, ""),
+    const baseName = fileName.replace(/\.pdf$/i, "");
+
+    return {
+      id: path,
+      name: baseName,
       path,
       meta: {
-        title: fileName.replace(/\.pdf$/i, ""),
+        title: baseName,
         authors: "—",
         year: "—",
         abstract: "",
+        doi: "",
+        arxivId: "",
         tags: [],
       },
     };
+  }
 
-    setFolderTree(prev => {
-      const clone = JSON.parse(JSON.stringify(prev)) as FolderNode[];
-      const folder = findFolder(clone, selectedFolderId);
-      if (folder) folder.pdfs.push(newPdf);
-      return clone;
+  function replacePathPrefix(path: string, oldPrefix: string, newPrefix: string) {
+    if (path === oldPrefix) return newPrefix;
+    if (path.startsWith(`${oldPrefix}/`)) {
+      return `${newPrefix}${path.slice(oldPrefix.length)}`;
+    }
+    return path;
+  }
+
+  async function refreshLibrary(preferredFolderId?: string) {
+    const tree = await invoke<FolderNode[]>("load_library_tree");
+    setFolderTree(tree);
+
+    const rootId = tree[0]?.id ?? DEFAULT_FOLDER.id;
+    setSelectedFolderId(prev => {
+      const nextId = preferredFolderId ?? prev;
+      return nextId && findFolder(tree, nextId) ? nextId : rootId;
     });
 
+    return tree;
+  }
+
+  useEffect(() => {
+    refreshLibrary().catch(err => {
+      console.error("Failed to load library", err);
+    });
+  }, []);
+
+  useEffect(() => {
+    const disableNativeContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+    };
+
+    window.addEventListener("contextmenu", disableNativeContextMenu);
+    return () => {
+      window.removeEventListener("contextmenu", disableNativeContextMenu);
+    };
+  }, []);
+
+  // Add a PDF entry into the selected folder
+  function addPdfToFolder(path: string): PdfEntry {
+    const newPdf = createPdfEntry(path);
     setSelectedPdfId(newPdf.id);
     return newPdf;
   }
@@ -138,24 +175,38 @@ function App() {
   const handleAddPdf = async () => {
     const { open } = await import("@tauri-apps/plugin-dialog");
     try {
+      const targetFolder = findFolder(folderTree, selectedFolderId);
+      if (!targetFolder) return;
+
       const selected = await open({
         multiple: false,
         filters: [{ name: "PDF", extensions: ["pdf"] }],
       });
       if (selected && typeof selected === "string") {
         setIsLoading(true);
-        const pages: number = await invoke("load_pdf", { path: selected });
-        const dims: PageDimension[] = await invoke("get_pdf_dimensions", { path: selected });
-        const newPdf = addPdfToFolder(selected);
+        const importedPath: string = await invoke("import_pdf_to_folder", {
+          sourcePath: selected,
+          folderPath: targetFolder.path,
+        });
+        const pages: number = await invoke("load_pdf", { path: importedPath });
+        const dims: PageDimension[] = await invoke("get_pdf_dimensions", { path: importedPath });
+        const refreshedTree = await refreshLibrary(targetFolder.id);
+        const newPdf = findPdf(refreshedTree, importedPath) ?? addPdfToFolder(importedPath);
         
-        setOpenTabs(prev => [...prev, {
-          id: newPdf.id,
-          pdf: newPdf,
-          totalPages: pages,
-          dimensions: dims,
-          currentPage: 1
-        }]);
+        setOpenTabs(prev => {
+          const existing = prev.find(tab => tab.id === newPdf.id);
+          if (existing) return prev;
+
+          return [...prev, {
+            id: newPdf.id,
+            pdf: newPdf,
+            totalPages: pages,
+            dimensions: dims,
+            currentPage: 1
+          }];
+        });
         setActiveTabId(newPdf.id);
+        setSelectedPdfId(newPdf.id);
         
         setIsLoading(false);
       }
@@ -276,6 +327,120 @@ function App() {
   const selectedPdf = selectedPdfId ? findPdf(folderTree, selectedPdfId) : null;
   const isLibrary = activeTabId === 'library' || activeTabId === null;
 
+  const handleAddFolder = async (parentId: string) => {
+    const parent = findFolder(folderTree, parentId);
+    if (!parent) return;
+
+    const name = window.prompt("Folder name:");
+    const trimmedName = name?.trim();
+    if (!trimmedName) return;
+
+    try {
+      const createdPath: string = await invoke("create_library_folder", {
+        parentPath: parent.path,
+        name: trimmedName,
+      });
+
+      await refreshLibrary(createdPath);
+      setSelectedFolderId(createdPath);
+    } catch (err) {
+      console.error("Failed to create folder", err);
+      window.alert("Failed to create folder.");
+    }
+  };
+
+  const handleDeletePdf = async (pdf: PdfEntry) => {
+    try {
+      await invoke("delete_library_pdf", { path: pdf.path });
+      await refreshLibrary(selectedFolderId);
+
+      setOpenTabs(prev => {
+        const next = prev.filter(tab => tab.id !== pdf.id);
+        if (activeTabId === pdf.id) {
+          setActiveTabId(next.length > 0 ? next[next.length - 1].id : "library");
+        }
+        return next;
+      });
+
+      setSelectedPdfId(prev => prev === pdf.id ? null : prev);
+    } catch (err) {
+      console.error("Failed to delete PDF", err);
+      window.alert("Failed to delete PDF.");
+    }
+  };
+
+  const handleRenamePdf = async (pdf: PdfEntry, nextName: string) => {
+    const trimmedName = nextName.trim();
+    if (!trimmedName || trimmedName === (pdf.meta.title || pdf.name)) return;
+
+    try {
+      const renamedPath: string = await invoke("rename_library_pdf", {
+        path: pdf.path,
+        newName: trimmedName,
+      });
+
+      const refreshedTree = await refreshLibrary(selectedFolderId);
+      const renamedPdf = findPdf(refreshedTree, renamedPath) ?? createPdfEntry(renamedPath);
+
+      setOpenTabs(prev => prev.map(tab => {
+        if (tab.id !== pdf.id) return tab;
+        return {
+          ...tab,
+          id: renamedPdf.id,
+          pdf: renamedPdf,
+        };
+      }));
+
+      setSelectedPdfId(prev => prev === pdf.id ? renamedPdf.id : prev);
+      setActiveTabId(prev => prev === pdf.id ? renamedPdf.id : prev);
+    } catch (err) {
+      console.error("Failed to rename PDF", err);
+      window.alert("Failed to rename PDF.");
+    }
+  };
+
+  const handleRenameFolder = async (folder: FolderNode, nextName: string) => {
+    const trimmedName = nextName.trim();
+    if (!trimmedName || trimmedName === folder.name) return;
+
+    try {
+      const renamedPath: string = await invoke("rename_library_folder", {
+        path: folder.path,
+        newName: trimmedName,
+      });
+
+      const nextSelectedFolderId = replacePathPrefix(selectedFolderId, folder.path, renamedPath);
+      const nextSelectedPdfId = selectedPdfId ? replacePathPrefix(selectedPdfId, folder.path, renamedPath) : null;
+      const nextActiveTabId = activeTabId && activeTabId !== "library"
+        ? replacePathPrefix(activeTabId, folder.path, renamedPath)
+        : activeTabId;
+
+      const refreshedTree = await refreshLibrary(nextSelectedFolderId);
+
+      setOpenTabs(prev => prev.map(tab => {
+        if (tab.id !== folder.path && !tab.id.startsWith(`${folder.path}/`)) {
+          return tab;
+        }
+
+        const renamedPdfPath = replacePathPrefix(tab.pdf.path, folder.path, renamedPath);
+        const renamedPdf = findPdf(refreshedTree, renamedPdfPath) ?? createPdfEntry(renamedPdfPath);
+
+        return {
+          ...tab,
+          id: renamedPdf.id,
+          pdf: renamedPdf,
+        };
+      }));
+
+      setSelectedFolderId(nextSelectedFolderId);
+      setSelectedPdfId(nextSelectedPdfId);
+      setActiveTabId(nextActiveTabId);
+    } catch (err) {
+      console.error("Failed to rename folder", err);
+      window.alert("Failed to rename folder.");
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-50">
       {/* ── Top title-bar / tab strip ── */}
@@ -358,18 +523,8 @@ function App() {
               folderTree={folderTree}
               selectedFolderId={selectedFolderId}
               onSelectFolder={setSelectedFolderId}
-              onAddPdf={handleAddPdf}
-              onAddFolder={(parentId) => {
-                const name = window.prompt("Folder name:");
-                if (!name?.trim()) return;
-                const newFolder: FolderNode = { id: uid(), name: name.trim(), children: [], pdfs: [] };
-                setFolderTree(prev => {
-                  const clone = JSON.parse(JSON.stringify(prev)) as FolderNode[];
-                  const parent = findFolder(clone, parentId);
-                  if (parent) parent.children.push(newFolder);
-                  return clone;
-                });
-              }}
+              onAddFolder={handleAddFolder}
+              onRenameFolder={handleRenameFolder}
             />
             <LibraryView 
               folderTree={folderTree}
@@ -378,6 +533,8 @@ function App() {
               onSelectPdf={setSelectedPdfId}
               onOpenPdf={handleOpenPdf}
               onAddPdf={handleAddPdf}
+              onDeletePdf={handleDeletePdf}
+              onRenamePdf={handleRenamePdf}
             />
           </>
         ) : (
@@ -420,6 +577,7 @@ function App() {
                     dimensions={tab.dimensions} 
                     scale={scale} 
                     activeTool={activeTool}
+                    currentPage={tab.currentPage}
                   />
                 </div>
               ))}

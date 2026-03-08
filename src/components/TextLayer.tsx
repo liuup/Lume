@@ -16,33 +16,58 @@ interface TextLayerProps {
   width: number;
   height: number;
   isVisible: boolean;
+  shouldLoad: boolean;
 }
 
-export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible }: TextLayerProps) {
+const textLayerCache = new Map<string, TextNode[]>();
+
+function getTextLayerCacheKey(pdfPath: string, pageIndex: number) {
+  return `${pdfPath}::${pageIndex}`;
+}
+
+export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible, shouldLoad }: TextLayerProps) {
   const [textNodes, setTextNodes] = useState<TextNode[]>([]);
   const [isLoaded, setIsLoaded] = useState(false);
+  const cacheKey = getTextLayerCacheKey(pdfPath, pageIndex);
 
   useEffect(() => {
-    if (!isVisible || isLoaded) return;
-    let isMounted = true;
+    const cached = textLayerCache.get(cacheKey);
+    if (cached) {
+      setTextNodes(cached);
+      setIsLoaded(true);
+      return;
+    }
 
-    async function loadText() {
+    if (!isVisible || !shouldLoad || isLoaded) return;
+    let isMounted = true;
+    const scheduler = window.requestIdleCallback
+      ? window.requestIdleCallback
+      : (callback: IdleRequestCallback) => window.setTimeout(() => callback({
+          didTimeout: false,
+          timeRemaining: () => 0,
+        } as IdleDeadline), 120);
+    const cancelScheduler = window.cancelIdleCallback
+      ? window.cancelIdleCallback
+      : (handle: number) => window.clearTimeout(handle);
+
+    const taskId = scheduler(async () => {
       try {
         const nodes = await invoke<TextNode[]>("get_page_text", { path: pdfPath, pageIndex });
         if (isMounted) {
+          textLayerCache.set(cacheKey, nodes);
           setTextNodes(nodes);
           setIsLoaded(true);
         }
       } catch (err) {
         console.error(`Failed to load text for page ${pageIndex}`, err);
       }
-    }
+    });
 
-    loadText();
     return () => {
       isMounted = false;
+      cancelScheduler(taskId);
     };
-  }, [isVisible, pageIndex, isLoaded, pdfPath]);
+  }, [cacheKey, isVisible, pageIndex, isLoaded, pdfPath, shouldLoad]);
 
   // We only render when we have both visibility and data
   if (!isVisible || textNodes.length === 0) return null;

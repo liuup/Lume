@@ -1,4 +1,4 @@
-import { Tag, Calendar, User, AlignLeft, X, FileText } from "lucide-react";
+import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit } from "lucide-react";
 import { PdfEntry } from "../../App";
 
 interface MetaPanelProps {
@@ -73,6 +73,20 @@ export function MetaPanel({ selectedPdf, isOpen, onClose }: MetaPanelProps) {
               {selectedPdf.meta.abstract ? (
                 <MetaRow icon={<AlignLeft size={15} className="text-zinc-400" />} label="Abstract">
                   <p className="text-sm text-zinc-600 leading-relaxed">{selectedPdf.meta.abstract}</p>
+                </MetaRow>
+              ) : null}
+
+              {/* DOI */}
+              {selectedPdf.meta.doi ? (
+                <MetaRow icon={<Fingerprint size={15} className="text-zinc-400" />} label="DOI">
+                  <span className="text-zinc-600 break-all">{selectedPdf.meta.doi}</span>
+                </MetaRow>
+              ) : null}
+
+              {/* arXiv */}
+              {selectedPdf.meta.arxivId ? (
+                <MetaRow icon={<Orbit size={15} className="text-zinc-400" />} label="arXiv">
+                  <span className="text-zinc-600 break-all">{selectedPdf.meta.arxivId}</span>
                 </MetaRow>
               ) : null}
 

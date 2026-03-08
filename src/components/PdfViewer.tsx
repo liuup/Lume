@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { PageDimension, ToolType } from "../App";
 import { AnnotationLayer } from "./AnnotationLayer";
@@ -10,21 +10,138 @@ interface PdfViewerProps {
   dimensions: PageDimension[];
   scale: number;
   activeTool: ToolType;
+  currentPage: number;
 }
 
-export function PdfViewer({ pdfPath, totalPages, dimensions, scale, activeTool }: PdfViewerProps) {
+const pageImageCache = new Map<string, string>();
+const inflightRenders = new Map<string, Promise<string>>();
+const renderQueue: Array<() => void> = [];
+const MAX_RENDER_CONCURRENCY = 2;
+const MAX_CACHE_ENTRIES = 120;
+let activeRenderCount = 0;
+
+function runNextRender() {
+  if (activeRenderCount >= MAX_RENDER_CONCURRENCY || renderQueue.length === 0) {
+    return;
+  }
+
+  const nextJob = renderQueue.shift();
+  if (!nextJob) return;
+
+  activeRenderCount += 1;
+  nextJob();
+}
+
+function enqueueRender<T>(job: () => Promise<T>) {
+  return new Promise<T>((resolve, reject) => {
+    renderQueue.push(() => {
+      job()
+        .then(resolve)
+        .catch(reject)
+        .finally(() => {
+          activeRenderCount -= 1;
+          runNextRender();
+        });
+    });
+
+    runNextRender();
+  });
+}
+
+function rememberRenderedPage(cacheKey: string, value: string) {
+  if (pageImageCache.has(cacheKey)) {
+    pageImageCache.delete(cacheKey);
+  }
+
+  pageImageCache.set(cacheKey, value);
+
+  if (pageImageCache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = pageImageCache.keys().next().value;
+    if (oldestKey) {
+      pageImageCache.delete(oldestKey);
+    }
+  }
+}
+
+function getPreviewRenderScale(scale: number) {
+  return scale;
+}
+
+function getFullRenderScale(scale: number) {
+  const deviceScale = Math.min(window.devicePixelRatio || 1, 1.2);
+  return scale * deviceScale;
+}
+
+function getCacheKey(pdfPath: string, pageIndex: number, scale: number) {
+  return `${pdfPath}::${pageIndex}::${scale.toFixed(2)}`;
+}
+
+async function requestRenderedPage(pdfPath: string, pageIndex: number, scale: number) {
+  const cacheKey = getCacheKey(pdfPath, pageIndex, scale);
+
+  if (pageImageCache.has(cacheKey)) {
+    return pageImageCache.get(cacheKey)!;
+  }
+
+  const pending = inflightRenders.get(cacheKey);
+  if (pending) {
+    return pending;
+  }
+
+  const nextRequest = enqueueRender(() => invoke<string>("render_page", {
+    path: pdfPath,
+    pageIndex,
+    scale,
+  })).then((base64) => {
+    rememberRenderedPage(cacheKey, base64);
+    inflightRenders.delete(cacheKey);
+    return base64;
+  }).catch((error) => {
+    inflightRenders.delete(cacheKey);
+    throw error;
+  });
+
+  inflightRenders.set(cacheKey, nextRequest);
+  return nextRequest;
+}
+
+export function PdfViewer({ pdfPath, totalPages, dimensions, scale, activeTool, currentPage }: PdfViewerProps) {
   if (dimensions.length === 0) return null;
+
+  const prefetchPages = useMemo(() => {
+    const indices: number[] = [];
+    const centerIndex = Math.max(0, currentPage - 1);
+
+    for (let offset = -1; offset <= 2; offset += 1) {
+      const nextIndex = centerIndex + offset;
+      if (nextIndex >= 0 && nextIndex < totalPages) {
+        indices.push(nextIndex);
+      }
+    }
+
+    return indices;
+  }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    prefetchPages.forEach((pageIndex) => {
+      requestRenderedPage(pdfPath, pageIndex, getPreviewRenderScale(scale)).catch((error) => {
+        console.error(`Failed to prefetch page ${pageIndex}`, error);
+      });
+    });
+  }, [pdfPath, prefetchPages, scale]);
 
   return (
     <div className="flex flex-col items-center py-6 space-y-4 min-w-full">
       {Array.from({ length: totalPages }).map((_, i) => (
-        <PageRender 
+        <MemoPageRender 
           key={`page-${i}`} 
           pdfPath={pdfPath}
           pageIndex={i} 
           dimension={dimensions[i]} 
           scale={scale} 
           activeTool={activeTool}
+          shouldPrefetch={prefetchPages.includes(i)}
+          shouldLoadText={Math.abs(i - (currentPage - 1)) <= 1}
         />
       ))}
     </div>
@@ -37,12 +154,20 @@ interface PageRenderProps {
   dimension: PageDimension;
   scale: number;
   activeTool: ToolType;
+  shouldPrefetch: boolean;
+  shouldLoadText: boolean;
 }
 
-function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool }: PageRenderProps) {
+function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool, shouldPrefetch, shouldLoadText }: PageRenderProps) {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
+  const width = dimension.width * scale;
+  const height = dimension.height * scale;
+  const previewScale = getPreviewRenderScale(scale);
+  const fullScale = getFullRenderScale(scale);
+  const previewCacheKey = getCacheKey(pdfPath, pageIndex, previewScale);
+  const fullCacheKey = getCacheKey(pdfPath, pageIndex, fullScale);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -54,7 +179,7 @@ function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool }: PageRe
           setIsVisible(true);
         }
       },
-      { rootMargin: "3000px" } 
+      { rootMargin: "1200px", threshold: 0.01 } 
     );
 
     observer.observe(el);
@@ -62,32 +187,51 @@ function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool }: PageRe
   }, []);
 
   useEffect(() => {
-    if (!isVisible) return;
+    const bestCached = pageImageCache.get(fullCacheKey) ?? pageImageCache.get(previewCacheKey) ?? null;
+    if (bestCached) {
+      setImgSrc(bestCached);
+      return;
+    }
+
+    if (!isVisible && !shouldPrefetch) return;
     let isMounted = true;
 
-    const timer = setTimeout(async () => {
-      try {
-        const base64 = await invoke<string>("render_page", { 
-          path: pdfPath,
-          pageIndex, 
-          scale: scale * (window.devicePixelRatio || 1) // High resolution rendering
-        });
+    requestRenderedPage(pdfPath, pageIndex, previewScale)
+      .then((base64) => {
         if (isMounted) {
           setImgSrc(base64);
         }
-      } catch (err) {
+      })
+      .catch((err) => {
         console.error(`Failed to load page ${pageIndex}`, err);
-      }
-    }, 150);
+      });
 
     return () => { 
       isMounted = false;
-      clearTimeout(timer);
     };
-  }, [isVisible, pageIndex, scale, pdfPath]);
+  }, [fullCacheKey, isVisible, pageIndex, pdfPath, previewCacheKey, previewScale, shouldPrefetch]);
 
-  const width = dimension.width * scale;
-  const height = dimension.height * scale;
+  useEffect(() => {
+    if ((!isVisible && !shouldPrefetch) || Math.abs(fullScale - previewScale) < 0.05) {
+      return;
+    }
+
+    let isMounted = true;
+
+    requestRenderedPage(pdfPath, pageIndex, fullScale)
+      .then((base64) => {
+        if (isMounted) {
+          setImgSrc(base64);
+        }
+      })
+      .catch((err) => {
+        console.error(`Failed to refine page ${pageIndex}`, err);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [fullScale, isVisible, pageIndex, pdfPath, previewScale, shouldPrefetch]);
 
   return (
     <div id={`pdf-page-${pageIndex + 1}`} data-page-number={pageIndex + 1} className="flex flex-col items-center space-y-3 group">
@@ -111,17 +255,20 @@ function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool }: PageRe
             style={{ opacity: 0 }}
           />
         ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center space-y-4">
-            <div className="w-8 h-8 border-2 border-zinc-200 border-t-zinc-400 rounded-full animate-spin" />
-            <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-tighter">
-              Loading Page {pageIndex + 1}
-            </div>
+          <div className="absolute inset-0 bg-gradient-to-br from-zinc-50 to-zinc-100 animate-pulse" />
+        )}
+
+        {!imgSrc && (
+          <div className="absolute top-3 right-3 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-medium text-zinc-400 shadow-sm backdrop-blur-sm">
+            Page {pageIndex + 1}
           </div>
         )}
         
-        <TextLayer pdfPath={pdfPath} pageIndex={pageIndex} scale={scale} width={width} height={height} isVisible={isVisible} />
+        <TextLayer pdfPath={pdfPath} pageIndex={pageIndex} scale={scale} width={width} height={height} isVisible={isVisible} shouldLoad={shouldLoadText} />
         <AnnotationLayer pageIndex={pageIndex} width={width} height={height} scale={scale} activeTool={activeTool} />
       </div>
     </div>
   );
 }
+
+const MemoPageRender = memo(PageRender);
