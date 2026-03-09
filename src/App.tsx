@@ -618,6 +618,18 @@ function App() {
             selectedItem={selectedItem}
             isOpen={isRightPanelOpen}
             onClose={() => setIsRightPanelOpen(false)}
+            onItemUpdated={() => {
+              refreshLibrary(selectedFolderId).then(tree => {
+                if (selectedItemId) {
+                  const updatedItem = findItem(tree, selectedItemId);
+                  if (updatedItem) {
+                    setOpenTabs(prevTabs => 
+                      prevTabs.map(tab => tab.id === selectedItemId ? { ...tab, item: updatedItem } : tab)
+                    );
+                  }
+                }
+              });
+            }}
           />
         )}
       </div>

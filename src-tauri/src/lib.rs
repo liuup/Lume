@@ -56,6 +56,27 @@ struct LibraryAttachment {
     attachment_type: String,
 }
 
+#[derive(Deserialize)]
+pub struct UpdateMetadataPayload {
+    pub id: String,
+    pub title: String,
+    pub authors: String,
+    pub year: String,
+    pub r#abstract: String,
+    pub doi: String,
+    #[serde(rename = "arxivId")]
+    pub arxiv_id: String,
+    pub publication: String,
+    pub volume: String,
+    pub issue: String,
+    pub pages: String,
+    pub publisher: String,
+    pub isbn: String,
+    pub url: String,
+    pub language: String,
+    pub tags: Vec<String>,
+}
+
 #[derive(Serialize)]
 struct LibraryItem {
     id: String,
@@ -1911,6 +1932,67 @@ fn rename_library_folder(
 }
 
 #[tauri::command]
+fn update_item_metadata(payload: UpdateMetadataPayload, state: State<'_, AppState>) -> Result<(), String> {
+    let conn_mutex = state.db.clone();
+    let conn = conn_mutex.lock().map_err(|e| format!("Database lock error: {}", e))?;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+        .to_string();
+
+    let mut stmt = conn.prepare(
+        "UPDATE items 
+         SET title = ?1, authors = ?2, year = ?3, abstract = ?4, doi = ?5, arxiv_id = ?6,
+             publication = ?7, volume = ?8, issue = ?9, pages = ?10, publisher = ?11, 
+             isbn = ?12, url = ?13, language = ?14, date_modified = ?15
+         WHERE id = ?16"
+    ).map_err(|e| format!("Failed to prepare statement: {}", e))?;
+
+    stmt.execute(params![
+        payload.title,
+        payload.authors,
+        payload.year,
+        payload.r#abstract,
+        payload.doi,
+        payload.arxiv_id,
+        payload.publication,
+        payload.volume,
+        payload.issue,
+        payload.pages,
+        payload.publisher,
+        payload.isbn,
+        payload.url,
+        payload.language,
+        now,
+        payload.id
+    ]).map_err(|e| format!("Failed to update item metadata: {}", e))?;
+
+    // Update tags: simple delete-and-insert
+    conn.execute(
+        "DELETE FROM item_tags WHERE item_id = ?1",
+        params![payload.id]
+    ).map_err(|e| format!("Failed to delete existing tags: {}", e))?;
+
+    if !payload.tags.is_empty() {
+        let mut tag_insert_stmt = conn.prepare(
+            "INSERT INTO item_tags (item_id, tag) VALUES (?1, ?2)"
+        ).map_err(|e| format!("Failed to prepare tag insert: {}", e))?;
+
+        for tag in payload.tags {
+            let trimmed = tag.trim();
+            if !trimmed.is_empty() {
+                tag_insert_stmt.execute(params![payload.id, trimmed])
+                    .map_err(|e| format!("Failed to insert tag '{}': {}", trimmed, e))?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 fn load_pdf(path: String, state: State<'_, AppState>) -> Result<u16, String> {
     let mut docs = state.documents.lock().unwrap();
     if let Some(doc_arc) = docs.get(&path) {
@@ -2324,6 +2406,7 @@ pub fn run() {
             delete_library_pdf,
             rename_library_pdf,
             rename_library_folder,
+            update_item_metadata,
             load_pdf,
             get_pdf_dimensions,
             get_text_rects,
