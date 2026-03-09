@@ -1082,3 +1082,431 @@ pub fn set_tag_color(
     .map_err(|e| format!("Failed to set tag color: {}", e))?;
     Ok(())
 }
+
+// ── Citation / Export ────────────────────────────────────────────────────────
+
+/// Internal citation data row (lighter than the full LibraryItem)
+struct CitationData {
+    id: String,
+    item_type: String,
+    title: String,
+    authors: String,
+    year: String,
+    publication: String,
+    volume: String,
+    issue: String,
+    pages: String,
+    publisher: String,
+    doi: String,
+    arxiv_id: String,
+    url: String,
+    isbn: String,
+}
+
+fn fetch_citation_data(conn: &rusqlite::Connection, item_id: &str) -> Result<CitationData, String> {
+    conn.query_row(
+        "SELECT id, item_type, title, authors, year, publication, volume, issue, pages,
+                publisher, doi, arxiv_id, url, isbn
+         FROM items WHERE id = ?1",
+        rusqlite::params![item_id],
+        |r| {
+            Ok(CitationData {
+                id:          r.get::<_, String>(0).unwrap_or_default(),
+                item_type:   r.get::<_, String>(1).unwrap_or_default(),
+                title:       r.get::<_, String>(2).unwrap_or_default(),
+                authors:     r.get::<_, String>(3).unwrap_or_default(),
+                year:        r.get::<_, String>(4).unwrap_or_default(),
+                publication: r.get::<_, String>(5).unwrap_or_default(),
+                volume:      r.get::<_, String>(6).unwrap_or_default(),
+                issue:       r.get::<_, String>(7).unwrap_or_default(),
+                pages:       r.get::<_, String>(8).unwrap_or_default(),
+                publisher:   r.get::<_, String>(9).unwrap_or_default(),
+                doi:         r.get::<_, String>(10).unwrap_or_default(),
+                arxiv_id:    r.get::<_, String>(11).unwrap_or_default(),
+                url:         r.get::<_, String>(12).unwrap_or_default(),
+                isbn:        r.get::<_, String>(13).unwrap_or_default(),
+            })
+        },
+    )
+    .map_err(|e| format!("Item not found: {}", e))
+}
+
+/// Split a comma-separated author string into a Vec of individual name strings.
+fn split_authors(raw: &str) -> Vec<String> {
+    if raw.trim().is_empty() || raw.trim() == "—" {
+        return vec![];
+    }
+    raw.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect()
+}
+
+/// Best-effort: given a full name like "Jane Smith" or "Smith Jane",
+/// return ("Smith", "J.") for APA initials. Falls back to (name, "").
+fn name_to_last_initials(name: &str) -> (String, String) {
+    let parts: Vec<&str> = name.split_whitespace().collect();
+    match parts.len() {
+        0 => (String::new(), String::new()),
+        1 => (parts[0].to_string(), String::new()),
+        _ => {
+            // Heuristic: last word is family name
+            let last = parts.last().unwrap().to_string();
+            let initials: String = parts[..parts.len() - 1]
+                .iter()
+                .map(|p| format!("{}.", p.chars().next().unwrap_or(' ').to_uppercase().next().unwrap_or(' ')))
+                .collect::<Vec<_>>()
+                .join(" ");
+            (last, initials)
+        }
+    }
+}
+
+/// Format a DOI as a URL suffix segment.
+fn doi_url(doi: &str) -> String {
+    if doi.is_empty() { return String::new(); }
+    format!("https://doi.org/{}", doi)
+}
+
+// ── Format-specific generators ───────────────────────────────────────────────
+
+fn format_apa(item: &CitationData) -> String {
+    // APA 7th: Authors (Year). Title. Journal, Volume(Issue), Pages. https://doi.org/…
+    let authors_list = split_authors(&item.authors);
+    let apa_authors = if authors_list.is_empty() {
+        String::from("Unknown Author")
+    } else {
+        let formatted: Vec<String> = authors_list.iter().map(|a| {
+            let (last, initials) = name_to_last_initials(a);
+            if initials.is_empty() { last } else { format!("{}, {}", last, initials) }
+        }).collect();
+        let n = formatted.len();
+        if n == 1 {
+            formatted[0].clone()
+        } else {
+            format!("{}, & {}", formatted[..n-1].join(", "), formatted[n-1])
+        }
+    };
+
+    let year = if item.year.is_empty() { "n.d.".to_string() } else { format!("({})", item.year) };
+
+    let mut source_parts: Vec<String> = Vec::new();
+    if !item.publication.is_empty() {
+        let mut pub_str = format!("*{}*", item.publication);
+        if !item.volume.is_empty() {
+            pub_str.push_str(&format!(", *{}*", item.volume));
+            if !item.issue.is_empty() {
+                pub_str.push_str(&format!("({})", item.issue));
+            }
+        }
+        if !item.pages.is_empty() {
+            pub_str.push_str(&format!(", {}", item.pages));
+        }
+        source_parts.push(pub_str);
+    } else if !item.publisher.is_empty() {
+        source_parts.push(item.publisher.clone());
+    }
+
+    let doi_part = doi_url(&item.doi);
+
+    let mut out = format!("{} {}. {}.", apa_authors, year, item.title);
+    if !source_parts.is_empty() {
+        out.push(' ');
+        out.push_str(&source_parts.join(". "));
+        out.push('.');
+    }
+    if !doi_part.is_empty() {
+        out.push(' ');
+        out.push_str(&doi_part);
+    } else if !item.url.is_empty() {
+        out.push(' ');
+        out.push_str(&item.url);
+    }
+    out
+}
+
+fn format_mla(item: &CitationData) -> String {
+    // MLA 9th: Last, First, et al. "Title." Journal, vol. V, no. I, Year, pp. P, doi:DOI.
+    let authors_list = split_authors(&item.authors);
+    let mla_authors = match authors_list.len() {
+        0 => "Unknown Author".to_string(),
+        1 => {
+            let (last, initials) = name_to_last_initials(&authors_list[0]);
+            if initials.is_empty() { last } else {
+                let first = authors_list[0].split_whitespace()
+                    .take(authors_list[0].split_whitespace().count().saturating_sub(1))
+                    .collect::<Vec<_>>().join(" ");
+                format!("{}, {}", last, first)
+            }
+        }
+        2 => {
+            let (l0, _) = name_to_last_initials(&authors_list[0]);
+            let first0 = authors_list[0].split_whitespace()
+                .take(authors_list[0].split_whitespace().count().saturating_sub(1))
+                .collect::<Vec<_>>().join(" ");
+            format!("{}, {}, and {}", l0, first0, authors_list[1])
+        }
+        _ => {
+            let (l0, _) = name_to_last_initials(&authors_list[0]);
+            let first0 = authors_list[0].split_whitespace()
+                .take(authors_list[0].split_whitespace().count().saturating_sub(1))
+                .collect::<Vec<_>>().join(" ");
+            format!("{}, {}, et al.", l0, first0)
+        }
+    };
+
+    let mut out = format!("{}. \"{}.", mla_authors, item.title);
+    if !item.publication.is_empty() {
+        out.push_str(&format!("\" *{}*", item.publication));
+        if !item.volume.is_empty() { out.push_str(&format!(", vol. {}", item.volume)); }
+        if !item.issue.is_empty()  { out.push_str(&format!(", no. {}", item.issue)); }
+        if !item.year.is_empty()   { out.push_str(&format!(", {}", item.year)); }
+        if !item.pages.is_empty()  { out.push_str(&format!(", pp. {}", item.pages)); }
+        if !item.doi.is_empty()    { out.push_str(&format!(", doi:{}", item.doi)); }
+        out.push('.');
+    } else {
+        if !item.publisher.is_empty() { out.push_str(&format!("\" {}", item.publisher)); }
+        if !item.year.is_empty() { out.push_str(&format!(", {}", item.year)); }
+        out.push('.');
+    }
+    out
+}
+
+fn format_chicago(item: &CitationData) -> String {
+    // Chicago 17th author-date: Authors. "Title." Journal Volume, no. Issue (Year): Pages. DOI.
+    let authors_list = split_authors(&item.authors);
+    let chicago_authors = if authors_list.is_empty() {
+        "Unknown Author".to_string()
+    } else {
+        authors_list.join(", ")
+    };
+
+    let mut out = format!("{}. \"{}.", chicago_authors, item.title);
+    if !item.publication.is_empty() {
+        out.push_str(&format!("\" *{}*", item.publication));
+        if !item.volume.is_empty() { out.push_str(&format!(" {}", item.volume)); }
+        if !item.issue.is_empty()  { out.push_str(&format!(", no. {}", item.issue)); }
+        if !item.year.is_empty()   { out.push_str(&format!(" ({})", item.year)); }
+        if !item.pages.is_empty()  { out.push_str(&format!(": {}", item.pages)); }
+        out.push('.');
+    } else {
+        if !item.publisher.is_empty() { out.push_str(&format!("\" {}", item.publisher)); }
+        if !item.year.is_empty() { out.push_str(&format!(", {}", item.year)); }
+        out.push('.');
+    }
+    if !item.doi.is_empty() {
+        out.push(' ');
+        out.push_str(&doi_url(&item.doi));
+        out.push('.');
+    }
+    out
+}
+
+fn format_gbt(item: &CitationData) -> String {
+    // GB/T 7714-2015: Authors. Title[J]. Journal, Year, Volume(Issue): Pages. DOI.
+    let authors_list = split_authors(&item.authors);
+    let gbt_authors = if authors_list.is_empty() {
+        String::new()
+    } else {
+        authors_list.join(", ")
+    };
+
+    let type_mark = match item.item_type.as_str() {
+        "book" => "[M]",
+        "thesis" => "[D]",
+        "conference" => "[C]",
+        _ => "[J]",
+    };
+
+    let mut out = if gbt_authors.is_empty() {
+        format!("{}{}", item.title, type_mark)
+    } else {
+        format!("{}. {}{}", gbt_authors, item.title, type_mark)
+    };
+
+    if !item.publication.is_empty() {
+        out.push_str(&format!(". {}", item.publication));
+        if !item.year.is_empty() { out.push_str(&format!(", {}", item.year)); }
+        if !item.volume.is_empty() {
+            out.push_str(&format!(", {}", item.volume));
+            if !item.issue.is_empty() { out.push_str(&format!("({})", item.issue)); }
+        }
+        if !item.pages.is_empty() { out.push_str(&format!(": {}", item.pages)); }
+        out.push('.');
+    } else if !item.publisher.is_empty() {
+        out.push_str(&format!(". {}", item.publisher));
+        if !item.year.is_empty() { out.push_str(&format!(", {}", item.year)); }
+        out.push('.');
+    }
+
+    if !item.doi.is_empty() {
+        out.push_str(&format!(" DOI: {}", item.doi));
+    }
+    out
+}
+
+fn format_bibtex(item: &CitationData) -> String {
+    // Generate a cite key from first-author-last + year
+    let first_author = split_authors(&item.authors).into_iter().next().unwrap_or_default();
+    let (last, _) = name_to_last_initials(&first_author);
+    let key_last = last.to_lowercase().replace(' ', "").chars().filter(|c| c.is_alphanumeric()).collect::<String>();
+    let key_year = if item.year.is_empty() { "nd".to_string() } else { item.year.clone() };
+    let cite_key = if key_last.is_empty() { format!("item{}", key_year) } else { format!("{}{}", key_last, key_year) };
+
+    let entry_type = match item.item_type.as_str() {
+        "book" => "book",
+        "thesis" => "phdthesis",
+        "conference" => "inproceedings",
+        _ => "article",
+    };
+
+    let journal_field = if entry_type == "article" { "journal" } else { "booktitle" };
+
+    // BibTeX author: join with " and "
+    let bibtex_authors = split_authors(&item.authors).join(" and ");
+
+    let mut fields: Vec<String> = Vec::new();
+    if !item.title.is_empty()       { fields.push(format!("  title     = {{{}}}", item.title)); }
+    if !bibtex_authors.is_empty()   { fields.push(format!("  author    = {{{}}}", bibtex_authors)); }
+    if !item.publication.is_empty() { fields.push(format!("  {}   = {{{}}}", journal_field, item.publication)); }
+    if !item.year.is_empty()        { fields.push(format!("  year      = {{{}}}", item.year)); }
+    if !item.volume.is_empty()      { fields.push(format!("  volume    = {{{}}}", item.volume)); }
+    if !item.issue.is_empty()       { fields.push(format!("  number    = {{{}}}", item.issue)); }
+    if !item.pages.is_empty()       { fields.push(format!("  pages     = {{{}}}", item.pages)); }
+    if !item.publisher.is_empty()   { fields.push(format!("  publisher = {{{}}}", item.publisher)); }
+    if !item.doi.is_empty()         { fields.push(format!("  doi       = {{{}}}", item.doi)); }
+    if !item.arxiv_id.is_empty()    { fields.push(format!("  eprint    = {{{}}}", item.arxiv_id)); }
+    if !item.isbn.is_empty()        { fields.push(format!("  isbn      = {{{}}}", item.isbn)); }
+    if !item.url.is_empty()         { fields.push(format!("  url       = {{{}}}", item.url)); }
+
+    format!("@{}{{{},\n{}\n}}", entry_type, cite_key, fields.join(",\n"))
+}
+
+fn format_ris(item: &CitationData) -> String {
+    let ty = match item.item_type.as_str() {
+        "book" => "BOOK",
+        "thesis" => "THES",
+        "conference" => "CONF",
+        _ => "JOUR",
+    };
+
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!("TY  - {}", ty));
+    if !item.title.is_empty()       { lines.push(format!("TI  - {}", item.title)); }
+    for author in split_authors(&item.authors) {
+        lines.push(format!("AU  - {}", author));
+    }
+    if !item.year.is_empty()        { lines.push(format!("PY  - {}", item.year)); }
+    if !item.publication.is_empty() { lines.push(format!("JO  - {}", item.publication)); }
+    if !item.volume.is_empty()      { lines.push(format!("VL  - {}", item.volume)); }
+    if !item.issue.is_empty()       { lines.push(format!("IS  - {}", item.issue)); }
+    if !item.pages.is_empty() {
+        let ps: Vec<&str> = item.pages.splitn(2, '-').collect();
+        lines.push(format!("SP  - {}", ps[0].trim()));
+        if ps.len() > 1 { lines.push(format!("EP  - {}", ps[1].trim())); }
+    }
+    if !item.publisher.is_empty()   { lines.push(format!("PB  - {}", item.publisher)); }
+    if !item.doi.is_empty()         { lines.push(format!("DO  - {}", item.doi)); }
+    if !item.isbn.is_empty()        { lines.push(format!("SN  - {}", item.isbn)); }
+    if !item.url.is_empty()         { lines.push(format!("UR  - {}", item.url)); }
+    lines.push("ER  - ".to_string());
+    lines.join("\n")
+}
+
+fn format_csljson_one(item: &CitationData) -> String {
+    // Minimal CSL-JSON for one item
+    let csl_type = match item.item_type.as_str() {
+        "book" => "book",
+        "thesis" => "thesis",
+        "conference" => "paper-conference",
+        _ => "article-journal",
+    };
+
+    let escape = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+
+    let author_json: String = split_authors(&item.authors)
+        .iter()
+        .map(|a| {
+            let (last, _) = name_to_last_initials(a);
+            let first_parts: Vec<&str> = a.split_whitespace().collect();
+            let given = if first_parts.len() > 1 {
+                first_parts[..first_parts.len()-1].join(" ")
+            } else {
+                String::new()
+            };
+            format!("{{\"family\":\"{}\",\"given\":\"{}\"}}", escape(&last), escape(&given))
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let mut fields: Vec<String> = Vec::new();
+    fields.push(format!("\"id\":\"{}\"", escape(&item.id)));
+    fields.push(format!("\"type\":\"{}\"", csl_type));
+    if !item.title.is_empty()       { fields.push(format!("\"title\":\"{}\"", escape(&item.title))); }
+    if !author_json.is_empty()      { fields.push(format!("\"author\":[{}]", author_json)); }
+    if !item.year.is_empty()        { fields.push(format!("\"issued\":{{\"date-parts\":[[{}]]}}", item.year)); }
+    if !item.publication.is_empty() { fields.push(format!("\"container-title\":\"{}\"", escape(&item.publication))); }
+    if !item.volume.is_empty()      { fields.push(format!("\"volume\":\"{}\"", escape(&item.volume))); }
+    if !item.issue.is_empty()       { fields.push(format!("\"issue\":\"{}\"", escape(&item.issue))); }
+    if !item.pages.is_empty()       { fields.push(format!("\"page\":\"{}\"", escape(&item.pages))); }
+    if !item.publisher.is_empty()   { fields.push(format!("\"publisher\":\"{}\"", escape(&item.publisher))); }
+    if !item.doi.is_empty()         { fields.push(format!("\"DOI\":\"{}\"", escape(&item.doi))); }
+    if !item.isbn.is_empty()        { fields.push(format!("\"ISBN\":\"{}\"", escape(&item.isbn))); }
+    if !item.url.is_empty()         { fields.push(format!("\"URL\":\"{}\"", escape(&item.url))); }
+    format!("{{{}}}", fields.join(","))
+}
+
+fn apply_format(item: &CitationData, format: &str) -> String {
+    match format {
+        "apa"      => format_apa(item),
+        "mla"      => format_mla(item),
+        "chicago"  => format_chicago(item),
+        "gbt"      => format_gbt(item),
+        "bibtex"   => format_bibtex(item),
+        "ris"      => format_ris(item),
+        "csljson"  => format!("[{}]", format_csljson_one(item)),
+        _          => format_apa(item),
+    }
+}
+
+/// Generate a formatted citation string for a single library item.
+#[tauri::command]
+pub fn generate_citation(
+    item_id: String,
+    format: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<String, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    let item = fetch_citation_data(&conn, &item_id)?;
+    Ok(apply_format(&item, &format))
+}
+
+/// Export one or more library items in the requested format.
+/// For text formats (APA/MLA/Chicago/GBT) items are joined with newlines.
+/// For BibTeX/RIS entries are joined with blank lines.
+/// For CSL-JSON a JSON array is returned.
+#[tauri::command]
+pub fn export_items(
+    item_ids: Vec<String>,
+    format: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<String, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    let mut parts: Vec<String> = Vec::new();
+    for id in &item_ids {
+        match fetch_citation_data(&conn, id) {
+            Ok(item) => parts.push(apply_format(&item, &format)),
+            Err(_) => {} // skip missing items silently
+        }
+    }
+    let sep = match format.as_str() {
+        "bibtex" | "ris" => "\n\n",
+        _ => "\n",
+    };
+    if format == "csljson" {
+        // Unwrap individual JSON objects and wrap in one array
+        let objects: Vec<String> = parts.iter()
+            .map(|p| p.trim_start_matches('[').trim_end_matches(']').to_string())
+            .collect();
+        Ok(format!("[{}]", objects.join(",")))
+    } else {
+        Ok(parts.join(sep))
+    }
+}

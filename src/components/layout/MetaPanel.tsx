@@ -1,7 +1,17 @@
-import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit, Edit2, Check, Book, Building, Link2 } from "lucide-react";
+import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit, Edit2, Check, Book, Building, Link2, Copy, Quote } from "lucide-react";
 import { LibraryItem } from "../../types";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { CitationFormat } from "./ExportModal";
+
+const CITE_FORMATS: { id: CitationFormat; label: string }[] = [
+  { id: "apa",     label: "APA" },
+  { id: "mla",     label: "MLA" },
+  { id: "chicago", label: "Chicago" },
+  { id: "gbt",     label: "GB/T" },
+  { id: "bibtex",  label: "BibTeX" },
+  { id: "ris",     label: "RIS" },
+];
 
 interface MetaPanelProps {
   selectedItem: LibraryItem | null;
@@ -17,6 +27,28 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   const [isSaving, setIsSaving] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const tagInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Citation state ───────────────────────────────────────────────────────
+  const [citeFormat, setCiteFormat] = useState<CitationFormat>("apa");
+  const [citeText, setCiteText] = useState("");
+  const [citeCopied, setCiteCopied] = useState(false);
+
+  const generateCite = useCallback(async (itemId: string, fmt: CitationFormat) => {
+    try {
+      const text = await invoke<string>("generate_citation", { itemId, format: fmt });
+      setCiteText(text);
+    } catch {
+      setCiteText("");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedItem && !isEditing) {
+      generateCite(selectedItem.id, citeFormat);
+    } else {
+      setCiteText("");
+    }
+  }, [selectedItem?.id, citeFormat, isEditing, generateCite]);
 
   // Sync form data when selection changes or editing toggles
   useEffect(() => {
@@ -355,6 +387,53 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
               <MetaRow icon={<Tag size={15} className="text-zinc-400" />} label="File">
                 <span className="text-zinc-500 text-xs font-mono break-all line-clamp-2" title={selectedItem.attachments[0]?.name}>{selectedItem.attachments[0]?.name || "None"}</span>
               </MetaRow>
+            </div>
+
+            {/* ── Cite section ─────────────────────────────────────────── */}
+            <div className="border-t border-zinc-100 pt-5">
+              <div className="flex items-center gap-1.5 mb-3">
+                <Quote size={14} className="text-zinc-400" />
+                <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Cite</span>
+              </div>
+              {/* Format tabs */}
+              <div className="flex flex-wrap gap-1 mb-3">
+                {CITE_FORMATS.map(f => (
+                  <button
+                    key={f.id}
+                    onClick={() => setCiteFormat(f.id)}
+                    className={[
+                      "px-2.5 py-1 rounded-full text-[10px] font-semibold border transition-colors",
+                      citeFormat === f.id
+                        ? "bg-indigo-600 text-white border-indigo-600"
+                        : "bg-white text-zinc-500 border-zinc-200 hover:border-indigo-300 hover:text-indigo-600",
+                    ].join(" ")}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              {/* Citation output */}
+              <div className="relative">
+                <textarea
+                  readOnly
+                  value={citeText}
+                  rows={4}
+                  className="w-full p-2.5 text-xs font-mono text-zinc-700 bg-zinc-50 border border-zinc-200 rounded-lg resize-none leading-relaxed outline-none"
+                  spellCheck={false}
+                />
+                <button
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(citeText);
+                    setCiteCopied(true);
+                    setTimeout(() => setCiteCopied(false), 2000);
+                  }}
+                  disabled={!citeText}
+                  className="absolute top-2 right-2 p-1 rounded bg-white border border-zinc-200 text-zinc-400 hover:text-indigo-600 hover:border-indigo-300 transition-colors disabled:opacity-30"
+                  title="Copy citation"
+                >
+                  {citeCopied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                </button>
+              </div>
             </div>
           </div>
         )}

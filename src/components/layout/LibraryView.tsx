@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { FilePenLine, FileText, FileUp, Globe, Loader2, Search, Trash2 } from "lucide-react";
+import { Download, FilePenLine, FileText, FileUp, Globe, Loader2, Search, Trash2 } from "lucide-react";
 import { FolderNode, LibraryItem } from "../../types";
+import { ExportModal } from "./ExportModal";
 
 // ─── Search field types ──────────────────────────────────────────────────────
 
@@ -69,8 +70,7 @@ export function LibraryView({
   // UI state
   const [contextMenu, setContextMenu] = useState<{ item: LibraryItem; x: number; y: number } | null>(null);
   const [renameTarget, setRenameTarget] = useState<LibraryItem | null>(null);
-  const [renameValue, setRenameValue]   = useState("");
-  const renameInputRef = useRef<HTMLInputElement>(null);
+  const [renameValue, setRenameValue]   = useState("");  const [showExport, setShowExport] = useState(false);  const renameInputRef = useRef<HTMLInputElement>(null);
   const debounceRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Folder tree helpers ──────────────────────────────────────────────────
@@ -211,6 +211,14 @@ export function LibraryView({
               className="w-full pl-10 pr-4 py-2 bg-zinc-100 border-transparent focus:bg-white border focus:border-indigo-400 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-400/20 transition-all placeholder:text-zinc-400 shadow-sm"
             />
           </div>
+          <button
+            onClick={() => setShowExport(true)}
+            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
+            title="Export references"
+          >
+            <Download size={15} />
+            <span>Export</span>
+          </button>
           <button
             onClick={onAddItem}
             className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
@@ -421,7 +429,19 @@ export function LibraryView({
           </div>
         </div>
       )}
-    </div>
+
+    {/* Export modal — uses fixed positioning, renders correctly inside any container */}
+    <ExportModal
+      items={displayItems}
+      isOpen={showExport}
+      onClose={() => setShowExport(false)}
+      scopeLabel={
+        isGlobalSearch
+          ? `${displayItems.length} item${displayItems.length !== 1 ? "s" : ""} from search results`
+          : `${displayItems.length} item${displayItems.length !== 1 ? "s" : ""} in ${folderLabel}`
+      }
+    />
+  </div>
   );
 }
 

@@ -62,6 +62,8 @@ pub fn run() {
             library_commands::remove_item_tag,
             library_commands::update_item_tags,
             library_commands::set_tag_color,
+            library_commands::generate_citation,
+            library_commands::export_items,
             metadata_fetch::update_item_metadata,
             pdf_handlers::load_pdf,
             pdf_handlers::get_pdf_dimensions,
