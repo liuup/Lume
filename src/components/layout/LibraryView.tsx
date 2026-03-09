@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FilePenLine, FileText, FileUp, Search, Trash2 } from "lucide-react";
-import { FolderNode, LibraryItem } from "../../App";
+import { FolderNode, LibraryItem } from "../../types";
 
 interface LibraryViewProps {
   folderTree: FolderNode[];

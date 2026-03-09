@@ -1,5 +1,5 @@
 import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit, Edit2, Check, Book, Building, Link2 } from "lucide-react";
-import { LibraryItem } from "../../App";
+import { LibraryItem } from "../../types";
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 

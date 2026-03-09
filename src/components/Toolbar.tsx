@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type, PanelRight, ChevronDown } from "lucide-react";
-import { ToolType } from "../App";
+import { ToolType } from "../types";
 
 interface ToolbarProps {
   onZoomIn: () => void;

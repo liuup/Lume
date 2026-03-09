@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { PageDimension, ToolType } from "../App";
+import { PageDimension, ToolType } from "../types";
 import { AnnotationLayer } from "./AnnotationLayer";
 import { TextLayer } from "./TextLayer";
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight, FilePenLine, Folder, FolderOpen, FolderPlus, Plus } from "lucide-react";
-import { FolderNode } from "../../App";
+import { FolderNode } from "../../types";
 
 interface FolderSidebarProps {
   folderTree: FolderNode[];

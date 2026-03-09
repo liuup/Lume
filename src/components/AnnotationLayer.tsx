@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { ToolType } from "../App";
+import { ToolType } from "../types";
 
 interface AnnotationLayerProps {
   pdfPath: string;
