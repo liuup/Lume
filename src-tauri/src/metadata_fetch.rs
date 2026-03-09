@@ -673,5 +673,20 @@ pub fn update_item_metadata(payload: crate::models::UpdateMetadataPayload, state
     let conn = conn_mutex.lock().map_err(|e| format!("Database lock error: {}", e))?;
     let mut stmt = conn.prepare("UPDATE items SET title = ?1, authors = ?2, year = ?3, abstract = ?4, doi = ?5, arxiv_id = ?6, publication = ?7, volume = ?8, issue = ?9, pages = ?10, publisher = ?11, isbn = ?12, url = ?13, language = ?14, date_modified = datetime('now') WHERE id = ?15").map_err(|e| format!("Prepare error: {}", e))?;
     stmt.execute(rusqlite::params![payload.title, payload.authors, payload.year, payload.r#abstract, payload.doi, payload.arxiv_id, payload.publication, payload.volume, payload.issue, payload.pages, payload.publisher, payload.isbn, payload.url, payload.language, payload.id]).map_err(|e| format!("Execute error: {}", e))?;
+
+    // Sync tags – replace all existing tags for this item
+    conn.execute("DELETE FROM item_tags WHERE item_id = ?1", rusqlite::params![payload.id])
+        .map_err(|e| format!("Failed to clear tags: {}", e))?;
+    for tag in &payload.tags {
+        let t = tag.trim();
+        if !t.is_empty() {
+            conn.execute(
+                "INSERT OR IGNORE INTO item_tags (item_id, tag) VALUES (?1, ?2)",
+                rusqlite::params![payload.id, t],
+            )
+            .map_err(|e| format!("Failed to insert tag: {}", e))?;
+        }
+    }
+
     Ok(())
 }

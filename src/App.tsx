@@ -1,4 +1,5 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Toolbar } from "./components/Toolbar";
 import { PdfViewer } from "./components/PdfViewer";
 import { FolderSidebar } from "./components/layout/FolderSidebar";
@@ -6,7 +7,7 @@ import { LibraryView } from "./components/layout/LibraryView";
 import { MetaPanel } from "./components/layout/MetaPanel";
 import { X } from "lucide-react";
 
-import { ToolType } from "./types";
+import { TagInfo, ToolType } from "./types";
 import { useLibrary } from "./hooks/useLibrary";
 
 function App() {
@@ -40,6 +41,26 @@ function App() {
   const [scale, setScale] = useState<number>(1.5);
   const [activeTool, setActiveTool] = useState<ToolType>('none');
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+
+  // ── Tag system state ─────────────────────────────────────────────────────
+  const [allTags, setAllTags] = useState<TagInfo[]>([]);
+  const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(null);
+
+  const refreshAllTags = useCallback(async () => {
+    try {
+      const tags = await invoke<TagInfo[]>("get_all_tags");
+      setAllTags(tags);
+    } catch (err) {
+      console.error("Failed to load tags", err);
+    }
+  }, []);
+
+  useEffect(() => { refreshAllTags(); }, [refreshAllTags]);
+
+  const tagColors: Record<string, string> = {};
+  for (const t of allTags) {
+    if (t.color) tagColors[t.tag] = t.color;
+  }
 
   const mainRef = useRef<HTMLElement>(null);
 
@@ -176,9 +197,16 @@ function App() {
             <FolderSidebar
               folderTree={folderTree}
               selectedFolderId={selectedFolderId}
-              onSelectFolder={setSelectedFolderId}
+              onSelectFolder={id => { setSelectedFolderId(id); setSelectedTagFilter(null); }}
               onAddFolder={handleAddFolder}
               onRenameFolder={handleRenameFolder}
+              allTags={allTags}
+              selectedTagFilter={selectedTagFilter}
+              onSelectTag={tag => { setSelectedTagFilter(prev => prev === tag ? null : tag); }}
+              onSetTagColor={async (tag, color) => {
+                await invoke("set_tag_color", { tag, color });
+                await refreshAllTags();
+              }}
             />
             <LibraryView 
               folderTree={folderTree}
@@ -189,6 +217,8 @@ function App() {
               onAddItem={handleAddItem}
               onDeleteItem={handleDeleteItem}
               onRenameItem={handleRenameItem}
+              tagFilter={selectedTagFilter}
+              onClearTagFilter={() => setSelectedTagFilter(null)}
             />
           </>
         ) : (
@@ -244,8 +274,10 @@ function App() {
             selectedItem={selectedItem}
             isOpen={isRightPanelOpen}
             onClose={() => setIsRightPanelOpen(false)}
+            tagColors={tagColors}
             onItemUpdated={() => {
               handleItemUpdatedLocally();
+              refreshAllTags();
             }}
           />
         )}

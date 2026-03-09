@@ -1,6 +1,20 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, FilePenLine, Folder, FolderOpen, FolderPlus, Plus } from "lucide-react";
-import { FolderNode } from "../../types";
+import { ChevronRight, FilePenLine, Folder, FolderOpen, FolderPlus, Hash, Plus } from "lucide-react";
+import { FolderNode, TagInfo } from "../../types";
+
+// ── Preset tag palette ──────────────────────────────────────────────────────
+const TAG_COLORS: { label: string; value: string }[] = [
+  { label: 'Indigo',  value: '#6366f1' },
+  { label: 'Sky',     value: '#0ea5e9' },
+  { label: 'Teal',    value: '#14b8a6' },
+  { label: 'Emerald', value: '#10b981' },
+  { label: 'Amber',   value: '#f59e0b' },
+  { label: 'Orange',  value: '#f97316' },
+  { label: 'Rose',    value: '#f43f5e' },
+  { label: 'Violet',  value: '#8b5cf6' },
+];
+
+const DEFAULT_TAG_COLOR = '#94a3b8'; // zinc-400 when no color assigned
 
 interface FolderSidebarProps {
   folderTree: FolderNode[];
@@ -8,6 +22,11 @@ interface FolderSidebarProps {
   onSelectFolder: (id: string) => void;
   onAddFolder: (parentId: string, name: string) => Promise<void>;
   onRenameFolder: (folder: FolderNode, nextName: string) => Promise<void> | void;
+  // ── tag system ────────
+  allTags: TagInfo[];
+  selectedTagFilter: string | null;
+  onSelectTag: (tag: string) => void;
+  onSetTagColor: (tag: string, color: string) => Promise<void>;
 }
 
 export function FolderSidebar({
@@ -16,6 +35,10 @@ export function FolderSidebar({
   onSelectFolder,
   onAddFolder,
   onRenameFolder,
+  allTags,
+  selectedTagFilter,
+  onSelectTag,
+  onSetTagColor,
 }: FolderSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{
     folder: FolderNode;
@@ -25,6 +48,13 @@ export function FolderSidebar({
   const [renameTarget, setRenameTarget] = useState<FolderNode | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
+
+  const [tagColorMenu, setTagColorMenu] = useState<{
+    tag: string;
+    currentColor: string;
+    x: number;
+    y: number;
+  } | null>(null);
 
   const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
@@ -98,8 +128,24 @@ export function FolderSidebar({
     };
   }, [renameTarget]);
 
+  useEffect(() => {
+    if (!tagColorMenu) return;
+    const close = () => setTagColorMenu(null);
+    const onEsc = (e: KeyboardEvent) => { if (e.key === 'Escape') setTagColorMenu(null); };
+    window.addEventListener('click',   close);
+    window.addEventListener('scroll',  close, true);
+    window.addEventListener('resize',  close);
+    window.addEventListener('keydown', onEsc);
+    return () => {
+      window.removeEventListener('click',   close);
+      window.removeEventListener('scroll',  close, true);
+      window.removeEventListener('resize',  close);
+      window.removeEventListener('keydown', onEsc);
+    };
+  }, [tagColorMenu]);
+
   const menuX = contextMenu ? Math.min(contextMenu.x, window.innerWidth - 184) : 0;
-  const menuY = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 56) : 0;
+  const menuY = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 56)  : 0;
 
   const submitNewFolder = async () => {
     if (!newFolderParentId) return;
@@ -134,7 +180,7 @@ export function FolderSidebar({
       </div>
 
       {/* Folder Tree */}
-      <div className="flex-1 overflow-y-auto px-2 py-2">
+      <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
         {folderTree.map(node => (
           <FolderTreeItem
             key={node.id}
@@ -150,6 +196,53 @@ export function FolderSidebar({
           />
         ))}
       </div>
+
+      {/* ── Tags section ──────────────────────────────────────── */}
+      {allTags.length > 0 && (
+        <div className="border-t border-zinc-200 shrink-0">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 pt-3 pb-1.5">
+            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
+              <Hash size={11} />
+              Tags
+            </div>
+            <span className="text-[10px] text-zinc-400 font-medium">{allTags.length}</span>
+          </div>
+          {/* Tag list */}
+          <div className="max-h-52 overflow-y-auto px-2 pb-2 space-y-0.5">
+            {allTags.map(tagInfo => {
+              const isActive = selectedTagFilter === tagInfo.tag;
+              const dotColor = tagInfo.color || DEFAULT_TAG_COLOR;
+              return (
+                <div
+                  key={tagInfo.tag}
+                  className={[
+                    'group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer select-none transition-colors',
+                    isActive
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : 'text-zinc-600 hover:bg-zinc-100',
+                  ].join(' ')}
+                  onClick={() => onSelectTag(tagInfo.tag)}
+                  onContextMenu={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setTagColorMenu({ tag: tagInfo.tag, currentColor: dotColor, x: e.clientX, y: e.clientY });
+                  }}
+                  title={`${tagInfo.tag} — ${tagInfo.count} paper${tagInfo.count !== 1 ? 's' : ''} (right-click to change color)`}
+                >
+                  {/* Colored dot */}
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0 transition-transform group-hover:scale-110"
+                    style={{ backgroundColor: dotColor }}
+                  />
+                  <span className="text-[13px] font-medium flex-1 truncate">{tagInfo.tag}</span>
+                  <span className="text-[10px] font-medium text-zinc-400 shrink-0">{tagInfo.count}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {contextMenu && (
         <div
@@ -295,6 +388,41 @@ export function FolderSidebar({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Tag color picker (right-click context menu) */}
+      {tagColorMenu && (
+        <div
+          className="fixed z-50 rounded-xl border border-zinc-200 bg-white p-3 shadow-[0_12px_40px_rgba(0,0,0,0.14)] min-w-[160px]"
+          style={{
+            left: Math.min(tagColorMenu.x, window.innerWidth  - 172),
+            top:  Math.min(tagColorMenu.y, window.innerHeight - 100),
+          }}
+          onClick={e => e.stopPropagation()}
+        >
+          <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 px-0.5">
+            Tag color
+          </p>
+          <div className="grid grid-cols-4 gap-1.5">
+            {TAG_COLORS.map(c => (
+              <button
+                key={c.value}
+                title={c.label}
+                onClick={async () => {
+                  await onSetTagColor(tagColorMenu.tag, c.value);
+                  setTagColorMenu(null);
+                }}
+                className={[
+                  'w-7 h-7 rounded-full transition-transform hover:scale-110 border-2',
+                  tagColorMenu.currentColor === c.value
+                    ? 'border-zinc-800 scale-110'
+                    : 'border-transparent',
+                ].join(' ')}
+                style={{ backgroundColor: c.value }}
+              />
+            ))}
           </div>
         </div>
       )}

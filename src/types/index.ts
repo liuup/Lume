@@ -65,3 +65,11 @@ export interface OpenTab {
   dimensions: PageDimension[];
   currentPage: number;
 }
+
+/** A tag in the library with its usage count and optional display color. */
+export interface TagInfo {
+  tag: string;
+  count: number;
+  /** Hex color string, e.g. '#6366f1'. Empty string means use the default color. */
+  color: string;
+}

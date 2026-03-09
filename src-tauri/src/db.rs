@@ -59,5 +59,13 @@ pub fn init_db(app: &tauri::AppHandle) -> SqlResult<Connection> {
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS tag_colors (
+            tag  TEXT PRIMARY KEY COLLATE NOCASE,
+            color TEXT NOT NULL DEFAULT '#6366f1'
+        )",
+        [],
+    )?;
+
     Ok(conn)
 }

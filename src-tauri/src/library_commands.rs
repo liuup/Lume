@@ -962,3 +962,123 @@ pub fn search_library(
 
     Ok(items)
 }
+
+// ─────────────────────────────────────────────────────────────
+// Tag Management Commands
+// ─────────────────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+pub struct TagInfo {
+    pub tag: String,
+    pub count: i64,
+    pub color: String,
+}
+
+/// Return every tag in the library, with usage count and assigned color.
+#[tauri::command]
+pub fn get_all_tags(
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<Vec<TagInfo>, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    let mut stmt = conn.prepare(
+        "SELECT it.tag, COUNT(*) AS cnt, COALESCE(tc.color, '') AS color \
+         FROM item_tags it \
+         LEFT JOIN tag_colors tc ON LOWER(it.tag) = LOWER(tc.tag) \
+         GROUP BY it.tag \
+         ORDER BY cnt DESC, it.tag ASC",
+    )
+    .map_err(|e| format!("Prepare error: {}", e))?;
+
+    let tags: Vec<TagInfo> = stmt
+        .query_map([], |row| {
+            Ok(TagInfo {
+                tag:   row.get(0)?,
+                count: row.get(1)?,
+                color: row.get(2)?,
+            })
+        })
+        .map_err(|e| format!("Query error: {}", e))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(tags)
+}
+
+/// Add a single tag to an item (idempotent).
+#[tauri::command]
+pub fn add_item_tag(
+    item_id: String,
+    tag: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<(), String> {
+    let tag = tag.trim().to_string();
+    if tag.is_empty() {
+        return Err("Tag name cannot be empty".to_string());
+    }
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    conn.execute(
+        "INSERT OR IGNORE INTO item_tags (item_id, tag) VALUES (?1, ?2)",
+        rusqlite::params![item_id, tag],
+    )
+    .map_err(|e| format!("Failed to add tag: {}", e))?;
+    Ok(())
+}
+
+/// Remove a single tag from an item.
+#[tauri::command]
+pub fn remove_item_tag(
+    item_id: String,
+    tag: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    conn.execute(
+        "DELETE FROM item_tags WHERE item_id = ?1 AND tag = ?2",
+        rusqlite::params![item_id, tag],
+    )
+    .map_err(|e| format!("Failed to remove tag: {}", e))?;
+    Ok(())
+}
+
+/// Replace all tags for an item atomically.
+#[tauri::command]
+pub fn update_item_tags(
+    item_id: String,
+    tags: Vec<String>,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    conn.execute(
+        "DELETE FROM item_tags WHERE item_id = ?1",
+        rusqlite::params![item_id],
+    )
+    .map_err(|e| format!("Failed to clear tags: {}", e))?;
+    for tag in &tags {
+        let t = tag.trim();
+        if !t.is_empty() {
+            conn.execute(
+                "INSERT OR IGNORE INTO item_tags (item_id, tag) VALUES (?1, ?2)",
+                rusqlite::params![item_id, t],
+            )
+            .map_err(|e| format!("Failed to insert tag: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
+/// Persist a display color for a tag (upsert).
+#[tauri::command]
+pub fn set_tag_color(
+    tag: String,
+    color: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    conn.execute(
+        "INSERT INTO tag_colors (tag, color) VALUES (?1, ?2) \
+         ON CONFLICT(tag) DO UPDATE SET color = excluded.color",
+        rusqlite::params![tag, color],
+    )
+    .map_err(|e| format!("Failed to set tag color: {}", e))?;
+    Ok(())
+}

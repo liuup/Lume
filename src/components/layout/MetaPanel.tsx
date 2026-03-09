@@ -1,6 +1,6 @@
 import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit, Edit2, Check, Book, Building, Link2 } from "lucide-react";
 import { LibraryItem } from "../../types";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 interface MetaPanelProps {
@@ -8,12 +8,15 @@ interface MetaPanelProps {
   isOpen: boolean;
   onClose: () => void;
   onItemUpdated?: () => void;
+  tagColors?: Record<string, string>;
 }
 
-export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated }: MetaPanelProps) {
+export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagColors = {} }: MetaPanelProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editFormData, setEditFormData] = useState<Partial<LibraryItem>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [tagInput, setTagInput] = useState("");
+  const tagInputRef = useRef<HTMLInputElement>(null);
 
   // Sync form data when selection changes or editing toggles
   useEffect(() => {
@@ -88,10 +91,29 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated }: Meta
     setEditFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleTagsChange = (value: string) => {
-    // Basic comma-separated tagging for now
-    const tagsArray = value.split(',').map(t => t.trim()).filter(t => t.length > 0);
-    setEditFormData(prev => ({ ...prev, tags: tagsArray }));
+  const addTag = (raw: string) => {
+    const tag = raw.trim();
+    if (!tag) return;
+    setEditFormData(prev => {
+      const current = prev.tags || [];
+      if (current.includes(tag)) return prev;
+      return { ...prev, tags: [...current, tag] };
+    });
+    setTagInput("");
+  };
+
+  const removeTag = (tag: string) => {
+    setEditFormData(prev => ({ ...prev, tags: (prev.tags || []).filter(t => t !== tag) }));
+  };
+
+  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addTag(tagInput);
+    } else if (e.key === "Backspace" && tagInput === "") {
+      const tags = editFormData.tags || [];
+      if (tags.length > 0) removeTag(tags[tags.length - 1]);
+    }
   };
 
   return (
@@ -157,7 +179,43 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated }: Meta
               <EditField label="Language" value={editFormData.language || ""} onChange={v => handleStringChange('language', v)} />
             </div>
 
-            <EditField label="Tags" value={(editFormData.tags || []).join(', ')} onChange={handleTagsChange} placeholder="Comma-separated tags" />
+            {/* Pill tag editor */}
+            <div className="flex flex-col space-y-1">
+              <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Tags</label>
+              <div
+                className="flex flex-wrap gap-1.5 p-2 border border-zinc-200 rounded-md bg-white min-h-[36px] cursor-text focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400 transition-shadow"
+                onClick={() => tagInputRef.current?.focus()}
+              >
+                {(editFormData.tags || []).map(tag => {
+                  const color = tagColors[tag] || "#6366f1";
+                  return (
+                    <span
+                      key={tag}
+                      className="flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded-full text-[11px] font-medium bg-zinc-100 text-zinc-700 border border-zinc-200"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                      {tag}
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); removeTag(tag); }}
+                        className="ml-0.5 text-zinc-400 hover:text-red-500 transition-colors leading-none"
+                      >×</button>
+                    </span>
+                  );
+                })}
+                <input
+                  ref={tagInputRef}
+                  type="text"
+                  value={tagInput}
+                  onChange={e => setTagInput(e.target.value)}
+                  onKeyDown={handleTagKeyDown}
+                  onBlur={() => { if (tagInput.trim()) addTag(tagInput); }}
+                  placeholder={(editFormData.tags || []).length === 0 ? "Type a tag, press Enter or comma" : ""}
+                  className="flex-1 min-w-[120px] text-sm bg-transparent outline-none placeholder:text-zinc-300"
+                />
+              </div>
+              <p className="text-[10px] text-zinc-400">Press Enter or comma to add · Backspace to remove last</p>
+            </div>
 
             <div className="border-t border-zinc-100 pt-4 mt-2 space-y-4">
               <EditField label="Publication" value={editFormData.publication || ""} onChange={v => handleStringChange('publication', v)} />
@@ -209,14 +267,18 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated }: Meta
               </h3>
               {selectedItem.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-3">
-                  {selectedItem.tags.map(tag => (
-                    <span
-                      key={tag}
-                      className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-semibold rounded-full uppercase tracking-wider"
-                    >
-                      {tag}
-                    </span>
-                  ))}
+                  {selectedItem.tags.map(tag => {
+                    const color = tagColors[tag] || "#6366f1";
+                    return (
+                      <span
+                        key={tag}
+                        className="flex items-center gap-1 px-2 py-0.5 bg-zinc-100 text-zinc-700 text-[10px] font-semibold rounded-full border border-zinc-200"
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                        {tag}
+                      </span>
+                    );
+                  })}
                 </div>
               )}
             </div>

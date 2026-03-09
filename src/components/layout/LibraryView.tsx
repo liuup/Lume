@@ -42,6 +42,9 @@ interface LibraryViewProps {
   onAddItem: () => void;
   onDeleteItem: (item: LibraryItem) => void;
   onRenameItem: (item: LibraryItem, nextName: string) => Promise<void> | void;
+  /** Sidebar tag filter (null = no filter active). */
+  tagFilter: string | null;
+  onClearTagFilter: () => void;
 }
 
 export function LibraryView({
@@ -53,6 +56,8 @@ export function LibraryView({
   onAddItem,
   onDeleteItem,
   onRenameItem,
+  tagFilter,
+  onClearTagFilter,
 }: LibraryViewProps) {
   // Search state
   const [query, setQuery]             = useState("");
@@ -97,18 +102,19 @@ export function LibraryView({
 
   // ── Global search via Tauri backend ─────────────────────────────────────
 
-  const isGlobalSearch = query.trim().length > 0 || yearFilter.trim().length > 0;
+  const isGlobalSearch = query.trim().length > 0 || yearFilter.trim().length > 0 || !!tagFilter;
 
   const runGlobalSearch = useCallback(
-    (q: string, field: SearchField, year: string) => {
-      if (!q.trim() && !year.trim()) {
+    (q: string, field: SearchField, year: string, sidebarTag: string | null) => {
+      if (!q.trim() && !year.trim() && !sidebarTag) {
         setGlobalResults([]);
         setIsSearching(false);
         return;
       }
       setIsSearching(true);
+      const tagFilters = sidebarTag ? [sidebarTag] : [];
       invoke<LibraryItem[]>("search_library", {
-        params: { query: q.trim(), field, year_filter: year.trim() || null, tag_filters: [] },
+        params: { query: q.trim(), field, year_filter: year.trim() || null, tag_filters: tagFilters },
       })
         .then(results => { setGlobalResults(results); setIsSearching(false); })
         .catch(err   => { console.error("search_library error:", err); setIsSearching(false); });
@@ -116,17 +122,17 @@ export function LibraryView({
     []
   );
 
-  // Debounced search trigger
+  // Debounced search trigger — re-runs on any filter change, including sidebar tag
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => runGlobalSearch(query, searchField, yearFilter), 280);
+    debounceRef.current = setTimeout(() => runGlobalSearch(query, searchField, yearFilter, tagFilter), 280);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [query, searchField, yearFilter, runGlobalSearch]);
+  }, [query, searchField, yearFilter, tagFilter, runGlobalSearch]);
 
-  // Clear results when inputs become empty
+  // Clear results when all inputs are empty
   useEffect(() => {
-    if (!query.trim() && !yearFilter.trim()) setGlobalResults([]);
-  }, [query, yearFilter]);
+    if (!query.trim() && !yearFilter.trim() && !tagFilter) setGlobalResults([]);
+  }, [query, yearFilter, tagFilter]);
 
   const displayItems = isGlobalSearch ? globalResults : folderItems;
 
@@ -243,6 +249,21 @@ export function LibraryView({
               className="w-16 px-2 py-1 bg-zinc-100 border border-transparent focus:bg-white focus:border-indigo-400 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-400/20 transition-all placeholder:text-zinc-400"
             />
           </div>
+
+          {/* Active sidebar tag chip */}
+          {tagFilter && (
+            <div className="flex items-center gap-1.5 ml-1 px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-medium border border-indigo-200">
+              <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
+              <span>#{tagFilter}</span>
+              <button
+                onClick={onClearTagFilter}
+                className="ml-0.5 text-indigo-400 hover:text-indigo-700 transition-colors leading-none"
+                title="Clear tag filter"
+              >
+                ×
+              </button>
+            </div>
+          )}
 
           {/* Right-aligned scope indicator */}
           <div className="ml-auto flex items-center gap-1.5 text-xs text-zinc-400 shrink-0">
