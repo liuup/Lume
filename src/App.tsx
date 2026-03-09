@@ -327,13 +327,12 @@ function App() {
   const selectedPdf = selectedPdfId ? findPdf(folderTree, selectedPdfId) : null;
   const isLibrary = activeTabId === 'library' || activeTabId === null;
 
-  const handleAddFolder = async (parentId: string) => {
+  const handleAddFolder = async (parentId: string, name: string) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+
     const parent = findFolder(folderTree, parentId);
     if (!parent) return;
-
-    const name = window.prompt("Folder name:");
-    const trimmedName = name?.trim();
-    if (!trimmedName) return;
 
     try {
       const createdPath: string = await invoke("create_library_folder", {
@@ -345,7 +344,6 @@ function App() {
       setSelectedFolderId(createdPath);
     } catch (err) {
       console.error("Failed to create folder", err);
-      window.alert("Failed to create folder.");
     }
   };
 

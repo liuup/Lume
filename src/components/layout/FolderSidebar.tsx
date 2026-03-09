@@ -6,7 +6,7 @@ interface FolderSidebarProps {
   folderTree: FolderNode[];
   selectedFolderId: string;
   onSelectFolder: (id: string) => void;
-  onAddFolder: (parentId: string) => void;
+  onAddFolder: (parentId: string, name: string) => Promise<void>;
   onRenameFolder: (folder: FolderNode, nextName: string) => Promise<void> | void;
 }
 
@@ -25,6 +25,10 @@ export function FolderSidebar({
   const [renameTarget, setRenameTarget] = useState<FolderNode | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
+
+  const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
+  const [newFolderName, setNewFolderName] = useState("");
+  const newFolderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -48,6 +52,28 @@ export function FolderSidebar({
       window.removeEventListener("keydown", handleEscape);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!newFolderParentId) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      newFolderInputRef.current?.focus();
+    });
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setNewFolderParentId(null);
+        setNewFolderName("");
+      }
+    };
+
+    window.addEventListener("keydown", handleEscape);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [newFolderParentId]);
 
   useEffect(() => {
     if (!renameTarget) return;
@@ -75,6 +101,15 @@ export function FolderSidebar({
   const menuX = contextMenu ? Math.min(contextMenu.x, window.innerWidth - 184) : 0;
   const menuY = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 56) : 0;
 
+  const submitNewFolder = async () => {
+    if (!newFolderParentId) return;
+    const trimmedName = newFolderName.trim();
+    if (!trimmedName) return;
+    await onAddFolder(newFolderParentId, trimmedName);
+    setNewFolderParentId(null);
+    setNewFolderName("");
+  };
+
   const submitRename = async () => {
     if (!renameTarget) return;
 
@@ -90,9 +125,9 @@ export function FolderSidebar({
     <aside className="w-64 bg-zinc-50 border-r border-zinc-200 flex flex-col h-full shrink-0">
       <div className="h-14 px-4 border-b border-zinc-200 shrink-0 flex items-center">
         <button
-          onClick={() => onAddFolder(selectedFolderId)}
+          onClick={() => { setNewFolderParentId(selectedFolderId); setNewFolderName(""); }}
           className="inline-flex items-center justify-center w-9 h-9 text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
-          title="Add Folder"
+          title="New Folder"
         >
           <FolderPlus size={15} />
         </button>
@@ -107,7 +142,7 @@ export function FolderSidebar({
             depth={0}
             selectedFolderId={selectedFolderId}
             onSelectFolder={onSelectFolder}
-            onAddFolder={onAddFolder}
+            onOpenNewFolderDialog={parentId => { setNewFolderParentId(parentId); setNewFolderName(""); }}
             onOpenContextMenu={(folder, event) => {
               onSelectFolder(folder.id);
               setContextMenu({ folder, x: event.clientX, y: event.clientY });
@@ -133,6 +168,67 @@ export function FolderSidebar({
             <FilePenLine size={15} />
             <span>Rename Folder</span>
           </button>
+        </div>
+      )}
+
+      {newFolderParentId && (
+        <div
+          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px]"
+          onClick={() => { setNewFolderParentId(null); setNewFolderName(""); }}
+        >
+          <div
+            className="w-[calc(100%-24px)] max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-indigo-50 p-2 text-indigo-600">
+                <FolderPlus size={18} />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-900">New Folder</h3>
+                <p className="text-xs text-zinc-500">Create a new folder in your library.</p>
+              </div>
+            </div>
+
+            <form
+              className="mt-4 space-y-4"
+              onSubmit={async e => {
+                e.preventDefault();
+                await submitNewFolder();
+              }}
+            >
+              <div>
+                <label className="mb-2 block text-xs font-medium text-zinc-500">Folder name</label>
+                <div className="flex items-center rounded-xl border border-zinc-200 bg-zinc-50 px-3 focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-400/15">
+                  <input
+                    ref={newFolderInputRef}
+                    type="text"
+                    value={newFolderName}
+                    onChange={e => setNewFolderName(e.target.value)}
+                    className="w-full bg-transparent py-2.5 text-sm text-zinc-800 outline-none"
+                    placeholder="Enter folder name"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setNewFolderParentId(null); setNewFolderName(""); }}
+                  className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!newFolderName.trim()}
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300"
+                >
+                  Create
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
@@ -212,14 +308,14 @@ function FolderTreeItem({
   depth,
   selectedFolderId,
   onSelectFolder,
-  onAddFolder,
+  onOpenNewFolderDialog,
   onOpenContextMenu,
 }: {
   node: FolderNode;
   depth: number;
   selectedFolderId: string;
   onSelectFolder: (id: string) => void;
-  onAddFolder: (parentId: string) => void;
+  onOpenNewFolderDialog: (parentId: string) => void;
   onOpenContextMenu: (folder: FolderNode, event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
   const [open, setOpen] = useState(true);
@@ -264,7 +360,7 @@ function FolderTreeItem({
         <button
           className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-indigo-500 transition-opacity shrink-0"
           title="New sub-folder"
-          onClick={e => { e.stopPropagation(); onAddFolder(node.id); }}
+          onClick={e => { e.stopPropagation(); onOpenNewFolderDialog(node.id); }}
         >
           <Plus size={12} />
         </button>
@@ -279,7 +375,7 @@ function FolderTreeItem({
               depth={depth + 1}
               selectedFolderId={selectedFolderId}
               onSelectFolder={onSelectFolder}
-              onAddFolder={onAddFolder}
+              onOpenNewFolderDialog={onOpenNewFolderDialog}
               onOpenContextMenu={onOpenContextMenu}
             />
           ))}

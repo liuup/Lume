@@ -81,6 +81,51 @@ struct CachedPdfMetadataRecord {
     meta: ParsedPdfMetadata,
 }
 
+#[derive(Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedPdfAnnotationsDocument {
+    #[serde(default = "default_annotation_version")]
+    version: u8,
+    #[serde(default)]
+    pages: HashMap<String, SavedPdfPageAnnotations>,
+}
+
+#[derive(Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedPdfPageAnnotations {
+    #[serde(default)]
+    paths: Vec<SavedAnnotationPath>,
+    #[serde(default)]
+    text_annotations: Vec<SavedTextAnnotation>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedAnnotationPath {
+    tool: String,
+    points: Vec<SavedAnnotationPoint>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedAnnotationPoint {
+    x: f32,
+    y: f32,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedTextAnnotation {
+    x: f32,
+    y: f32,
+    text: String,
+    font_size: f32,
+}
+
+fn default_annotation_version() -> u8 {
+    1
+}
+
 #[derive(Deserialize, Clone)]
 struct CrossrefWorkResponse {
     message: CrossrefWorkMessage,
@@ -747,6 +792,15 @@ fn metadata_cache_path(path: &Path) -> PathBuf {
     parent.join(format!(".{}.Lume-meta.json", file_name))
 }
 
+fn annotation_sidecar_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("document.pdf");
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    parent.join(format!(".{}.Lume-annotations.json", file_name))
+}
+
 fn file_signature(path: &Path) -> Option<(u64, u64)> {
     let metadata = fs::metadata(path).ok()?;
     let modified = metadata.modified().ok()?;
@@ -783,6 +837,50 @@ fn rename_cached_pdf_metadata(old_path: &Path, new_path: &Path) {
     }
 
     let _ = fs::rename(old_cache, new_cache);
+}
+
+fn read_annotation_sidecar(path: &Path) -> Option<SavedPdfAnnotationsDocument> {
+    let sidecar_path = annotation_sidecar_path(path);
+    let content = fs::read_to_string(sidecar_path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+fn write_annotation_sidecar(path: &Path, document: &SavedPdfAnnotationsDocument) -> Result<(), String> {
+    let sidecar_path = annotation_sidecar_path(path);
+    let content = serde_json::to_string_pretty(document)
+        .map_err(|e| format!("Failed to serialize annotations: {}", e))?;
+    fs::write(sidecar_path, content)
+        .map_err(|e| format!("Failed to write annotations: {}", e))
+}
+
+fn remove_annotation_sidecar(path: &Path) {
+    let _ = fs::remove_file(annotation_sidecar_path(path));
+}
+
+fn rename_annotation_sidecar(old_path: &Path, new_path: &Path) {
+    let old_sidecar = annotation_sidecar_path(old_path);
+    let new_sidecar = annotation_sidecar_path(new_path);
+
+    if old_sidecar == new_sidecar || !old_sidecar.exists() {
+        return;
+    }
+
+    let _ = fs::rename(old_sidecar, new_sidecar);
+}
+
+fn copy_annotation_sidecar(source_path: &Path, target_path: &Path) {
+    let source_sidecar = annotation_sidecar_path(source_path);
+    let target_sidecar = annotation_sidecar_path(target_path);
+
+    if !source_sidecar.exists() || source_sidecar == target_sidecar {
+        return;
+    }
+
+    let _ = fs::copy(source_sidecar, target_sidecar);
+}
+
+fn is_annotation_payload_empty(payload: &SavedPdfPageAnnotations) -> bool {
+    payload.paths.is_empty() && payload.text_annotations.is_empty()
 }
 
 fn merge_page_text_nodes(page: &PdfPage<'_>) -> Result<Vec<TextNode>, String> {
@@ -1375,6 +1473,53 @@ fn load_library_tree(app: tauri::AppHandle) -> Result<Vec<LibraryFolderNode>, St
 }
 
 #[tauri::command]
+fn load_pdf_annotations(path: String, page_index: u16) -> Result<SavedPdfPageAnnotations, String> {
+    let pdf_path = PathBuf::from(&path);
+    if !pdf_path.exists() {
+        return Err("PDF does not exist".to_string());
+    }
+
+    let Some(document) = read_annotation_sidecar(&pdf_path) else {
+        return Ok(SavedPdfPageAnnotations::default());
+    };
+
+    Ok(document
+        .pages
+        .get(&page_index.to_string())
+        .cloned()
+        .unwrap_or_default())
+}
+
+#[tauri::command]
+fn save_pdf_annotations(
+    path: String,
+    page_index: u16,
+    annotations: SavedPdfPageAnnotations,
+) -> Result<(), String> {
+    let pdf_path = PathBuf::from(&path);
+    if !pdf_path.exists() {
+        return Err("PDF does not exist".to_string());
+    }
+
+    let mut document = read_annotation_sidecar(&pdf_path).unwrap_or_default();
+    document.version = default_annotation_version();
+
+    let page_key = page_index.to_string();
+    if is_annotation_payload_empty(&annotations) {
+        document.pages.remove(&page_key);
+    } else {
+        document.pages.insert(page_key, annotations);
+    }
+
+    if document.pages.is_empty() {
+        remove_annotation_sidecar(&pdf_path);
+        return Ok(());
+    }
+
+    write_annotation_sidecar(&pdf_path, &document)
+}
+
+#[tauri::command]
 fn create_library_folder(parent_path: String, name: String) -> Result<String, String> {
     let trimmed_name = name.trim();
     if trimmed_name.is_empty() {
@@ -1417,6 +1562,7 @@ fn import_pdf_to_folder(source_path: String, folder_path: String) -> Result<Stri
 
     fs::copy(&source, &target)
         .map_err(|e| format!("Failed to import PDF: {}", e))?;
+    copy_annotation_sidecar(&source, &target);
 
     let resolved_meta = resolve_pdf_metadata(&target);
 
@@ -1441,6 +1587,7 @@ fn import_pdf_to_folder(source_path: String, folder_path: String) -> Result<Stri
 
     if final_path != target {
         rename_cached_pdf_metadata(&target, &final_path);
+        rename_annotation_sidecar(&target, &final_path);
     }
 
     Ok(final_path.to_string_lossy().to_string())
@@ -1467,6 +1614,7 @@ fn delete_library_pdf(path: String, state: State<'_, AppState>) -> Result<(), St
         .map_err(|e| format!("Failed to delete PDF: {}", e))?;
 
     remove_cached_pdf_metadata(&target);
+    remove_annotation_sidecar(&target);
 
     Ok(())
 }
@@ -1511,6 +1659,7 @@ fn rename_library_pdf(path: String, new_name: String, state: State<'_, AppState>
         .map_err(|e| format!("Failed to rename PDF: {}", e))?;
 
     rename_cached_pdf_metadata(&source, &target);
+    rename_annotation_sidecar(&source, &target);
 
     Ok(target.to_string_lossy().to_string())
 }
@@ -1917,6 +2066,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             load_library_tree,
+            load_pdf_annotations,
+            save_pdf_annotations,
             create_library_folder,
             import_pdf_to_folder,
             delete_library_pdf,

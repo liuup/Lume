@@ -265,7 +265,7 @@ function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool, shouldPr
         )}
         
         <TextLayer pdfPath={pdfPath} pageIndex={pageIndex} scale={scale} width={width} height={height} isVisible={isVisible} shouldLoad={shouldLoadText} />
-        <AnnotationLayer pageIndex={pageIndex} width={width} height={height} scale={scale} activeTool={activeTool} />
+        <AnnotationLayer pdfPath={pdfPath} pageIndex={pageIndex} width={width} height={height} scale={scale} activeTool={activeTool} />
       </div>
     </div>
   );

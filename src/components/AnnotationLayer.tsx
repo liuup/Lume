@@ -1,7 +1,9 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ToolType } from "../App";
 
 interface AnnotationLayerProps {
+  pdfPath: string;
   pageIndex: number;
   width: number;
   height: number;
@@ -17,6 +19,11 @@ interface Point {
 interface Path {
   tool: ToolType;
   points: Point[];
+}
+
+interface SavedPageAnnotations {
+  paths: Path[];
+  textAnnotations: TextAnnotation[];
 }
 
 /** A committed text annotation (stores unscaled position + content). */
@@ -38,9 +45,11 @@ interface ActiveTextInput {
 const BASE_FONT_SIZE = 13;
 const FONT_FAMILY = "system-ui, -apple-system, sans-serif";
 
-export function AnnotationLayer({ pageIndex: _pageIndex, width, height, scale, activeTool }: AnnotationLayerProps) {
+export function AnnotationLayer({ pdfPath, pageIndex, width, height, scale, activeTool }: AnnotationLayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const hasLoadedAnnotationsRef = useRef(false);
+  const latestSaveRequestRef = useRef(0);
 
   const [paths, setPaths] = useState<Path[]>([]);
   const [currentPath, setCurrentPath] = useState<Path | null>(null);
@@ -48,6 +57,59 @@ export function AnnotationLayer({ pageIndex: _pageIndex, width, height, scale, a
 
   const [textAnnotations, setTextAnnotations] = useState<TextAnnotation[]>([]);
   const [activeTextInput, setActiveTextInput] = useState<ActiveTextInput | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    hasLoadedAnnotationsRef.current = false;
+    setPaths([]);
+    setCurrentPath(null);
+    setIsDrawing(false);
+    setTextAnnotations([]);
+    setActiveTextInput(null);
+
+    invoke<SavedPageAnnotations>("load_pdf_annotations", { path: pdfPath, pageIndex })
+      .then((saved) => {
+        if (!isMounted) return;
+        setPaths(saved.paths ?? []);
+        setTextAnnotations(saved.textAnnotations ?? []);
+      })
+      .catch((error) => {
+        console.error(`Failed to load annotations for page ${pageIndex + 1}`, error);
+      })
+      .finally(() => {
+        if (isMounted) {
+          hasLoadedAnnotationsRef.current = true;
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [pdfPath, pageIndex]);
+
+  useEffect(() => {
+    if (!hasLoadedAnnotationsRef.current) return;
+
+    const requestId = latestSaveRequestRef.current + 1;
+    latestSaveRequestRef.current = requestId;
+
+    const timer = window.setTimeout(() => {
+      const payload: SavedPageAnnotations = {
+        paths,
+        textAnnotations,
+      };
+
+      invoke("save_pdf_annotations", { path: pdfPath, pageIndex, annotations: payload }).catch((error) => {
+        if (latestSaveRequestRef.current === requestId) {
+          console.error(`Failed to save annotations for page ${pageIndex + 1}`, error);
+        }
+      });
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [paths, textAnnotations, pdfPath, pageIndex]);
 
   // ── Canvas redraw ────────────────────────────────────────────────────────────
   useEffect(() => {

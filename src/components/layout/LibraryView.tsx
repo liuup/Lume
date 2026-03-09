@@ -33,30 +33,30 @@ export function LibraryView({
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
 
-  // Collect PDFs from the selected folder
-  function getSelectedFolderPdfs(nodes: FolderNode[]): PdfEntry[] {
-    for (const n of nodes) {
-      if (n.id === selectedFolderId) return n.pdfs;
-      const nested = getSelectedFolderPdfs(n.children);
-      if (nested.length > 0 || n.children.find(c => c.id === selectedFolderId)) {
-        // recurse; but we need to also check nested
-      }
-      const fromChild = getDeepPdfs(n, selectedFolderId);
-      if (fromChild !== null) return fromChild;
-    }
-    return [];
-  }
-
-  function getDeepPdfs(node: FolderNode, targetId: string): PdfEntry[] | null {
-    if (node.id === targetId) return node.pdfs;
-    for (const child of node.children) {
-      const result = getDeepPdfs(child, targetId);
-      if (result !== null) return result;
+  function findFolderById(nodes: FolderNode[], id: string): FolderNode | null {
+    for (const node of nodes) {
+      if (node.id === id) return node;
+      const nested = findFolderById(node.children, id);
+      if (nested) return nested;
     }
     return null;
   }
 
-  const folderPdfs = getSelectedFolderPdfs(folderTree);
+  function collectAllPdfs(node: FolderNode): PdfEntry[] {
+    return [
+      ...node.pdfs,
+      ...node.children.flatMap(child => collectAllPdfs(child)),
+    ];
+  }
+
+  const rootFolder = folderTree[0] ?? null;
+  const selectedFolder = findFolderById(folderTree, selectedFolderId);
+
+  const folderPdfs = selectedFolder
+    ? rootFolder && selectedFolder.id === rootFolder.id
+      ? collectAllPdfs(selectedFolder)
+      : selectedFolder.pdfs
+    : [];
 
   const filteredPdfs = query.trim()
     ? folderPdfs.filter(p =>
