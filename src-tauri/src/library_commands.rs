@@ -777,3 +777,188 @@ pub fn rename_library_folder(
 
     Ok(target.to_string_lossy().to_string())
 }
+
+// ─────────────────────────────────────────────────────────────
+// Global Library Search
+// ─────────────────────────────────────────────────────────────
+
+pub fn fetch_item_tags(conn: &rusqlite::Connection, item_id: &str) -> Vec<String> {
+    let mut stmt = match conn.prepare(
+        "SELECT tag FROM item_tags WHERE item_id = ?1 ORDER BY tag",
+    ) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
+    stmt.query_map(rusqlite::params![item_id], |row| row.get::<_, String>(0))
+        .map(|iter| iter.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+}
+
+#[derive(serde::Deserialize)]
+pub struct SearchLibraryParams {
+    /// Free-text query string
+    pub query: String,
+    /// Field scope: "all" | "title" | "authors" | "year" | "doi" | "arxiv"
+    pub field: String,
+    /// Optional year equality filter (applied in addition to `query`)
+    pub year_filter: Option<String>,
+    /// Optional tag equality filters (AND-combined)
+    pub tag_filters: Vec<String>,
+}
+
+#[tauri::command]
+pub fn search_library(
+    params: SearchLibraryParams,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<Vec<crate::models::LibraryItem>, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+
+    let query_text = params.query.trim();
+    let pattern = format!("%{}%", query_text.to_lowercase());
+
+    let mut conditions: Vec<String> = Vec::new();
+    let mut param_values: Vec<String> = Vec::new();
+
+    // ── Main text query ──────────────────────────────────────
+    if !query_text.is_empty() {
+        match params.field.as_str() {
+            "title" => {
+                conditions.push("LOWER(i.title) LIKE ?".to_string());
+                param_values.push(pattern.clone());
+            }
+            "authors" => {
+                conditions.push("LOWER(i.authors) LIKE ?".to_string());
+                param_values.push(pattern.clone());
+            }
+            "year" => {
+                conditions.push("i.year = ?".to_string());
+                param_values.push(query_text.to_string());
+            }
+            "doi" => {
+                conditions.push("LOWER(i.doi) LIKE ?".to_string());
+                param_values.push(pattern.clone());
+            }
+            "arxiv" => {
+                conditions.push("LOWER(i.arxiv_id) LIKE ?".to_string());
+                param_values.push(pattern.clone());
+            }
+            _ => {
+                // "all" – search title, authors, DOI, arXiv, publication, abstract, and tags
+                conditions.push(
+                    "(LOWER(i.title) LIKE ? \
+                     OR LOWER(i.authors) LIKE ? \
+                     OR LOWER(i.doi) LIKE ? \
+                     OR LOWER(i.arxiv_id) LIKE ? \
+                     OR LOWER(i.publication) LIKE ? \
+                     OR LOWER(i.abstract) LIKE ? \
+                     OR EXISTS (SELECT 1 FROM item_tags it \
+                                WHERE it.item_id = i.id AND LOWER(it.tag) LIKE ?))"
+                        .to_string(),
+                );
+                for _ in 0..7 {
+                    param_values.push(pattern.clone());
+                }
+            }
+        }
+    }
+
+    // ── Year equality filter ─────────────────────────────────
+    if let Some(year) = &params.year_filter {
+        let y = year.trim();
+        if !y.is_empty() {
+            conditions.push("i.year = ?".to_string());
+            param_values.push(y.to_string());
+        }
+    }
+
+    // ── Tag equality filters (AND) ───────────────────────────
+    for tag in &params.tag_filters {
+        let t = tag.trim();
+        if !t.is_empty() {
+            conditions.push(
+                "EXISTS (SELECT 1 FROM item_tags it \
+                          WHERE it.item_id = i.id AND LOWER(it.tag) = ?)"
+                    .to_string(),
+            );
+            param_values.push(t.to_lowercase());
+        }
+    }
+
+    // Nothing to search for → return empty rather than the whole library
+    if conditions.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let sql = format!(
+        "SELECT DISTINCT i.id, i.item_type, i.title, i.authors, i.year, i.abstract, \
+                        i.doi, i.arxiv_id, i.publication, i.volume, i.issue, i.pages, \
+                        i.publisher, i.isbn, i.url, i.language, \
+                        i.date_added, i.date_modified, i.folder_path \
+         FROM items i \
+         WHERE {} \
+         ORDER BY i.title ASC \
+         LIMIT 200",
+        conditions.join(" AND ")
+    );
+
+    let mut stmt = conn.prepare(&sql).map_err(|e| format!("Prepare error: {}", e))?;
+
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(param_values.iter()), |row| {
+            Ok(crate::models::LibraryItem {
+                id: row.get(0)?,
+                item_type: row.get(1)?,
+                title: row.get(2)?,
+                authors: row.get(3)?,
+                year: row.get(4)?,
+                r#abstract: row.get(5)?,
+                doi: row.get(6)?,
+                arxiv_id: row.get(7)?,
+                publication: row.get(8)?,
+                volume: row.get(9)?,
+                issue: row.get(10)?,
+                pages: row.get(11)?,
+                publisher: row.get(12)?,
+                isbn: row.get(13)?,
+                url: row.get(14)?,
+                language: row.get(15)?,
+                date_added: row.get(16)?,
+                date_modified: row.get(17)?,
+                folder_path: row.get(18)?,
+                tags: Vec::new(),
+                attachments: Vec::new(),
+            })
+        })
+        .map_err(|e| format!("Query error: {}", e))?;
+
+    let mut items: Vec<crate::models::LibraryItem> = Vec::new();
+
+    for row in rows {
+        let mut item = row.map_err(|e| format!("Row error: {}", e))?;
+
+        // Enrich with tags
+        item.tags = fetch_item_tags(&conn, &item.id);
+
+        // Enrich with attachments
+        if let Ok(mut att_stmt) = conn.prepare(
+            "SELECT id, item_id, name, path, attachment_type \
+             FROM attachments WHERE item_id = ?1",
+        ) {
+            if let Ok(att_iter) = att_stmt.query_map(rusqlite::params![&item.id], |row| {
+                Ok(crate::models::LibraryAttachment {
+                    id: row.get(0)?,
+                    item_id: row.get(1)?,
+                    name: row.get(2)?,
+                    path: row.get(3)?,
+                    attachment_type: row.get(4)?,
+                })
+            }) {
+                item.attachments = att_iter.filter_map(|r| r.ok()).collect();
+            }
+        }
+
+        items.push(item);
+    }
+
+    Ok(items)
+}

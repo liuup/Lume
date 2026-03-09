@@ -1,6 +1,37 @@
-import { useEffect, useRef, useState } from "react";
-import { FilePenLine, FileText, FileUp, Search, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { FilePenLine, FileText, FileUp, Globe, Loader2, Search, Trash2 } from "lucide-react";
 import { FolderNode, LibraryItem } from "../../types";
+
+// ─── Search field types ──────────────────────────────────────────────────────
+
+type SearchField = "all" | "title" | "authors" | "year" | "doi" | "arxiv";
+
+const FIELD_LABELS: { id: SearchField; label: string }[] = [
+  { id: "all",     label: "All Fields" },
+  { id: "title",   label: "Title" },
+  { id: "authors", label: "Authors" },
+  { id: "year",    label: "Year" },
+  { id: "doi",     label: "DOI" },
+  { id: "arxiv",   label: "arXiv" },
+];
+
+// ─── Highlight utility ──────────────────────────────────────────────────────
+
+function highlightText(text: string, query: string): React.ReactNode {
+  if (!query.trim() || !text) return text;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx === -1) return text;
+  return (
+    <>
+      {text.slice(0, idx)}
+      <mark className="bg-amber-200 text-amber-900 rounded px-0.5 not-italic">
+        {text.slice(idx, idx + query.length)}
+      </mark>
+      {highlightText(text.slice(idx + query.length), query)}
+    </>
+  );
+}
 
 interface LibraryViewProps {
   folderTree: FolderNode[];
@@ -23,15 +54,21 @@ export function LibraryView({
   onDeleteItem,
   onRenameItem,
 }: LibraryViewProps) {
-  const [query, setQuery] = useState("");
-  const [contextMenu, setContextMenu] = useState<{
-    item: LibraryItem;
-    x: number;
-    y: number;
-  } | null>(null);
+  // Search state
+  const [query, setQuery]             = useState("");
+  const [searchField, setSearchField] = useState<SearchField>("all");
+  const [yearFilter, setYearFilter]   = useState("");
+  const [globalResults, setGlobalResults] = useState<LibraryItem[]>([]);
+  const [isSearching, setIsSearching]     = useState(false);
+
+  // UI state
+  const [contextMenu, setContextMenu] = useState<{ item: LibraryItem; x: number; y: number } | null>(null);
   const [renameTarget, setRenameTarget] = useState<LibraryItem | null>(null);
-  const [renameValue, setRenameValue] = useState("");
+  const [renameValue, setRenameValue]   = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const debounceRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Folder tree helpers ──────────────────────────────────────────────────
 
   function findFolderById(nodes: FolderNode[], id: string): FolderNode | null {
     for (const node of nodes) {
@@ -49,134 +86,215 @@ export function LibraryView({
     ];
   }
 
-  const rootFolder = folderTree[0] ?? null;
+  const rootFolder    = folderTree[0] ?? null;
   const selectedFolder = findFolderById(folderTree, selectedFolderId);
 
-  const folderItems = selectedFolder
+  const folderItems: LibraryItem[] = selectedFolder
     ? rootFolder && selectedFolder.id === rootFolder.id
       ? collectAllItems(selectedFolder)
       : selectedFolder.items
     : [];
 
-  const filteredItems = query.trim()
-    ? folderItems.filter(p =>
-        (p.attachments[0]?.name?.toLowerCase() || "").includes(query.toLowerCase()) ||
-        p.title?.toLowerCase().includes(query.toLowerCase()) ||
-        p.authors?.toLowerCase().includes(query.toLowerCase()) ||
-        p.doi?.toLowerCase().includes(query.toLowerCase()) ||
-        p.arxiv_id?.toLowerCase().includes(query.toLowerCase())
-      )
-    : folderItems;
+  // ── Global search via Tauri backend ─────────────────────────────────────
+
+  const isGlobalSearch = query.trim().length > 0 || yearFilter.trim().length > 0;
+
+  const runGlobalSearch = useCallback(
+    (q: string, field: SearchField, year: string) => {
+      if (!q.trim() && !year.trim()) {
+        setGlobalResults([]);
+        setIsSearching(false);
+        return;
+      }
+      setIsSearching(true);
+      invoke<LibraryItem[]>("search_library", {
+        params: { query: q.trim(), field, year_filter: year.trim() || null, tag_filters: [] },
+      })
+        .then(results => { setGlobalResults(results); setIsSearching(false); })
+        .catch(err   => { console.error("search_library error:", err); setIsSearching(false); });
+    },
+    []
+  );
+
+  // Debounced search trigger
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => runGlobalSearch(query, searchField, yearFilter), 280);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [query, searchField, yearFilter, runGlobalSearch]);
+
+  // Clear results when inputs become empty
+  useEffect(() => {
+    if (!query.trim() && !yearFilter.trim()) setGlobalResults([]);
+  }, [query, yearFilter]);
+
+  const displayItems = isGlobalSearch ? globalResults : folderItems;
+
+  // ── Context menu listener ────────────────────────────────────────────────
 
   useEffect(() => {
     if (!contextMenu) return;
-
     const closeMenu = () => setContextMenu(null);
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setContextMenu(null);
-      }
-    };
-
-    window.addEventListener("click", closeMenu);
-    window.addEventListener("scroll", closeMenu, true);
-    window.addEventListener("resize", closeMenu);
-    window.addEventListener("keydown", handleEscape);
-
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setContextMenu(null); };
+    window.addEventListener("click",   closeMenu);
+    window.addEventListener("scroll",  closeMenu, true);
+    window.addEventListener("resize",  closeMenu);
+    window.addEventListener("keydown", onEsc);
     return () => {
-      window.removeEventListener("click", closeMenu);
-      window.removeEventListener("scroll", closeMenu, true);
-      window.removeEventListener("resize", closeMenu);
-      window.removeEventListener("keydown", handleEscape);
+      window.removeEventListener("click",   closeMenu);
+      window.removeEventListener("scroll",  closeMenu, true);
+      window.removeEventListener("resize",  closeMenu);
+      window.removeEventListener("keydown", onEsc);
     };
   }, [contextMenu]);
 
+  // ── Rename dialog handler ────────────────────────────────────────────────
+
   useEffect(() => {
     if (!renameTarget) return;
-
     const frame = window.requestAnimationFrame(() => {
       renameInputRef.current?.focus();
       renameInputRef.current?.select();
     });
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setRenameTarget(null);
-        setRenameValue("");
-      }
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setRenameTarget(null); setRenameValue(""); }
     };
-
-    window.addEventListener("keydown", handleEscape);
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener("keydown", handleEscape);
-    };
+    window.addEventListener("keydown", onEsc);
+    return () => { window.cancelAnimationFrame(frame); window.removeEventListener("keydown", onEsc); };
   }, [renameTarget]);
 
-  const menuX = contextMenu ? Math.min(contextMenu.x, window.innerWidth - 184) : 0;
-  const menuY = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 56) : 0;
+  const menuX = contextMenu ? Math.min(contextMenu.x, window.innerWidth  - 184) : 0;
+  const menuY = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 56)  : 0;
 
   const submitRename = async () => {
     if (!renameTarget) return;
-
     const trimmedName = renameValue.trim();
     if (!trimmedName) return;
-
     await onRenameItem(renameTarget, trimmedName);
     setRenameTarget(null);
     setRenameValue("");
   };
 
+  const folderLabel = selectedFolder?.name ?? "My Library";
+
   return (
     <div className="flex-1 min-w-0 flex flex-col h-full bg-white relative">
-      {/* Search Header */}
-      <div className="h-14 border-b border-zinc-200 flex items-center gap-3 px-6 shrink-0 bg-white/80 backdrop-blur-md sticky top-0 z-10 min-w-0">
-        <div className="relative min-w-0 flex-1 max-w-2xl">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
-          <input
-            type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Search by title, author, DOI, or arXiv ID..."
-            className="w-full pl-10 pr-4 py-2 bg-zinc-100 border-transparent focus:bg-white border focus:border-indigo-400 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-400/20 transition-all placeholder:text-zinc-400 shadow-sm"
-          />
+
+      {/* ── Search header ───────────────────────────────────── */}
+      <div className="border-b border-zinc-200 flex flex-col shrink-0 bg-white/80 backdrop-blur-md sticky top-0 z-10 min-w-0">
+
+        {/* Row 1 – search input + add button */}
+        <div className="h-14 flex items-center gap-3 px-6">
+          <div className="relative min-w-0 flex-1 max-w-2xl">
+            {isSearching
+              ? <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-400 animate-spin" size={16} />
+              : <Search  className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
+            }
+            <input
+              type="text"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder={
+                searchField === "title"   ? "Search by title..." :
+                searchField === "authors" ? "Search by author..." :
+                searchField === "year"    ? "Search by year, e.g. 2024..." :
+                searchField === "doi"     ? "Search by DOI..." :
+                searchField === "arxiv"   ? "Search by arXiv ID..." :
+                                            "Search across all fields..."
+              }
+              className="w-full pl-10 pr-4 py-2 bg-zinc-100 border-transparent focus:bg-white border focus:border-indigo-400 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-400/20 transition-all placeholder:text-zinc-400 shadow-sm"
+            />
+          </div>
+          <button
+            onClick={onAddItem}
+            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
+          >
+            <FileUp size={15} />
+            <span>Add Library Item</span>
+          </button>
         </div>
-        <button
-          onClick={onAddItem}
-          className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
-        >
-          <FileUp size={15} />
-          <span>Add Library Item</span>
-        </button>
+
+        {/* Row 2 – field filter pills + year input + scope indicator */}
+        <div className="flex items-center gap-2 px-6 pb-3 flex-wrap min-w-0">
+          {FIELD_LABELS.map(f => (
+            <button
+              key={f.id}
+              onClick={() => setSearchField(f.id)}
+              className={[
+                "px-3 py-1 rounded-full text-xs font-medium transition-colors border whitespace-nowrap",
+                searchField === f.id
+                  ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
+                  : "bg-white text-zinc-500 border-zinc-200 hover:border-indigo-300 hover:text-indigo-600",
+              ].join(" ")}
+            >
+              {f.label}
+            </button>
+          ))}
+
+          {/* Year filter */}
+          <div className="flex items-center gap-1.5 ml-1">
+            <span className="text-xs text-zinc-400">Year:</span>
+            <input
+              type="text"
+              value={yearFilter}
+              onChange={e => setYearFilter(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              placeholder="2024"
+              maxLength={4}
+              className="w-16 px-2 py-1 bg-zinc-100 border border-transparent focus:bg-white focus:border-indigo-400 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-400/20 transition-all placeholder:text-zinc-400"
+            />
+          </div>
+
+          {/* Right-aligned scope indicator */}
+          <div className="ml-auto flex items-center gap-1.5 text-xs text-zinc-400 shrink-0">
+            {isGlobalSearch ? (
+              <>
+                <Globe size={13} className="text-indigo-400 shrink-0" />
+                <span className="text-indigo-500 font-medium">
+                  {isSearching
+                    ? "Searching entire library…"
+                    : `${displayItems.length} result${displayItems.length !== 1 ? "s" : ""} across all library`}
+                </span>
+              </>
+            ) : (
+              <span>
+                {folderItems.length} paper{folderItems.length !== 1 ? "s" : ""} in{" "}
+                <strong className="text-zinc-600">{folderLabel}</strong>
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Item List */}
+      {/* ── Item list ───────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto p-6">
-        {filteredItems.length === 0 ? (
+        {displayItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-zinc-400 space-y-4 mt-10">
             <div className="w-16 h-16 bg-zinc-50 rounded-2xl flex items-center justify-center border border-zinc-200/60 shadow-sm">
               <FileText size={32} className="opacity-40" />
             </div>
-            <p className="text-sm">No items in this folder</p>
-            <p className="text-xs text-zinc-400">Use the Add Library Item button above to add a paper.</p>
+            {isGlobalSearch ? (
+              <p className="text-sm">{isSearching ? "Searching…" : "No results found"}</p>
+            ) : (
+              <>
+                <p className="text-sm">No items in this folder</p>
+                <p className="text-xs text-zinc-400">Use the Add Library Item button above to add a paper.</p>
+              </>
+            )}
           </div>
         ) : (
           <div className="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
-            {filteredItems.map(item => (
+            {displayItems.map(item => (
               <LibraryItemRow
                 key={item.id}
                 item={item}
                 isSelected={selectedItemId === item.id}
+                highlight={isGlobalSearch ? query : ""}
+                showFolderPath={isGlobalSearch}
                 onSelect={() => onSelectItem(item.id)}
                 onOpen={() => onOpenItem(item)}
                 onContextMenu={event => {
                   onSelectItem(item.id);
-                  setContextMenu({
-                    item,
-                    x: event.clientX,
-                    y: event.clientY,
-                  });
+                  setContextMenu({ item, x: event.clientX, y: event.clientY });
                 }}
               />
             ))}
@@ -184,6 +302,7 @@ export function LibraryView({
         )}
       </div>
 
+      {/* ── Context menu ────────────────────────────────────── */}
       {contextMenu && (
         <div
           className="fixed z-50 min-w-44 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-[0_12px_40px_rgba(0,0,0,0.14)]"
@@ -285,69 +404,97 @@ export function LibraryView({
   );
 }
 
-function formatAuthorsForList(authors: string) {
-  if (authors === "—") {
-    return "Unknown Author";
-  }
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
-  const parts = authors
-    .split(",")
-    .map(part => part.trim())
-    .filter(Boolean);
-
-  if (parts.length <= 3) {
-    return authors;
-  }
-
+function formatAuthorsForList(authors: string): string {
+  if (authors === "—") return "Unknown Author";
+  const parts = authors.split(",").map(p => p.trim()).filter(Boolean);
+  if (parts.length <= 3) return authors;
   return `${parts.slice(0, 3).join(", ")}, etc.`;
 }
+
+/** Derive a display-friendly folder label from a filesystem item id */
+function folderPathLabel(itemId: string): string {
+  const segments = itemId.split("/");
+  const libIdx   = segments.findIndex(s => s === "library");
+  if (libIdx !== -1) {
+    const relative = segments.slice(libIdx + 1, -1);
+    return relative.length > 0 ? relative.join(" / ") : "My Library";
+  }
+  return segments.length > 2 ? segments[segments.length - 2] : "My Library";
+}
+
+// ─── LibraryItemRow ──────────────────────────────────────────────────────────
 
 function LibraryItemRow({
   item,
   isSelected,
+  highlight,
+  showFolderPath,
   onSelect,
   onOpen,
   onContextMenu,
 }: {
   item: LibraryItem;
   isSelected: boolean;
+  highlight: string;
+  showFolderPath: boolean;
   onSelect: () => void;
   onOpen: () => void;
   onContextMenu: (event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
+  const displayTitle   = item.title || item.attachments[0]?.name || "Untitled";
+  const displayAuthors = formatAuthorsForList(item.authors);
+
   return (
     <div
       className={`group flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors select-none ${
-        isSelected
-          ? "bg-indigo-50"
-          : "bg-white hover:bg-zinc-50"
+        isSelected ? "bg-indigo-50" : "bg-white hover:bg-zinc-50"
       }`}
       onClick={onSelect}
       onDoubleClick={onOpen}
-      onContextMenu={e => {
-        e.preventDefault();
-        e.stopPropagation();
-        onContextMenu(e);
-      }}
+      onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu(e); }}
       title="Double-click to open"
     >
-      <div className={`p-2 rounded-lg shrink-0 ${isSelected ? "bg-indigo-100 text-indigo-600" : "bg-zinc-100 text-zinc-500 group-hover:text-indigo-500 transition-colors"}`}>
+      <div className={`p-2 rounded-lg shrink-0 ${
+        isSelected ? "bg-indigo-100 text-indigo-600" : "bg-zinc-100 text-zinc-500 group-hover:text-indigo-500 transition-colors"
+      }`}>
         <FileText size={16} />
       </div>
 
       <div className="min-w-0 flex-1">
         <h3 className="text-sm font-semibold text-zinc-800 truncate group-hover:text-indigo-900 transition-colors">
-          {item.title || item.attachments[0]?.name || "Untitled"}
+          {highlight ? highlightText(displayTitle, highlight) : displayTitle}
         </h3>
-        <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500 min-w-0">
+        <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500 min-w-0 flex-wrap">
           <span className="truncate">
-            {formatAuthorsForList(item.authors)}
+            {highlight ? highlightText(displayAuthors, highlight) : displayAuthors}
           </span>
           <span className="text-zinc-300">•</span>
           <span className="shrink-0 text-zinc-400">
             {item.year !== "—" ? item.year : "No Year"}
           </span>
+          {item.tags && item.tags.length > 0 && (
+            <>
+              <span className="text-zinc-300">•</span>
+              <div className="flex items-center gap-1 flex-wrap">
+                {item.tags.slice(0, 3).map(tag => (
+                  <span key={tag} className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 text-[10px] font-medium border border-indigo-100">
+                    {tag}
+                  </span>
+                ))}
+                {item.tags.length > 3 && (
+                  <span className="text-zinc-400 text-[10px]">+{item.tags.length - 3}</span>
+                )}
+              </div>
+            </>
+          )}
         </div>
+        {showFolderPath && (
+          <div className="mt-0.5 text-[10px] text-zinc-400 truncate">
+            📁 {folderPathLabel(item.id)}
+          </div>
+        )}
       </div>
     </div>
   );

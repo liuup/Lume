@@ -56,6 +56,7 @@ pub fn run() {
             library_commands::delete_library_pdf,
             library_commands::rename_library_pdf,
             library_commands::rename_library_folder,
+            library_commands::search_library,
             metadata_fetch::update_item_metadata,
             pdf_handlers::load_pdf,
             pdf_handlers::get_pdf_dimensions,
