@@ -10,21 +10,36 @@ import { X } from "lucide-react";
 export type PageDimension = { width: number; height: number };
 export type ToolType = 'none' | 'draw' | 'highlight' | 'text-highlight';
 
-export interface PdfMeta {
+export interface Attachment {
+  id: string;
+  item_id: string;
+  name: string;
+  path: string;
+  attachment_type: string;
+}
+
+export interface LibraryItem {
+  id: string;
+  item_type: string;
   title: string;
   authors: string;
   year: string;
   abstract: string;
   doi: string;
-  arxivId: string;
+  arxiv_id: string;
+  publication: string;
+  volume: string;
+  issue: string;
+  pages: string;
+  publisher: string;
+  isbn: string;
+  url: string;
+  language: string;
+  date_added: string;
+  date_modified: string;
+  folder_path: string;
   tags: string[];
-}
-
-export interface PdfEntry {
-  id: string;
-  name: string;
-  path: string;
-  meta: PdfMeta;
+  attachments: Attachment[];
 }
 
 export interface FolderNode {
@@ -32,7 +47,7 @@ export interface FolderNode {
   name: string;
   path: string;
   children: FolderNode[];
-  pdfs: PdfEntry[];
+  items: LibraryItem[];
 }
 
 const DEFAULT_FOLDER: FolderNode = {
@@ -40,12 +55,12 @@ const DEFAULT_FOLDER: FolderNode = {
   name: "My Library",
   path: "",
   children: [],
-  pdfs: [],
+  items: [],
 };
 
 export interface OpenTab {
   id: string;
-  pdf: PdfEntry;
+  item: LibraryItem;
   totalPages: number;
   dimensions: PageDimension[];
   currentPage: number;
@@ -56,7 +71,7 @@ function App() {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
   const activeTab = openTabs.find(t => t.id === activeTabId) || null;
-  const pdfPath = activeTab?.pdf.path || null;
+  const pdfPath = activeTab?.item.attachments?.[0]?.path || null;
   const totalPages = activeTab?.totalPages || 0;
   const dimensions = activeTab?.dimensions || [];
   const currentPage = activeTab?.currentPage || 1;
@@ -64,10 +79,9 @@ function App() {
   const [activeTool, setActiveTool] = useState<ToolType>('none');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Library state
   const [folderTree, setFolderTree] = useState<FolderNode[]>([DEFAULT_FOLDER]);
   const [selectedFolderId, setSelectedFolderId] = useState<string>(DEFAULT_FOLDER.id);
-  const [selectedPdfId, setSelectedPdfId] = useState<string | null>(null);
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
 
   // Sync background Rust PDF context when switching tabs
@@ -106,23 +120,38 @@ function App() {
     return null;
   }
 
-  function createPdfEntry(path: string): PdfEntry {
+  function createLibraryItem(path: string): LibraryItem {
     const fileName = path.split("/").pop() ?? path;
     const baseName = fileName.replace(/\.pdf$/i, "");
 
     return {
       id: path,
-      name: baseName,
-      path,
-      meta: {
-        title: baseName,
-        authors: "—",
-        year: "—",
-        abstract: "",
-        doi: "",
-        arxivId: "",
-        tags: [],
-      },
+      item_type: "Journal Article",
+      title: baseName,
+      authors: "—",
+      year: "—",
+      abstract: "",
+      doi: "",
+      arxiv_id: "",
+      publication: "",
+      volume: "",
+      issue: "",
+      pages: "",
+      publisher: "",
+      isbn: "",
+      url: "",
+      language: "",
+      date_added: "",
+      date_modified: "",
+      folder_path: "",
+      tags: [],
+      attachments: [{
+        id: `att-${path}`,
+        item_id: path,
+        name: baseName,
+        path: path,
+        attachment_type: "PDF"
+      }],
     };
   }
 
@@ -164,15 +193,15 @@ function App() {
     };
   }, []);
 
-  // Add a PDF entry into the selected folder
-  function addPdfToFolder(path: string): PdfEntry {
-    const newPdf = createPdfEntry(path);
-    setSelectedPdfId(newPdf.id);
-    return newPdf;
+  // Add an Item entry into the selected folder
+  function addItemToFolder(path: string): LibraryItem {
+    const newItem = createLibraryItem(path);
+    setSelectedItemId(newItem.id);
+    return newItem;
   }
 
   // Handle adding a PDF via the open dialog (called from sidebar)
-  const handleAddPdf = async () => {
+  const handleAddItem = async () => {
     const { open } = await import("@tauri-apps/plugin-dialog");
     try {
       const targetFolder = findFolder(folderTree, selectedFolderId);
@@ -191,22 +220,22 @@ function App() {
         const pages: number = await invoke("load_pdf", { path: importedPath });
         const dims: PageDimension[] = await invoke("get_pdf_dimensions", { path: importedPath });
         const refreshedTree = await refreshLibrary(targetFolder.id);
-        const newPdf = findPdf(refreshedTree, importedPath) ?? addPdfToFolder(importedPath);
+        const newItem = findItem(refreshedTree, importedPath) ?? addItemToFolder(importedPath);
         
         setOpenTabs(prev => {
-          const existing = prev.find(tab => tab.id === newPdf.id);
+          const existing = prev.find(tab => tab.id === newItem.id);
           if (existing) return prev;
 
           return [...prev, {
-            id: newPdf.id,
-            pdf: newPdf,
+            id: newItem.id,
+            item: newItem,
             totalPages: pages,
             dimensions: dims,
             currentPage: 1
           }];
         });
-        setActiveTabId(newPdf.id);
-        setSelectedPdfId(newPdf.id);
+        setActiveTabId(newItem.id);
+        setSelectedItemId(newItem.id);
         
         setIsLoading(false);
       }
@@ -216,25 +245,26 @@ function App() {
     }
   };
 
-  // Called when user double-clicks a PDF in the list — opens it in the viewer
-  const handleOpenPdf = async (pdf: PdfEntry) => {
-    if (openTabs.find(t => t.id === pdf.id)) {
-      setActiveTabId(pdf.id);
+  // Called when user double-clicks an Item in the list — opens it in the viewer (assuming it's a PDF)
+  const handleOpenItem = async (item: LibraryItem) => {
+    if (openTabs.find(t => t.id === item.id)) {
+      setActiveTabId(item.id);
       return;
     }
     try {
       setIsLoading(true);
-      const pages: number = await invoke("load_pdf", { path: pdf.path });
-      const dims: PageDimension[] = await invoke("get_pdf_dimensions", { path: pdf.path });
+      const pdfPath = item.attachments?.[0]?.path || item.id;
+      const pages: number = await invoke("load_pdf", { path: pdfPath });
+      const dims: PageDimension[] = await invoke("get_pdf_dimensions", { path: pdfPath });
       
       setOpenTabs(prev => [...prev, {
-        id: pdf.id,
-        pdf,
+        id: item.id,
+        item,
         totalPages: pages,
         dimensions: dims,
         currentPage: 1
       }]);
-      setActiveTabId(pdf.id);
+      setActiveTabId(item.id);
       
       setIsLoading(false);
     } catch (err) {
@@ -243,12 +273,12 @@ function App() {
     }
   };
 
-  // Find the currently selected PDF across all folders
-  function findPdf(nodes: FolderNode[], id: string): PdfEntry | null {
+  // Find the currently selected Item across all folders
+  function findItem(nodes: FolderNode[], id: string): LibraryItem | null {
     for (const n of nodes) {
-      const found = n.pdfs.find(p => p.id === id);
+      const found = n.items.find(p => p.id === id);
       if (found) return found;
-      const deep = findPdf(n.children, id);
+      const deep = findItem(n.children, id);
       if (deep) return deep;
     }
     return null;
@@ -261,7 +291,7 @@ function App() {
       if (activeTabId === id) {
         const nextActiveId = next.length > 0 ? next[next.length - 1].id : 'library';
         setActiveTabId(nextActiveId);
-        if (nextActiveId && nextActiveId !== 'library') setSelectedPdfId(nextActiveId);
+        if (nextActiveId && nextActiveId !== 'library') setSelectedItemId(nextActiveId);
       }
       return next;
     });
@@ -324,7 +354,7 @@ function App() {
     }
   };
 
-  const selectedPdf = selectedPdfId ? findPdf(folderTree, selectedPdfId) : null;
+  const selectedItem = selectedItemId ? findItem(folderTree, selectedItemId) : null;
   const isLibrary = activeTabId === 'library' || activeTabId === null;
 
   const handleAddFolder = async (parentId: string, name: string) => {
@@ -347,53 +377,53 @@ function App() {
     }
   };
 
-  const handleDeletePdf = async (pdf: PdfEntry) => {
+  const handleDeleteItem = async (item: LibraryItem) => {
     try {
-      await invoke("delete_library_pdf", { path: pdf.path });
+      await invoke("delete_library_pdf", { path: item.id });
       await refreshLibrary(selectedFolderId);
 
       setOpenTabs(prev => {
-        const next = prev.filter(tab => tab.id !== pdf.id);
-        if (activeTabId === pdf.id) {
+        const next = prev.filter(tab => tab.id !== item.id);
+        if (activeTabId === item.id) {
           setActiveTabId(next.length > 0 ? next[next.length - 1].id : "library");
         }
         return next;
       });
 
-      setSelectedPdfId(prev => prev === pdf.id ? null : prev);
+      setSelectedItemId(prev => prev === item.id ? null : prev);
     } catch (err) {
-      console.error("Failed to delete PDF", err);
-      window.alert("Failed to delete PDF.");
+      console.error("Failed to delete Item", err);
+      window.alert("Failed to delete Item.");
     }
   };
 
-  const handleRenamePdf = async (pdf: PdfEntry, nextName: string) => {
+  const handleRenameItem = async (item: LibraryItem, nextName: string) => {
     const trimmedName = nextName.trim();
-    if (!trimmedName || trimmedName === (pdf.meta.title || pdf.name)) return;
+    if (!trimmedName || trimmedName === (item.title || item.attachments[0]?.name)) return;
 
     try {
       const renamedPath: string = await invoke("rename_library_pdf", {
-        path: pdf.path,
+        path: item.id,
         newName: trimmedName,
       });
 
       const refreshedTree = await refreshLibrary(selectedFolderId);
-      const renamedPdf = findPdf(refreshedTree, renamedPath) ?? createPdfEntry(renamedPath);
+      const renamedItem = findItem(refreshedTree, renamedPath) ?? createLibraryItem(renamedPath);
 
       setOpenTabs(prev => prev.map(tab => {
-        if (tab.id !== pdf.id) return tab;
+        if (tab.id !== item.id) return tab;
         return {
           ...tab,
-          id: renamedPdf.id,
-          pdf: renamedPdf,
+          id: renamedItem.id,
+          item: renamedItem,
         };
       }));
 
-      setSelectedPdfId(prev => prev === pdf.id ? renamedPdf.id : prev);
-      setActiveTabId(prev => prev === pdf.id ? renamedPdf.id : prev);
+      setSelectedItemId(prev => prev === item.id ? renamedItem.id : prev);
+      setActiveTabId(prev => prev === item.id ? renamedItem.id : prev);
     } catch (err) {
-      console.error("Failed to rename PDF", err);
-      window.alert("Failed to rename PDF.");
+      console.error("Failed to rename Item", err);
+      window.alert("Failed to rename Item.");
     }
   };
 
@@ -408,7 +438,7 @@ function App() {
       });
 
       const nextSelectedFolderId = replacePathPrefix(selectedFolderId, folder.path, renamedPath);
-      const nextSelectedPdfId = selectedPdfId ? replacePathPrefix(selectedPdfId, folder.path, renamedPath) : null;
+      const nextSelectedItemId = selectedItemId ? replacePathPrefix(selectedItemId, folder.path, renamedPath) : null;
       const nextActiveTabId = activeTabId && activeTabId !== "library"
         ? replacePathPrefix(activeTabId, folder.path, renamedPath)
         : activeTabId;
@@ -420,18 +450,18 @@ function App() {
           return tab;
         }
 
-        const renamedPdfPath = replacePathPrefix(tab.pdf.path, folder.path, renamedPath);
-        const renamedPdf = findPdf(refreshedTree, renamedPdfPath) ?? createPdfEntry(renamedPdfPath);
+        const renamedItemPath = replacePathPrefix(tab.item.attachments[0]?.path || tab.item.id, folder.path, renamedPath);
+        const renamedItem = findItem(refreshedTree, renamedItemPath) ?? createLibraryItem(renamedItemPath);
 
         return {
           ...tab,
-          id: renamedPdf.id,
-          pdf: renamedPdf,
+          id: renamedItem.id,
+          item: renamedItem,
         };
       }));
 
       setSelectedFolderId(nextSelectedFolderId);
-      setSelectedPdfId(nextSelectedPdfId);
+      setSelectedItemId(nextSelectedItemId);
       setActiveTabId(nextActiveTabId);
     } catch (err) {
       console.error("Failed to rename folder", err);
@@ -477,7 +507,7 @@ function App() {
                 key={tab.id}
                 onClick={() => {
                   setActiveTabId(tab.id);
-                  setSelectedPdfId(tab.id);
+                  setSelectedItemId(tab.id);
                 }}
                 className={[
                   "group flex items-center gap-1.5 px-3 h-[26px] min-w-[100px] max-w-[180px]",
@@ -488,8 +518,8 @@ function App() {
                 ].join(" ")}
               >
                 
-                <span className="truncate flex-1" title={tab.pdf.meta.title || tab.pdf.name}>
-                  {tab.pdf.meta.title || tab.pdf.name}
+                <span className="truncate flex-1" title={tab.item.title || tab.item.attachments[0]?.name}>
+                  {tab.item.title || tab.item.attachments[0]?.name}
                 </span>
                 
                 <button
@@ -527,12 +557,12 @@ function App() {
             <LibraryView 
               folderTree={folderTree}
               selectedFolderId={selectedFolderId}
-              selectedPdfId={selectedPdfId}
-              onSelectPdf={setSelectedPdfId}
-              onOpenPdf={handleOpenPdf}
-              onAddPdf={handleAddPdf}
-              onDeletePdf={handleDeletePdf}
-              onRenamePdf={handleRenamePdf}
+              selectedItemId={selectedItemId}
+              onSelectItem={setSelectedItemId}
+              onOpenItem={handleOpenItem}
+              onAddItem={handleAddItem}
+              onDeleteItem={handleDeleteItem}
+              onRenameItem={handleRenameItem}
             />
           </>
         ) : (
@@ -570,7 +600,7 @@ function App() {
                   onScroll={handleScroll}
                 >
                   <PdfViewer 
-                    pdfPath={tab.pdf.path}
+                    pdfPath={tab.item.attachments?.[0]?.path || ""}
                     totalPages={tab.totalPages} 
                     dimensions={tab.dimensions} 
                     scale={scale} 
@@ -585,7 +615,7 @@ function App() {
 
         {!isLibrary && (
           <MetaPanel
-            selectedPdf={selectedPdf}
+            selectedItem={selectedItem}
             isOpen={isRightPanelOpen}
             onClose={() => setIsRightPanelOpen(false)}
           />

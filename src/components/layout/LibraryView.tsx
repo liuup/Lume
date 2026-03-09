@@ -1,35 +1,35 @@
 import { useEffect, useRef, useState } from "react";
 import { FilePenLine, FileText, FileUp, Search, Trash2 } from "lucide-react";
-import { FolderNode, PdfEntry } from "../../App";
+import { FolderNode, LibraryItem } from "../../App";
 
 interface LibraryViewProps {
   folderTree: FolderNode[];
   selectedFolderId: string;
-  selectedPdfId: string | null;
-  onSelectPdf: (id: string) => void;
-  onOpenPdf: (pdf: PdfEntry) => void;
-  onAddPdf: () => void;
-  onDeletePdf: (pdf: PdfEntry) => void;
-  onRenamePdf: (pdf: PdfEntry, nextName: string) => Promise<void> | void;
+  selectedItemId: string | null;
+  onSelectItem: (id: string) => void;
+  onOpenItem: (item: LibraryItem) => void;
+  onAddItem: () => void;
+  onDeleteItem: (item: LibraryItem) => void;
+  onRenameItem: (item: LibraryItem, nextName: string) => Promise<void> | void;
 }
 
 export function LibraryView({
   folderTree,
   selectedFolderId,
-  selectedPdfId,
-  onSelectPdf,
-  onOpenPdf,
-  onAddPdf,
-  onDeletePdf,
-  onRenamePdf,
+  selectedItemId,
+  onSelectItem,
+  onOpenItem,
+  onAddItem,
+  onDeleteItem,
+  onRenameItem,
 }: LibraryViewProps) {
   const [query, setQuery] = useState("");
   const [contextMenu, setContextMenu] = useState<{
-    pdf: PdfEntry;
+    item: LibraryItem;
     x: number;
     y: number;
   } | null>(null);
-  const [renameTarget, setRenameTarget] = useState<PdfEntry | null>(null);
+  const [renameTarget, setRenameTarget] = useState<LibraryItem | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
 
@@ -42,31 +42,31 @@ export function LibraryView({
     return null;
   }
 
-  function collectAllPdfs(node: FolderNode): PdfEntry[] {
+  function collectAllItems(node: FolderNode): LibraryItem[] {
     return [
-      ...node.pdfs,
-      ...node.children.flatMap(child => collectAllPdfs(child)),
+      ...node.items,
+      ...node.children.flatMap(child => collectAllItems(child)),
     ];
   }
 
   const rootFolder = folderTree[0] ?? null;
   const selectedFolder = findFolderById(folderTree, selectedFolderId);
 
-  const folderPdfs = selectedFolder
+  const folderItems = selectedFolder
     ? rootFolder && selectedFolder.id === rootFolder.id
-      ? collectAllPdfs(selectedFolder)
-      : selectedFolder.pdfs
+      ? collectAllItems(selectedFolder)
+      : selectedFolder.items
     : [];
 
-  const filteredPdfs = query.trim()
-    ? folderPdfs.filter(p =>
-        p.name.toLowerCase().includes(query.toLowerCase()) ||
-        p.meta.title.toLowerCase().includes(query.toLowerCase()) ||
-        p.meta.authors.toLowerCase().includes(query.toLowerCase()) ||
-        p.meta.doi.toLowerCase().includes(query.toLowerCase()) ||
-        p.meta.arxivId.toLowerCase().includes(query.toLowerCase())
+  const filteredItems = query.trim()
+    ? folderItems.filter(p =>
+        (p.attachments[0]?.name?.toLowerCase() || "").includes(query.toLowerCase()) ||
+        p.title?.toLowerCase().includes(query.toLowerCase()) ||
+        p.authors?.toLowerCase().includes(query.toLowerCase()) ||
+        p.doi?.toLowerCase().includes(query.toLowerCase()) ||
+        p.arxiv_id?.toLowerCase().includes(query.toLowerCase())
       )
-    : folderPdfs;
+    : folderItems;
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -123,7 +123,7 @@ export function LibraryView({
     const trimmedName = renameValue.trim();
     if (!trimmedName) return;
 
-    await onRenamePdf(renameTarget, trimmedName);
+    await onRenameItem(renameTarget, trimmedName);
     setRenameTarget(null);
     setRenameValue("");
   };
@@ -143,37 +143,37 @@ export function LibraryView({
           />
         </div>
         <button
-          onClick={onAddPdf}
+          onClick={onAddItem}
           className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
         >
           <FileUp size={15} />
-          <span>Import PDF</span>
+          <span>Add Library Item</span>
         </button>
       </div>
 
-      {/* PDF List */}
+      {/* Item List */}
       <div className="flex-1 overflow-y-auto p-6">
-        {filteredPdfs.length === 0 ? (
+        {filteredItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-zinc-400 space-y-4 mt-10">
             <div className="w-16 h-16 bg-zinc-50 rounded-2xl flex items-center justify-center border border-zinc-200/60 shadow-sm">
               <FileText size={32} className="opacity-40" />
             </div>
-            <p className="text-sm">No PDFs in this folder</p>
-            <p className="text-xs text-zinc-400">Use the Import PDF button above to add a paper.</p>
+            <p className="text-sm">No items in this folder</p>
+            <p className="text-xs text-zinc-400">Use the Add Library Item button above to add a paper.</p>
           </div>
         ) : (
           <div className="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
-            {filteredPdfs.map(pdf => (
-              <PdfListItem
-                key={pdf.id}
-                pdf={pdf}
-                isSelected={selectedPdfId === pdf.id}
-                onSelect={() => onSelectPdf(pdf.id)}
-                onOpen={() => onOpenPdf(pdf)}
+            {filteredItems.map(item => (
+              <LibraryItemRow
+                key={item.id}
+                item={item}
+                isSelected={selectedItemId === item.id}
+                onSelect={() => onSelectItem(item.id)}
+                onOpen={() => onOpenItem(item)}
                 onContextMenu={event => {
-                  onSelectPdf(pdf.id);
+                  onSelectItem(item.id);
                   setContextMenu({
-                    pdf,
+                    item,
                     x: event.clientX,
                     y: event.clientY,
                   });
@@ -192,24 +192,24 @@ export function LibraryView({
         >
           <button
             onClick={() => {
-              setRenameTarget(contextMenu.pdf);
-              setRenameValue(contextMenu.pdf.meta.title || contextMenu.pdf.name);
+              setRenameTarget(contextMenu.item);
+              setRenameValue(contextMenu.item.title || contextMenu.item.attachments[0]?.name || "Untitled");
               setContextMenu(null);
             }}
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
           >
             <FilePenLine size={15} />
-            <span>Rename PDF</span>
+            <span>Rename Item</span>
           </button>
           <button
             onClick={() => {
-              onDeletePdf(contextMenu.pdf);
+              onDeleteItem(contextMenu.item);
               setContextMenu(null);
             }}
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
           >
             <Trash2 size={15} />
-            <span>Delete PDF</span>
+            <span>Delete Item</span>
           </button>
         </div>
       )}
@@ -302,14 +302,14 @@ function formatAuthorsForList(authors: string) {
   return `${parts.slice(0, 3).join(", ")}, etc.`;
 }
 
-function PdfListItem({
-  pdf,
+function LibraryItemRow({
+  item,
   isSelected,
   onSelect,
   onOpen,
   onContextMenu,
 }: {
-  pdf: PdfEntry;
+  item: LibraryItem;
   isSelected: boolean;
   onSelect: () => void;
   onOpen: () => void;
@@ -337,15 +337,15 @@ function PdfListItem({
 
       <div className="min-w-0 flex-1">
         <h3 className="text-sm font-semibold text-zinc-800 truncate group-hover:text-indigo-900 transition-colors">
-          {pdf.meta.title || pdf.name}
+          {item.title || item.attachments[0]?.name || "Untitled"}
         </h3>
         <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500 min-w-0">
           <span className="truncate">
-            {formatAuthorsForList(pdf.meta.authors)}
+            {formatAuthorsForList(item.authors)}
           </span>
           <span className="text-zinc-300">•</span>
           <span className="shrink-0 text-zinc-400">
-            {pdf.meta.year !== "—" ? pdf.meta.year : "No Year"}
+            {item.year !== "—" ? item.year : "No Year"}
           </span>
         </div>
       </div>

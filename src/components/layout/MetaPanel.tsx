@@ -1,13 +1,13 @@
 import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit } from "lucide-react";
-import { PdfEntry } from "../../App";
+import { LibraryItem } from "../../App";
 
 interface MetaPanelProps {
-  selectedPdf: PdfEntry | null;
+  selectedItem: LibraryItem | null;
   isOpen: boolean;
   onClose: () => void;
 }
 
-export function MetaPanel({ selectedPdf, isOpen, onClose }: MetaPanelProps) {
+export function MetaPanel({ selectedItem, isOpen, onClose }: MetaPanelProps) {
   if (!isOpen) return null;
 
   return (
@@ -25,7 +25,7 @@ export function MetaPanel({ selectedPdf, isOpen, onClose }: MetaPanelProps) {
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {!selectedPdf ? (
+        {!selectedItem ? (
           /* Empty state */
           <div className="flex flex-col items-center justify-center h-full text-zinc-300 space-y-3 px-6">
             <FileText size={36} className="opacity-40" />
@@ -38,11 +38,11 @@ export function MetaPanel({ selectedPdf, isOpen, onClose }: MetaPanelProps) {
             {/* Title & tags */}
             <div>
               <h3 className="text-base font-bold text-zinc-900 leading-tight">
-                {selectedPdf.meta.title || selectedPdf.name}
+                {selectedItem.title || selectedItem.attachments[0]?.name || "Untitled"}
               </h3>
-              {selectedPdf.meta.tags.length > 0 && (
+              {selectedItem.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-3">
-                  {selectedPdf.meta.tags.map(tag => (
+                  {selectedItem.tags.map(tag => (
                     <span
                       key={tag}
                       className="px-2 py-0.5 bg-indigo-50 text-indigo-700 text-[10px] font-semibold rounded-full uppercase tracking-wider"
@@ -57,42 +57,42 @@ export function MetaPanel({ selectedPdf, isOpen, onClose }: MetaPanelProps) {
             <div className="space-y-4">
               {/* Authors */}
               <MetaRow icon={<User size={15} className="text-zinc-400" />} label="Authors">
-                {selectedPdf.meta.authors !== "—" ? selectedPdf.meta.authors : (
+                {selectedItem.authors !== "—" ? selectedItem.authors : (
                   <span className="text-zinc-400 italic">Unknown</span>
                 )}
               </MetaRow>
 
               {/* Year */}
               <MetaRow icon={<Calendar size={15} className="text-zinc-400" />} label="Year">
-                {selectedPdf.meta.year !== "—" ? selectedPdf.meta.year : (
+                {selectedItem.year !== "—" ? selectedItem.year : (
                   <span className="text-zinc-400 italic">Unknown</span>
                 )}
               </MetaRow>
 
               {/* Abstract */}
-              {selectedPdf.meta.abstract ? (
+              {selectedItem.abstract ? (
                 <MetaRow icon={<AlignLeft size={15} className="text-zinc-400" />} label="Abstract">
-                  <p className="text-sm text-zinc-600 leading-relaxed">{selectedPdf.meta.abstract}</p>
+                  <p className="text-sm text-zinc-600 leading-relaxed">{selectedItem.abstract}</p>
                 </MetaRow>
               ) : null}
 
               {/* DOI */}
-              {selectedPdf.meta.doi ? (
+              {selectedItem.doi ? (
                 <MetaRow icon={<Fingerprint size={15} className="text-zinc-400" />} label="DOI">
-                  <span className="text-zinc-600 break-all">{selectedPdf.meta.doi}</span>
+                  <span className="text-zinc-600 break-all">{selectedItem.doi}</span>
                 </MetaRow>
               ) : null}
 
               {/* arXiv */}
-              {selectedPdf.meta.arxivId ? (
+              {selectedItem.arxiv_id ? (
                 <MetaRow icon={<Orbit size={15} className="text-zinc-400" />} label="arXiv">
-                  <span className="text-zinc-600 break-all">{selectedPdf.meta.arxivId}</span>
+                  <span className="text-zinc-600 break-all">{selectedItem.arxiv_id}</span>
                 </MetaRow>
               ) : null}
 
               {/* Filename */}
               <MetaRow icon={<Tag size={15} className="text-zinc-400" />} label="File">
-                <span className="text-zinc-500 text-xs font-mono break-all">{selectedPdf.name}.pdf</span>
+                <span className="text-zinc-500 text-xs font-mono break-all">{selectedItem.attachments[0]?.name || "None"}</span>
               </MetaRow>
             </div>
           </div>

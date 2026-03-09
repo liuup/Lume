@@ -5,6 +5,7 @@ use regex::Regex;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use rusqlite::{params, Connection, Result as SqlResult};
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -31,6 +32,7 @@ unsafe impl Sync for ThreadSafeDoc {}
 
 struct AppState {
     documents: Arc<Mutex<HashMap<String, Arc<Mutex<ThreadSafeDoc>>>>>,
+    db: Arc<Mutex<Connection>>,
 }
 
 #[derive(Serialize)]
@@ -46,11 +48,37 @@ struct LibraryPdfMeta {
 }
 
 #[derive(Serialize)]
-struct LibraryPdfEntry {
+struct LibraryAttachment {
     id: String,
+    item_id: String,
     name: String,
     path: String,
-    meta: LibraryPdfMeta,
+    attachment_type: String,
+}
+
+#[derive(Serialize)]
+struct LibraryItem {
+    id: String,
+    item_type: String,
+    title: String,
+    authors: String,
+    year: String,
+    r#abstract: String,
+    doi: String,
+    arxiv_id: String,
+    publication: String,
+    volume: String,
+    issue: String,
+    pages: String,
+    publisher: String,
+    isbn: String,
+    url: String,
+    language: String,
+    date_added: String,
+    date_modified: String,
+    folder_path: String,
+    tags: Vec<String>,
+    attachments: Vec<LibraryAttachment>,
 }
 
 #[derive(Serialize)]
@@ -59,7 +87,7 @@ struct LibraryFolderNode {
     name: String,
     path: String,
     children: Vec<LibraryFolderNode>,
-    pdfs: Vec<LibraryPdfEntry>,
+    items: Vec<LibraryItem>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -1376,7 +1404,7 @@ fn resolve_pdf_metadata(path: &Path) -> ParsedPdfMetadata {
     resolved
 }
 
-fn build_pdf_entry(path: &Path) -> LibraryPdfEntry {
+fn build_library_item(path: &Path) -> LibraryItem {
     let name = path
         .file_stem()
         .and_then(|value| value.to_str())
@@ -1400,23 +1428,135 @@ fn build_pdf_entry(path: &Path) -> LibraryPdfEntry {
     let doi = parsed.doi.clone().unwrap_or_default();
     let arxiv_id = parsed.arxiv_id.clone().unwrap_or_default();
 
-    LibraryPdfEntry {
-        id: path_str.clone(),
+    let attachment = LibraryAttachment {
+        id: format!("att-{}", path_str),
+        item_id: path_str.clone(),
         name: name.clone(),
-        path: path_str,
-        meta: LibraryPdfMeta {
-            title,
-            authors,
-            year,
-            r#abstract: abstract_text,
-            doi,
-            arxiv_id,
-            tags: Vec::new(),
-        },
+        path: path_str.clone(),
+        attachment_type: "PDF".to_string(),
+    };
+
+    LibraryItem {
+        id: path_str.clone(),
+        item_type: "Journal Article".to_string(),
+        title,
+        authors,
+        year,
+        r#abstract: abstract_text,
+        doi,
+        arxiv_id,
+        publication: String::new(),
+        volume: String::new(),
+        issue: String::new(),
+        pages: String::new(),
+        publisher: String::new(),
+        isbn: String::new(),
+        url: String::new(),
+        language: String::new(),
+        date_added: String::new(),
+        date_modified: String::new(),
+        folder_path: String::new(),
+        tags: Vec::new(),
+        attachments: vec![attachment],
     }
 }
 
-fn build_library_tree(path: &Path, is_root: bool) -> Result<LibraryFolderNode, String> {
+fn fetch_item_from_db(conn: &Connection, id: &str) -> SqlResult<Option<LibraryItem>> {
+    let mut stmt = conn.prepare("SELECT id, item_type, title, authors, year, abstract, doi, arxiv_id, publication, volume, issue, pages, publisher, isbn, url, language, date_added, date_modified, folder_path FROM items WHERE id = ?1")?;
+    let mut item_iter = stmt.query_map(rusqlite::params![id], |row| {
+        Ok(LibraryItem {
+            id: row.get(0)?,
+            item_type: row.get(1)?,
+            title: row.get(2)?,
+            authors: row.get(3)?,
+            year: row.get(4)?,
+            r#abstract: row.get(5)?,
+            doi: row.get(6)?,
+            arxiv_id: row.get(7)?,
+            publication: row.get(8)?,
+            volume: row.get(9)?,
+            issue: row.get(10)?,
+            pages: row.get(11)?,
+            publisher: row.get(12)?,
+            isbn: row.get(13)?,
+            url: row.get(14)?,
+            language: row.get(15)?,
+            date_added: row.get(16)?,
+            date_modified: row.get(17)?,
+            folder_path: row.get(18)?,
+            tags: Vec::new(),
+            attachments: Vec::new(),
+        })
+    })?;
+
+    if let Some(item_res) = item_iter.next() {
+        let mut item = item_res?;
+        let mut att_stmt = conn.prepare("SELECT id, item_id, name, path, attachment_type FROM attachments WHERE item_id = ?1")?;
+        let att_iter = att_stmt.query_map(rusqlite::params![id], |row| {
+            Ok(LibraryAttachment {
+                id: row.get(0)?,
+                item_id: row.get(1)?,
+                name: row.get(2)?,
+                path: row.get(3)?,
+                attachment_type: row.get(4)?,
+            })
+        })?;
+        let mut attachments = Vec::new();
+        for att in att_iter {
+            attachments.push(att?);
+        }
+        item.attachments = attachments;
+        Ok(Some(item))
+    } else {
+        Ok(None)
+    }
+}
+
+fn sync_item_to_db(conn: &Connection, item: &LibraryItem) -> SqlResult<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO items (id, item_type, title, authors, year, abstract, doi, arxiv_id, publication, volume, issue, pages, publisher, isbn, url, language, date_added, date_modified, folder_path)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+        rusqlite::params![
+            item.id,
+            item.item_type,
+            item.title,
+            item.authors,
+            item.year,
+            item.r#abstract,
+            item.doi,
+            item.arxiv_id,
+            item.publication,
+            item.volume,
+            item.issue,
+            item.pages,
+            item.publisher,
+            item.isbn,
+            item.url,
+            item.language,
+            item.date_added,
+            item.date_modified,
+            item.folder_path,
+        ],
+    )?;
+
+    for att in &item.attachments {
+        conn.execute(
+            "INSERT OR IGNORE INTO attachments (id, item_id, name, path, attachment_type)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                att.id,
+                att.item_id,
+                att.name,
+                att.path,
+                att.attachment_type,
+            ],
+        )?;
+    }
+    
+    Ok(())
+}
+
+fn build_library_tree(path: &Path, is_root: bool, conn: &Connection) -> Result<LibraryFolderNode, String> {
     fs::create_dir_all(path)
         .map_err(|e| format!("Failed to prepare library folder: {}", e))?;
 
@@ -1439,12 +1579,22 @@ fn build_library_tree(path: &Path, is_root: bool) -> Result<LibraryFolderNode, S
 
     let children = child_dirs
         .into_iter()
-        .map(|child| build_library_tree(&child, false))
+        .map(|child| build_library_tree(&child, false, conn))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let pdfs = pdf_paths
+    let items = pdf_paths
         .into_iter()
-        .map(|pdf| build_pdf_entry(&pdf))
+        .map(|pdf| {
+            let id = pdf.to_string_lossy().to_string();
+            match fetch_item_from_db(conn, &id).unwrap_or(None) {
+                Some(item) => item,
+                None => {
+                    let new_item = build_library_item(&pdf);
+                    let _ = sync_item_to_db(conn, &new_item);
+                    new_item
+                }
+            }
+        })
         .collect::<Vec<_>>();
 
     let name = if is_root {
@@ -1462,14 +1612,15 @@ fn build_library_tree(path: &Path, is_root: bool) -> Result<LibraryFolderNode, S
         name,
         path: path_str,
         children,
-        pdfs,
+        items,
     })
 }
 
 #[tauri::command]
-fn load_library_tree(app: tauri::AppHandle) -> Result<Vec<LibraryFolderNode>, String> {
+fn load_library_tree(app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<Vec<LibraryFolderNode>, String> {
     let root = library_root_dir(&app)?;
-    Ok(vec![build_library_tree(&root, true)?])
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    Ok(vec![build_library_tree(&root, true, &conn)?])
 }
 
 #[tauri::command]
@@ -1541,7 +1692,7 @@ fn create_library_folder(parent_path: String, name: String) -> Result<String, St
 }
 
 #[tauri::command]
-fn import_pdf_to_folder(source_path: String, folder_path: String) -> Result<String, String> {
+fn import_pdf_to_folder(source_path: String, folder_path: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
     let source = PathBuf::from(&source_path);
     if !source.exists() {
         return Err("Selected PDF does not exist".to_string());
@@ -1590,6 +1741,11 @@ fn import_pdf_to_folder(source_path: String, folder_path: String) -> Result<Stri
         rename_annotation_sidecar(&target, &final_path);
     }
 
+    if let Ok(conn) = state.db.lock() {
+        let new_item = build_library_item(&final_path);
+        let _ = sync_item_to_db(&conn, &new_item);
+    }
+
     Ok(final_path.to_string_lossy().to_string())
 }
 
@@ -1615,6 +1771,10 @@ fn delete_library_pdf(path: String, state: State<'_, AppState>) -> Result<(), St
 
     remove_cached_pdf_metadata(&target);
     remove_annotation_sidecar(&target);
+
+    if let Ok(conn) = state.db.lock() {
+        let _ = conn.execute("DELETE FROM items WHERE id = ?1", rusqlite::params![path]);
+    }
 
     Ok(())
 }
@@ -1661,7 +1821,22 @@ fn rename_library_pdf(path: String, new_name: String, state: State<'_, AppState>
     rename_cached_pdf_metadata(&source, &target);
     rename_annotation_sidecar(&source, &target);
 
-    Ok(target.to_string_lossy().to_string())
+    let target_path_str = target.to_string_lossy().to_string();
+    
+    if let Ok(conn) = state.db.lock() {
+        if let Ok(Some(mut item)) = fetch_item_from_db(&conn, &path) {
+            item.id = target_path_str.clone();
+            if let Some(att) = item.attachments.first_mut() {
+                att.id = format!("att-{}", target_path_str);
+                att.item_id = target_path_str.clone();
+                att.path = target_path_str.clone();
+            }
+            let _ = conn.execute("DELETE FROM items WHERE id = ?1", rusqlite::params![&path]);
+            let _ = sync_item_to_db(&conn, &item);
+        }
+    }
+
+    Ok(target_path_str)
 }
 
 #[tauri::command]
@@ -1718,6 +1893,19 @@ fn rename_library_folder(
 
     fs::rename(&source, &target)
         .map_err(|e| format!("Failed to rename folder: {}", e))?;
+
+    if let Ok(conn) = state.db.lock() {
+        let target_str = target.to_string_lossy().to_string();
+        let pattern = format!("{}%", path);
+        let _ = conn.execute(
+            "UPDATE items SET id = replace(id, ?1, ?2), folder_path = replace(folder_path, ?1, ?2) WHERE id LIKE ?3",
+            rusqlite::params![&path, &target_str, &pattern],
+        );
+        let _ = conn.execute(
+            "UPDATE attachments SET id = replace(id, ?1, ?2), item_id = replace(item_id, ?1, ?2), path = replace(path, ?1, ?2) WHERE item_id LIKE ?3",
+            rusqlite::params![&path, &target_str, &pattern],
+        );
+    }
 
     Ok(target.to_string_lossy().to_string())
 }
@@ -2038,6 +2226,63 @@ async fn render_page(
     Ok(format!("data:image/jpeg;base64,{}", base64_str))
 }
 
+fn init_db(app: &tauri::AppHandle) -> SqlResult<Connection> {
+    let db_path = library_root_dir(app)
+        .map_err(|e| rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(1), Some(e)))?
+        .join("lume_library.db");
+    
+    let conn = Connection::open(db_path)?;
+    
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS items (
+            id TEXT PRIMARY KEY,
+            item_type TEXT,
+            title TEXT,
+            authors TEXT,
+            year TEXT,
+            abstract TEXT,
+            doi TEXT,
+            arxiv_id TEXT,
+            publication TEXT,
+            volume TEXT,
+            issue TEXT,
+            pages TEXT,
+            publisher TEXT,
+            isbn TEXT,
+            url TEXT,
+            language TEXT,
+            date_added TEXT,
+            date_modified TEXT,
+            folder_path TEXT
+        )",
+        [],
+    )?;
+    
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS attachments (
+            id TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL,
+            name TEXT,
+            path TEXT,
+            attachment_type TEXT,
+            FOREIGN KEY(item_id) REFERENCES items(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS item_tags (
+            item_id TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            PRIMARY KEY (item_id, tag),
+            FOREIGN KEY(item_id) REFERENCES items(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+
+    Ok(conn)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2057,13 +2302,19 @@ pub fn run() {
                 let pdfium = Box::leak(Box::new(Pdfium::new(bindings)));
                 let _ = GLOBAL_PDFIUM.set(GlobalPdfium(pdfium));
             }
+            
+            let app_handle = app.handle();
+            let db_conn = init_db(&app_handle).expect("Failed to initialize database");
+            
+            app.manage(AppState {
+                documents: Arc::new(Mutex::new(HashMap::new())),
+                db: Arc::new(Mutex::new(db_conn)),
+            });
+            
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(AppState {
-            documents: Arc::new(Mutex::new(HashMap::new())),
-        })
         .invoke_handler(tauri::generate_handler![
             load_library_tree,
             load_pdf_annotations,
