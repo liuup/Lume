@@ -5,6 +5,7 @@ import { PdfViewer } from "./components/PdfViewer";
 import { FolderSidebar } from "./components/layout/FolderSidebar";
 import { LibraryView } from "./components/layout/LibraryView";
 import { MetaPanel } from "./components/layout/MetaPanel";
+import { SearchBar } from "./components/SearchBar";
 import { X } from "lucide-react";
 
 import { TagInfo, ToolType } from "./types";
@@ -41,6 +42,7 @@ function App() {
   const [scale, setScale] = useState<number>(1.5);
   const [activeTool, setActiveTool] = useState<ToolType>('none');
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+  const [showSearch, setShowSearch] = useState(false);
 
   // ── Tag system state ─────────────────────────────────────────────────────
   const [allTags, setAllTags] = useState<TagInfo[]>([]);
@@ -56,6 +58,19 @@ function App() {
   }, []);
 
   useEffect(() => { refreshAllTags(); }, [refreshAllTags]);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Cmd+F or Ctrl+F
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        if (!activeTabId || activeTabId === 'library') return; // only in PDF view
+        e.preventDefault();
+        setShowSearch(true);
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [activeTabId]);
 
   const tagColors: Record<string, string> = {};
   for (const t of allTags) {
@@ -240,6 +255,18 @@ function App() {
             />
 
             <main ref={mainRef} className="flex-1 overflow-y-hidden relative flex justify-center canvas-pattern">
+              {showSearch && (
+                <SearchBar
+                  onSearch={(term, backwards) => {
+                    // Using basic window.find for finding natively parsed text
+                    const found = (window as any).find(term, false, backwards, true, false, false, false);
+                    if (!found) {
+                      // Optionally we could show a "not found" toast or handle it
+                    }
+                  }}
+                  onClose={() => setShowSearch(false)}
+                />
+              )}
               {/* Main Content Area */}
               {isLoading && (
                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-200/50 backdrop-blur-sm">

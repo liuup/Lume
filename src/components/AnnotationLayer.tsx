@@ -199,10 +199,42 @@ export function AnnotationLayer({ pdfPath, pageIndex, width, height, scale, acti
     };
   };
 
+  const eraseAt = (point: Point) => {
+    const radius = 10 / scale; // roughly 10px screen radius
+
+    setPaths(prev => {
+      const filtered = prev.filter(path => {
+        // Simple point-to-point distance check against all points in the path
+        return !path.points.some(p => Math.hypot(p.x - point.x, p.y - point.y) < radius);
+      });
+      return filtered.length !== prev.length ? filtered : prev;
+    });
+
+    setTextAnnotations(prev => {
+      const filtered = prev.filter(ann => {
+        // Approximate bounding box for the text
+        const approxWidth = ann.text.length * (BASE_FONT_SIZE * 0.55);
+        const height = BASE_FONT_SIZE * 1.5;
+        
+        const inX = point.x >= ann.x - radius && point.x <= ann.x + approxWidth + radius;
+        const inY = point.y >= ann.y - radius && point.y <= ann.y + height + radius;
+        
+        return !(inX && inY);
+      });
+      return filtered.length !== prev.length ? filtered : prev;
+    });
+  };
+
   const handlePointerDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (activeTool === "none") return;
     const point = getUnscaledPoint(e);
     if (!point) return;
+
+    if (activeTool === "eraser") {
+      setIsDrawing(true);
+      eraseAt(point);
+      return;
+    }
 
     if (activeTool === "text-highlight") {
       // If there's already an active input, commit it first
@@ -218,9 +250,16 @@ export function AnnotationLayer({ pdfPath, pageIndex, width, height, scale, acti
   };
 
   const handlePointerMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !currentPath || activeTool === "none") return;
+    if (!isDrawing || activeTool === "none") return;
     const point = getUnscaledPoint(e);
     if (!point) return;
+
+    if (activeTool === "eraser") {
+      eraseAt(point);
+      return;
+    }
+
+    if (!currentPath) return;
     setCurrentPath({ ...currentPath, points: [...currentPath.points, point] });
   };
 
@@ -261,6 +300,7 @@ export function AnnotationLayer({ pdfPath, pageIndex, width, height, scale, acti
           cursor:
             activeTool === "text-highlight" ? "text" :
             activeTool === "highlight" ? "text" :
+            activeTool === "eraser" ? "url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23e11d48%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m7%2021-4.3-4.3c-1-1-1-2.5%200-3.4l9.6-9.6c1-1%202.5-1%203.4%200l5.6%205.6c1%201%201%202.5%200%203.4L13%2021%22%2F%3E%3Cpath%20d%3D%22M22%2021H7%22%2F%3E%3Cpath%20d%3D%22m5%2011%209%209%22%2F%3E%3C%2Fsvg%3E') 0 24, pointer" :
             activeTool === "draw" ? "crosshair" : "default",
         }}
         onPointerDown={handlePointerDown}

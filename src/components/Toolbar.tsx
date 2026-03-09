@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type, PanelRight, ChevronDown } from "lucide-react";
+import { ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type, PanelRight, ChevronDown, Eraser } from "lucide-react";
 import { ToolType } from "../types";
 
 interface ToolbarProps {
@@ -161,6 +161,13 @@ export function Toolbar({
             icon={<Pencil size={16} />}
             tooltip="Pen — annotate with freehand drawing"
             activeClass="text-blue-600 bg-white"
+          />
+          <ToolButton
+            active={activeTool === "eraser"}
+            onClick={() => onToolChange("eraser")}
+            icon={<Eraser size={16} />}
+            tooltip="Eraser — click or drag to remove annotations"
+            activeClass="text-pink-600 bg-white"
           />
         </div>
       </div>

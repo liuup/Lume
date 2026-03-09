@@ -8,7 +8,7 @@
  */
 
 export type PageDimension = { width: number; height: number };
-export type ToolType = 'none' | 'draw' | 'highlight' | 'text-highlight';
+export type ToolType = 'none' | 'draw' | 'highlight' | 'text-highlight' | 'eraser';
 
 export interface Attachment {
   id: string;

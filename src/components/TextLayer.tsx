@@ -38,7 +38,7 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
       return;
     }
 
-    if (!isVisible || !shouldLoad || isLoaded) return;
+    if (!shouldLoad || isLoaded) return;
     let isMounted = true;
     const scheduler = window.requestIdleCallback
       ? window.requestIdleCallback
@@ -69,8 +69,8 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
     };
   }, [cacheKey, isVisible, pageIndex, isLoaded, pdfPath, shouldLoad]);
 
-  // We only render when we have both visibility and data
-  if (!isVisible || textNodes.length === 0) return null;
+  // We render if we have data, regardless of visibility, so native Cmd+F works
+  if (textNodes.length === 0) return null;
 
   return (
     <div

@@ -141,7 +141,7 @@ export function PdfViewer({ pdfPath, totalPages, dimensions, scale, activeTool, 
           scale={scale} 
           activeTool={activeTool}
           shouldPrefetch={prefetchPages.includes(i)}
-          shouldLoadText={Math.abs(i - (currentPage - 1)) <= 1}
+          shouldLoadText={true}
         />
       ))}
     </div>
