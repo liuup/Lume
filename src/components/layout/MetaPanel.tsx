@@ -1,4 +1,4 @@
-import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit, Edit2, Check, Book, Building, Link2, Copy, Quote } from "lucide-react";
+import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit, Edit2, Check, Book, Building, Link2, Copy, Quote, StickyNote, Wand2 } from "lucide-react";
 import { LibraryItem } from "../../types";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -32,6 +32,12 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   const [citeFormat, setCiteFormat] = useState<CitationFormat>("apa");
   const [citeText, setCiteText] = useState("");
   const [citeCopied, setCiteCopied] = useState(false);
+
+  // ── Notes state ─────────────────────────────────────────────────────────────
+  const [, setActiveTab] = useState<"info" | "notes" | "cite">("info");
+  const [noteText, setNoteText] = useState("");
+  const [isLoadingNote, setIsLoadingNote] = useState(false);
+  const [isSavingNote, setIsSavingNote] = useState(false);
 
   const generateCite = useCallback(async (itemId: string, fmt: CitationFormat) => {
     try {
@@ -79,6 +85,29 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   // Reset edit mode when selecting a different item
   useEffect(() => {
     setIsEditing(false);
+    setActiveTab("info");
+  }, [selectedItem?.id]);
+
+  // Load note when selection changes
+  useEffect(() => {
+    const loadNote = async () => {
+      if (!selectedItem) {
+        setNoteText("");
+        return;
+      }
+      setIsLoadingNote(true);
+      try {
+        const result = await invoke<{ id: string; item_id: string; content: string } | null>("get_item_note", {
+          itemId: selectedItem.id,
+        });
+        setNoteText(result?.content ?? "");
+      } catch {
+        setNoteText("");
+      } finally {
+        setIsLoadingNote(false);
+      }
+    };
+    loadNote();
   }, [selectedItem?.id]);
 
   if (!isOpen) return null;
@@ -121,6 +150,22 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
 
   const handleStringChange = (field: keyof LibraryItem, value: string) => {
     setEditFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleSaveNote = async () => {
+    if (!selectedItem) return;
+    setIsSavingNote(true);
+    try {
+      await invoke("upsert_item_note", {
+        itemId: selectedItem.id,
+        content: noteText,
+      });
+    } catch (error) {
+      console.error("Failed to save note", error);
+      alert("Failed to save note.");
+    } finally {
+      setIsSavingNote(false);
+    }
   };
 
   const addTag = (raw: string) => {
@@ -387,6 +432,51 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
               <MetaRow icon={<Tag size={15} className="text-zinc-400" />} label="File">
                 <span className="text-zinc-500 text-xs font-mono break-all line-clamp-2" title={selectedItem.attachments[0]?.name}>{selectedItem.attachments[0]?.name || "None"}</span>
               </MetaRow>
+            </div>
+
+            {/* ── Notes section ───────────────────────────────────────── */}
+            <div className="border-t border-zinc-100 pt-5 space-y-2">
+              <div className="flex items-center justify-between gap-1.5">
+                <div className="flex items-center gap-1.5">
+                  <StickyNote size={14} className="text-zinc-400" />
+                  <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Notes</span>
+                </div>
+                <button
+                  onClick={async () => {
+                    if (!selectedItem) return;
+                    try {
+                      const updatedNote = await invoke<{content: string} | null>("append_annotations_to_note", { itemId: selectedItem.id });
+                      if (updatedNote) {
+                        setNoteText(updatedNote.content);
+                      }
+                    } catch (e) {
+                      console.error("Failed to extract annotations", e);
+                    }
+                  }}
+                  className="px-2 py-1 text-[10px] font-medium flex items-center gap-1 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                  title="Extract PDF text annotations to note"
+                >
+                  <Wand2 size={12} />
+                  Extract
+                </button>
+              </div>
+              <textarea
+                value={noteText}
+                onChange={e => setNoteText(e.target.value)}
+                rows={8}
+                placeholder="Write your thoughts, summaries, or quotes in Markdown..."
+                className="w-full p-2.5 text-sm text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg resize-y leading-relaxed outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400"
+                spellCheck={false}
+              />
+              <div className="flex justify-end">
+                <button
+                  onClick={handleSaveNote}
+                  disabled={isSavingNote || isLoadingNote || !selectedItem}
+                  className="px-3 py-1.5 text-xs font-medium rounded-md border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  {isSavingNote ? "Saving..." : "Save Note"}
+                </button>
+              </div>
             </div>
 
             {/* ── Cite section ─────────────────────────────────────────── */}

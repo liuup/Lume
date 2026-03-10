@@ -36,7 +36,7 @@ pub fn init_db(app: &tauri::AppHandle) -> SqlResult<Connection> {
         )",
         [],
     )?;
-    
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS attachments (
             id TEXT PRIMARY KEY,
@@ -44,6 +44,18 @@ pub fn init_db(app: &tauri::AppHandle) -> SqlResult<Connection> {
             name TEXT,
             path TEXT,
             attachment_type TEXT,
+            FOREIGN KEY(item_id) REFERENCES items(id) ON DELETE CASCADE
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS notes (
+            id TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL,
+            content TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
             FOREIGN KEY(item_id) REFERENCES items(id) ON DELETE CASCADE
         )",
         [],

@@ -49,6 +49,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             library_commands::load_library_tree,
+            library_commands::get_item_note,
+            library_commands::upsert_item_note,
             library_commands::load_pdf_annotations,
             library_commands::save_pdf_annotations,
             library_commands::create_library_folder,
@@ -64,6 +66,7 @@ pub fn run() {
             library_commands::set_tag_color,
             library_commands::generate_citation,
             library_commands::export_items,
+            library_commands::append_annotations_to_note,
             metadata_fetch::update_item_metadata,
             pdf_handlers::load_pdf,
             pdf_handlers::get_pdf_dimensions,

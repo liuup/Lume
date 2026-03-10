@@ -2,13 +2,14 @@
 /// Purpose: Encapsulates all general file/directory manipulation commands.
 /// Capabilities: Moving, renaming, deleting, parsing library structure, managing annotations cache sidecars. 
 
-use crate::models::{CachedPdfMetadataRecord, LibraryItem, ParsedPdfMetadata, SavedPdfAnnotationsDocument, SavedPdfPageAnnotations};
+use crate::models::{CachedPdfMetadataRecord, LibraryItem, ParsedPdfMetadata, SavedPdfAnnotationsDocument, SavedPdfPageAnnotations, Note};
 use crate::pdf_handlers::extract_pdf_metadata;
 use crate::metadata_fetch::{fetch_arxiv_metadata_by_id, fetch_arxiv_metadata_by_title, fetch_crossref_metadata_by_doi, fetch_crossref_metadata_by_title, merge_arxiv_metadata, merge_crossref_metadata};
 
 use tauri::Manager;
 use std::fs;
 use std::path::{Path, PathBuf};
+use rusqlite::OptionalExtension;
 
 pub fn library_root_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let root = app
@@ -843,7 +844,7 @@ pub fn search_library(
                 param_values.push(pattern.clone());
             }
             _ => {
-                // "all" – search title, authors, DOI, arXiv, publication, abstract, and tags
+                // "all" – search title, authors, DOI, arXiv, publication, abstract, tags, and notes
                 conditions.push(
                     "(LOWER(i.title) LIKE ? \
                      OR LOWER(i.authors) LIKE ? \
@@ -852,10 +853,12 @@ pub fn search_library(
                      OR LOWER(i.publication) LIKE ? \
                      OR LOWER(i.abstract) LIKE ? \
                      OR EXISTS (SELECT 1 FROM item_tags it \
-                                WHERE it.item_id = i.id AND LOWER(it.tag) LIKE ?))"
+                                WHERE it.item_id = i.id AND LOWER(it.tag) LIKE ?) \
+                     OR EXISTS (SELECT 1 FROM notes n \
+                                WHERE n.item_id = i.id AND LOWER(n.content) LIKE ?))"
                         .to_string(),
                 );
-                for _ in 0..7 {
+                for _ in 0..8 {
                     param_values.push(pattern.clone());
                 }
             }
@@ -961,6 +964,186 @@ pub fn search_library(
     }
 
     Ok(items)
+}
+
+// ─────────────────────────────────────────────────────────────
+// Notes: per-item markdown notes
+// ─────────────────────────────────────────────────────────────
+
+fn now_iso8601() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    // Store as seconds since epoch string for simplicity; frontend can format.
+    now.as_secs().to_string()
+}
+
+#[tauri::command]
+pub fn get_item_note(
+    item_id: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<Option<Note>, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, item_id, content, created_at, updated_at \
+             FROM notes WHERE item_id = ?1 ORDER BY updated_at DESC LIMIT 1",
+        )
+        .map_err(|e| format!("Prepare error: {}", e))?;
+
+    let mut rows = stmt
+        .query_map(rusqlite::params![item_id], |row| {
+            Ok(Note {
+                id: row.get(0)?,
+                item_id: row.get(1)?,
+                content: row.get(2)?,
+                created_at: row.get(3)?,
+                updated_at: row.get(4)?,
+            })
+        })
+        .map_err(|e| format!("Query error: {}", e))?;
+
+    if let Some(row) = rows.next() {
+        row.map(Some).map_err(|e| format!("Row error: {}", e))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+pub fn upsert_item_note(
+    item_id: String,
+    content: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<Note, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+
+    let now = now_iso8601();
+
+    // Try update existing note for this item; if none, insert a new one.
+    let existing_id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM notes WHERE item_id = ?1 ORDER BY updated_at DESC LIMIT 1",
+            rusqlite::params![&item_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("Query existing note failed: {}", e))?;
+
+    let note_id = if let Some(id) = existing_id {
+        conn.execute(
+            "UPDATE notes SET content = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![&content, &now, &id],
+        )
+        .map_err(|e| format!("Failed to update note: {}", e))?;
+        id
+    } else {
+        let new_id = format!("note-{}-{}", item_id, now);
+        conn.execute(
+            "INSERT INTO notes (id, item_id, content, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![&new_id, &item_id, &content, &now, &now],
+        )
+        .map_err(|e| format!("Failed to insert note: {}", e))?;
+        new_id
+    };
+
+    Ok(Note {
+        id: note_id.clone(),
+        item_id,
+        content,
+        created_at: now.clone(),
+        updated_at: now,
+    })
+}
+
+#[tauri::command]
+pub fn append_annotations_to_note(
+    item_id: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<Option<Note>, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+
+    // First find the PDF attachment path for this item
+    let pdf_path: Option<String> = conn
+        .query_row(
+            "SELECT path FROM attachments WHERE item_id = ?1 AND attachment_type = 'PDF' LIMIT 1",
+            rusqlite::params![&item_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("Query PDF attachment failed: {}", e))?;
+
+    let Some(path_str) = pdf_path else {
+        return Ok(None);
+    };
+
+    let pdf_path = PathBuf::from(&path_str);
+    let mut extracted_text = String::new();
+
+    if let Some(document) = read_annotation_sidecar(&pdf_path) {
+        // Collect pages sorted by their numeric page index
+        let mut pages: Vec<(u16, &SavedPdfPageAnnotations)> = document.pages.iter()
+            .filter_map(|(k, v)| k.parse::<u16>().ok().map(|idx| (idx, v)))
+            .collect();
+        pages.sort_by_key(|(idx, _)| *idx);
+
+        for (page_idx, page_anns) in pages {
+            let mut page_text = String::new();
+            
+            // Collect text annotations for the page, sorting top to bottom
+            let mut text_anns = page_anns.text_annotations.clone();
+            text_anns.sort_by(|a, b| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal));
+            
+            for ann in text_anns {
+                let txt = ann.text.trim();
+                if !txt.is_empty() {
+                    page_text.push_str("> ");
+                    page_text.push_str(&txt.replace("\n", "\n> "));
+                    page_text.push_str("\n\n");
+                }
+            }
+
+            if !page_text.is_empty() {
+                extracted_text.push_str(&format!("### Annotations on Page {}\n\n", page_idx + 1));
+                extracted_text.push_str(&page_text);
+            }
+        }
+    }
+
+    if extracted_text.is_empty() {
+        return Ok(None);
+    }
+
+    // Now get current note, or create empty if none
+    let current_note: Option<String> = conn
+        .query_row(
+            "SELECT content FROM notes WHERE item_id = ?1 ORDER BY updated_at DESC LIMIT 1",
+            rusqlite::params![&item_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("Query existing note failed: {}", e))?;
+
+    let mut new_content = current_note.unwrap_or_default();
+    if !new_content.is_empty() {
+        if !new_content.ends_with("\n\n") {
+            if !new_content.ends_with('\n') {
+                new_content.push_str("\n\n");
+            } else {
+                new_content.push('\n');
+            }
+        }
+        new_content.push_str("---\n\n");
+    }
+    new_content.push_str(&extracted_text);
+
+    // Release the DB lock before calling the other command, or just do the upsert logics here inline
+    drop(conn);
+
+    let updated_note = upsert_item_note(item_id, new_content, state)?;
+    Ok(Some(updated_note))
 }
 
 // ─────────────────────────────────────────────────────────────

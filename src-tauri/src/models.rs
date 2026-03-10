@@ -15,6 +15,15 @@ pub struct AppState {
 }
 
 #[derive(Serialize)]
+pub struct Note {
+    pub id: String,
+    pub item_id: String,
+    pub content: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Serialize)]
 pub struct LibraryPdfMeta {
     pub title: String,
     pub authors: String,
