@@ -306,6 +306,7 @@ function App() {
               handleItemUpdatedLocally();
               refreshAllTags();
             }}
+            onPageJump={handlePageJump}
           />
         )}
       </div>

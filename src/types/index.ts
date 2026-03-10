@@ -73,3 +73,30 @@ export interface TagInfo {
   /** Hex color string, e.g. '#6366f1'. Empty string means use the default color. */
   color: string;
 }
+
+export interface SavedAnnotationPoint {
+  x: number;
+  y: number;
+}
+
+export interface SavedAnnotationPath {
+  tool: ToolType;
+  points: SavedAnnotationPoint[];
+}
+
+export interface SavedTextAnnotation {
+  x: number;
+  y: number;
+  text: string;
+  font_size: number;
+}
+
+export interface SavedPdfPageAnnotations {
+  paths: SavedAnnotationPath[];
+  text_annotations: SavedTextAnnotation[];
+}
+
+export interface SavedPdfAnnotationsDocument {
+  version: number;
+  pages: Record<string, SavedPdfPageAnnotations>;
+}

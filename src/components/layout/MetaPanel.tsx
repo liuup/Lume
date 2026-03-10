@@ -1,5 +1,5 @@
-import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit, Edit2, Check, Book, Building, Link2, Copy, Quote, StickyNote, Wand2 } from "lucide-react";
-import { LibraryItem } from "../../types";
+import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit, Edit2, Check, Book, Building, Link2, Copy, Quote, StickyNote, Wand2, Highlighter } from "lucide-react";
+import { LibraryItem, SavedPdfAnnotationsDocument } from "../../types";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CitationFormat } from "./ExportModal";
@@ -19,9 +19,10 @@ interface MetaPanelProps {
   onClose: () => void;
   onItemUpdated?: () => void;
   tagColors?: Record<string, string>;
+  onPageJump?: (page: number) => void;
 }
 
-export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagColors = {} }: MetaPanelProps) {
+export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagColors = {}, onPageJump }: MetaPanelProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editFormData, setEditFormData] = useState<Partial<LibraryItem>>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -34,10 +35,13 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   const [citeCopied, setCiteCopied] = useState(false);
 
   // ── Notes state ─────────────────────────────────────────────────────────────
-  const [, setActiveTab] = useState<"info" | "notes" | "cite">("info");
   const [noteText, setNoteText] = useState("");
   const [isLoadingNote, setIsLoadingNote] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
+
+  // ── Annotations list state ───────────────────────────────────────────────────
+  const [pdfAnnotations, setPdfAnnotations] = useState<SavedPdfAnnotationsDocument | null>(null);
+  const [isLoadingAnnotations, setIsLoadingAnnotations] = useState(false);
 
   const generateCite = useCallback(async (itemId: string, fmt: CitationFormat) => {
     try {
@@ -85,10 +89,9 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   // Reset edit mode when selecting a different item
   useEffect(() => {
     setIsEditing(false);
-    setActiveTab("info");
   }, [selectedItem?.id]);
 
-  // Load note when selection changes
+  // Load note and annotations when selection changes
   useEffect(() => {
     const loadNote = async () => {
       if (!selectedItem) {
@@ -107,8 +110,31 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
         setIsLoadingNote(false);
       }
     };
+
+    const loadAnnotations = async () => {
+      if (!selectedItem || !selectedItem.attachments?.[0]?.path) {
+        setPdfAnnotations(null);
+        return;
+      }
+      setIsLoadingAnnotations(true);
+      try {
+        const result = await invoke<SavedPdfAnnotationsDocument>("get_all_annotations", {
+          path: selectedItem.attachments[0].path,
+        });
+        setPdfAnnotations(result);
+      } catch (err) {
+        console.error("Failed to load full annotations array:", err);
+        setPdfAnnotations(null);
+      } finally {
+        setIsLoadingAnnotations(false);
+      }
+    };
+
     loadNote();
-  }, [selectedItem?.id]);
+    // Use setTimeout or a background queue to not block the main note loading UI immediately
+    const t = setTimeout(loadAnnotations, 100);
+    return () => clearTimeout(t);
+  }, [selectedItem?.id, isOpen]);
 
   if (!isOpen) return null;
 
@@ -477,6 +503,72 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                   {isSavingNote ? "Saving..." : "Save Note"}
                 </button>
               </div>
+            </div>
+
+            {/* ── Annotations section ─────────────────────────────────────── */}
+            <div className="border-t border-zinc-100 pt-5 space-y-3">
+              <div className="flex items-center gap-1.5">
+                <Highlighter size={14} className="text-zinc-400" />
+                <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Pdf Annotations</span>
+              </div>
+              
+              {isLoadingAnnotations ? (
+                 <div className="py-4 text-center text-xs text-zinc-400 animate-pulse">Loading annotations...</div>
+              ) : !pdfAnnotations || Object.keys(pdfAnnotations.pages).length === 0 ? (
+                 <div className="py-4 text-center text-xs text-zinc-400 bg-zinc-50 rounded-lg border border-dashed border-zinc-200">
+                    No annotations in this PDF.
+                 </div>
+              ) : (
+                <div className="space-y-3">
+                  {Object.entries(pdfAnnotations.pages)
+                    .sort(([a], [b]) => parseInt(a, 10) - parseInt(b, 10))
+                    .map(([pageKey, pageData]) => {
+                      const pageIdx = parseInt(pageKey, 10);
+                      const displayPage = pageIdx + 1;
+                      
+                      const hasItems = pageData.text_annotations.length > 0 || pageData.paths.length > 0;
+                      if (!hasItems) return null;
+
+                      // Sort text annotations top to bottom
+                      const sortedTextAnns = [...pageData.text_annotations].sort((a, b) => a.y - b.y);
+
+                      return (
+                        <div key={pageKey} className="text-sm">
+                          <div 
+                            className="font-semibold text-xs text-indigo-600 mb-1 cursor-pointer hover:underline inline-block"
+                            onClick={() => onPageJump && onPageJump(displayPage)}
+                          >
+                            Page {displayPage}
+                          </div>
+                          <div className="space-y-2">
+                            {/* Render Text Annotations */}
+                            {sortedTextAnns.map((ta, i) => (
+                              <div 
+                                key={`ta-${i}`} 
+                                className="pl-3 border-l-2 border-indigo-200 py-0.5 text-zinc-700 bg-zinc-50/50 rounded-r-md cursor-pointer hover:bg-zinc-100 transition-colors"
+                                onClick={() => onPageJump && onPageJump(displayPage)}
+                              >
+                                {ta.text}
+                              </div>
+                            ))}
+                            {/* Render Draw/Highlight summaries (if any, keeping it compact) */}
+                            {pageData.paths.length > 0 && (
+                               <div 
+                                 className="pl-3 py-0.5 flex items-center gap-2 cursor-pointer hover:opacity-80"
+                                 onClick={() => onPageJump && onPageJump(displayPage)}
+                               >
+                                  <div className="w-4 h-4 rounded bg-yellow-200/50 flex items-center justify-center border border-yellow-300">
+                                    <Highlighter size={10} className="text-yellow-600" />
+                                  </div>
+                                  <span className="text-xs text-zinc-500">{pageData.paths.length} draw/highlight actions</span>
+                               </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* ── Cite section ─────────────────────────────────────────── */}

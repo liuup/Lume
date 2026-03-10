@@ -493,6 +493,16 @@ pub fn load_library_tree(app: tauri::AppHandle, state: tauri::State<crate::model
 }
 
 #[tauri::command]
+pub fn get_all_annotations(path: String) -> Result<SavedPdfAnnotationsDocument, String> {
+    let pdf_path = PathBuf::from(&path);
+    if !pdf_path.exists() {
+        return Err("PDF does not exist".to_string());
+    }
+
+    Ok(read_annotation_sidecar(&pdf_path).unwrap_or_default())
+}
+
+#[tauri::command]
 pub fn load_pdf_annotations(path: String, page_index: u16) -> Result<SavedPdfPageAnnotations, String> {
     let pdf_path = PathBuf::from(&path);
     if !pdf_path.exists() {

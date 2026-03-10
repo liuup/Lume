@@ -53,6 +53,7 @@ pub fn run() {
             library_commands::upsert_item_note,
             library_commands::load_pdf_annotations,
             library_commands::save_pdf_annotations,
+            library_commands::get_all_annotations,
             library_commands::create_library_folder,
             library_commands::import_pdf_to_folder,
             library_commands::delete_library_pdf,
