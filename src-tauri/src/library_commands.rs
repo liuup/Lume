@@ -596,24 +596,60 @@ pub fn import_pdf_to_folder(source_path: String, folder_path: String, state: tau
 
     let resolved_meta = resolve_pdf_metadata(&target);
 
-    let final_path = if let Some(title) = resolved_meta
-        .title
-        .as_deref()
-        .map(sanitize_file_name)
-        .filter(|title| !title.is_empty())
-    {
-        let renamed = unique_file_path(&target_folder, &format!("{}.pdf", title));
+    let mut auto_rename = true;
+    let mut rename_pattern = "[Year] - [Author] - [Title]".to_string();
 
-        if renamed != target {
-            fs::rename(&target, &renamed)
-                .map_err(|e| format!("Failed to rename imported PDF: {}", e))?;
-            renamed
-        } else {
+    if let Ok(conn) = state.db.lock() {
+        let mut stmt = conn.prepare("SELECT key, value FROM settings WHERE key IN ('autoRenamePdf', 'renamePattern')").unwrap();
+        let _ = stmt.query_map([], |row| {
+            let k: String = row.get(0)?;
+            let v: String = row.get(1)?;
+            if k == "autoRenamePdf" {
+                auto_rename = v == "true";
+            } else if k == "renamePattern" {
+                rename_pattern = v;
+            }
+            Ok(())
+        }).map(|mut iter| {
+            while let Some(Ok(_)) = iter.next() {}
+        });
+    }
+
+    let final_path = if auto_rename {
+        let title = resolved_meta.title.as_deref().unwrap_or("Unknown Title");
+        let year = resolved_meta.year.as_deref().unwrap_or("Unknown Year");
+        let authors = resolved_meta.authors.as_deref().unwrap_or("Unknown Author");
+        
+        let mut first_author = authors.split(',').next().unwrap_or("Unknown Author").trim();
+        if first_author.contains(' ') {
+            first_author = first_author.split_whitespace().last().unwrap_or(first_author);
+        }
+
+        let proposed_name = rename_pattern
+            .replace("[Year]", year)
+            .replace("[Author]", first_author)
+            .replace("[Title]", title);
+            
+        let safe_name = sanitize_file_name(&proposed_name);
+        
+        if safe_name.is_empty() {
             target.clone()
+        } else {
+            let renamed = unique_file_path(&target_folder, &format!("{}.pdf", safe_name));
+
+            if renamed != target {
+                fs::rename(&target, &renamed)
+                    .map_err(|e| format!("Failed to rename imported PDF: {}", e))?;
+                renamed
+            } else {
+                target.clone()
+            }
         }
     } else {
         target.clone()
     };
+
+
 
     if final_path != target {
         rename_cached_pdf_metadata(&target, &final_path);
@@ -1698,8 +1734,50 @@ pub fn export_items(
         let objects: Vec<String> = parts.iter()
             .map(|p| p.trim_start_matches('[').trim_end_matches(']').to_string())
             .collect();
-        Ok(format!("[{}]", objects.join(",")))
-    } else {
-        Ok(parts.join(sep))
+        return Ok(format!("[{}]", objects.join(",")));
     }
+    Ok(parts.join(sep))
+}
+
+// ─────────────────────────────────────────────────────────────
+// Settings Commands
+// ─────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn get_settings(
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<Vec<crate::models::Setting>, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    let mut stmt = conn
+        .prepare("SELECT key, value FROM settings")
+        .map_err(|e| format!("Prepare error: {}", e))?;
+
+    let settings: Vec<crate::models::Setting> = stmt
+        .query_map([], |row| {
+            Ok(crate::models::Setting {
+                key: row.get(0)?,
+                value: row.get(1)?,
+            })
+        })
+        .map_err(|e| format!("Query error: {}", e))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn save_setting(
+    key: String,
+    value: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
+        rusqlite::params![&key, &value],
+    )
+    .map_err(|e| format!("Failed to save setting: {}", e))?;
+
+    Ok(())
 }

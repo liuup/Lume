@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, FilePenLine, Folder, FolderOpen, FolderPlus, Hash, Plus } from "lucide-react";
+import { ChevronRight, FilePenLine, Folder, FolderOpen, FolderPlus, Hash, Plus, Settings } from "lucide-react";
 import { FolderNode, TagInfo } from "../../types";
 
 // ── Preset tag palette ──────────────────────────────────────────────────────
@@ -27,6 +27,8 @@ interface FolderSidebarProps {
   selectedTagFilter: string | null;
   onSelectTag: (tag: string) => void;
   onSetTagColor: (tag: string, color: string) => Promise<void>;
+  
+  onOpenSettings: () => void;
 }
 
 export function FolderSidebar({
@@ -39,6 +41,7 @@ export function FolderSidebar({
   selectedTagFilter,
   onSelectTag,
   onSetTagColor,
+  onOpenSettings
 }: FolderSidebarProps) {
   const [contextMenu, setContextMenu] = useState<{
     folder: FolderNode;
@@ -243,6 +246,17 @@ export function FolderSidebar({
           </div>
         </div>
       )}
+
+      {/* ── Settings Button (Footer) ─────────────────────────── */}
+      <div className="border-t border-zinc-200 shrink-0 p-3">
+        <button
+          onClick={onOpenSettings}
+          className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium text-zinc-600 rounded-lg hover:bg-zinc-100 transition-colors"
+        >
+          <Settings size={15} className="text-zinc-400" />
+          Settings
+        </button>
+      </div>
 
       {contextMenu && (
         <div

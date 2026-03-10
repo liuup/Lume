@@ -79,5 +79,13 @@ pub fn init_db(app: &tauri::AppHandle) -> SqlResult<Connection> {
         [],
     )?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )",
+        [],
+    )?;
+
     Ok(conn)
 }

@@ -23,6 +23,12 @@ pub struct Note {
     pub updated_at: String,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct Setting {
+    pub key: String,
+    pub value: String,
+}
+
 #[derive(Serialize)]
 pub struct LibraryPdfMeta {
     pub title: String,

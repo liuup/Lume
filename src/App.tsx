@@ -6,10 +6,12 @@ import { FolderSidebar } from "./components/layout/FolderSidebar";
 import { LibraryView } from "./components/layout/LibraryView";
 import { MetaPanel } from "./components/layout/MetaPanel";
 import { SearchBar } from "./components/SearchBar";
+import { SettingsModal } from "./components/modals/SettingsModal";
 import { X } from "lucide-react";
 
 import { TagInfo, ToolType } from "./types";
 import { useLibrary } from "./hooks/useLibrary";
+import { useSettings } from "./hooks/useSettings";
 
 function App() {
   const {
@@ -43,6 +45,8 @@ function App() {
   const [activeTool, setActiveTool] = useState<ToolType>('none');
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
   const [showSearch, setShowSearch] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const { settings, isLoading: isSettingsLoading } = useSettings();
 
   // ── Tag system state ─────────────────────────────────────────────────────
   const [allTags, setAllTags] = useState<TagInfo[]>([]);
@@ -83,20 +87,50 @@ function App() {
   const zoomOut = () => setScale(s => Math.max(s - 0.25, 0.5));
 
   const fitWidth = () => {
-    if (!mainRef.current || dimensions.length === 0) return;
+    if (!mainRef.current || !dimensions || dimensions.length === 0) return;
     const cw = mainRef.current.clientWidth;
     const padding = 64; 
-    const s = Math.max(0.25, Math.min(4.0, (cw - padding) / dimensions[0].width));
-    setScale(s);
+    const baseW = dimensions[0]?.width || 1;
+    const s = Math.max(0.25, Math.min(4.0, (cw - padding) / baseW));
+    if (!isNaN(s)) setScale(s);
   };
 
   const fitHeight = () => {
-    if (!mainRef.current || dimensions.length === 0) return;
+    if (!mainRef.current || !dimensions || dimensions.length === 0) return;
     const ch = mainRef.current.clientHeight;
     const padding = 64;
-    const s = Math.max(0.25, Math.min(4.0, (ch - padding) / dimensions[0].height));
-    setScale(s);
+    const baseH = dimensions[0]?.height || 1;
+    const s = Math.max(0.25, Math.min(4.0, (ch - padding) / baseH));
+    if (!isNaN(s)) setScale(s);
   };
+
+  // ── Apply Default Zoom when a new PDF is opened ──
+  useEffect(() => {
+    if (isSettingsLoading || !activeTabId || activeTabId === 'library' || dimensions.length === 0) return;
+    
+    // We only want to apply this once when the document first loads
+    // so we timeout to let the modal / dom finish rendering
+    const timer = setTimeout(() => {
+        if (!settings || !settings.defaultPdfZoom) return;
+        if (settings.defaultPdfZoom === "page-fit") {
+          fitHeight();
+        } else if (settings.defaultPdfZoom === "page-width") {
+          fitWidth();
+        } else {
+          try {
+            const pctText = typeof settings.defaultPdfZoom === "string" ? settings.defaultPdfZoom : "100%";
+            const pct = parseInt(pctText.replace("%", ""), 10);
+            if (!isNaN(pct)) {
+              setScale(pct / 100);
+            }
+          } catch (e) {
+            console.error("Invalid default zoom", e);
+          }
+        }
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, [activeTabId, isSettingsLoading, dimensions.length]);
 
   const scrollTimeout = useRef<number | null>(null);
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -217,11 +251,12 @@ function App() {
               onRenameFolder={handleRenameFolder}
               allTags={allTags}
               selectedTagFilter={selectedTagFilter}
-              onSelectTag={tag => { setSelectedTagFilter(prev => prev === tag ? null : tag); }}
+              onSelectTag={t => setSelectedTagFilter(prev => prev === t ? null : t)}
               onSetTagColor={async (tag, color) => {
                 await invoke("set_tag_color", { tag, color });
                 await refreshAllTags();
               }}
+              onOpenSettings={() => setShowSettings(true)}
             />
             <LibraryView 
               folderTree={folderTree}
@@ -310,6 +345,12 @@ function App() {
           />
         )}
       </div>
+      
+      {/* ── Settings Modal ── */}
+      <SettingsModal 
+        isOpen={showSettings} 
+        onClose={() => setShowSettings(false)} 
+      />
     </div>
   );
 }

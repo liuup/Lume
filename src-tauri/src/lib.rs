@@ -68,6 +68,8 @@ pub fn run() {
             library_commands::generate_citation,
             library_commands::export_items,
             library_commands::append_annotations_to_note,
+            library_commands::get_settings,
+            library_commands::save_setting,
             metadata_fetch::update_item_metadata,
             pdf_handlers::load_pdf,
             pdf_handlers::get_pdf_dimensions,

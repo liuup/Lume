@@ -3,6 +3,7 @@ import { LibraryItem, SavedPdfAnnotationsDocument } from "../../types";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CitationFormat } from "./ExportModal";
+import { useSettings } from "../../hooks/useSettings";
 
 const CITE_FORMATS: { id: CitationFormat; label: string }[] = [
   { id: "apa",     label: "APA" },
@@ -29,10 +30,17 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   const [tagInput, setTagInput] = useState("");
   const tagInputRef = useRef<HTMLInputElement>(null);
 
+  const { settings } = useSettings();
+
   // ── Citation state ───────────────────────────────────────────────────────
-  const [citeFormat, setCiteFormat] = useState<CitationFormat>("apa");
+  const [citeFormat, setCiteFormat] = useState<CitationFormat>(settings.defaultCitationFormat as CitationFormat);
   const [citeText, setCiteText] = useState("");
   const [citeCopied, setCiteCopied] = useState(false);
+
+  // Update citation format when the default setting changes (only if we're basically resetting)
+  useEffect(() => {
+    setCiteFormat(settings.defaultCitationFormat as CitationFormat);
+  }, [settings.defaultCitationFormat]);
 
   // ── Notes state ─────────────────────────────────────────────────────────────
   const [noteText, setNoteText] = useState("");
@@ -119,7 +127,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
       setIsLoadingAnnotations(true);
       try {
         const result = await invoke<SavedPdfAnnotationsDocument>("get_all_annotations", {
-          path: selectedItem.attachments[0].path,
+          path: selectedItem.attachments?.[0]?.path,
         });
         setPdfAnnotations(result);
       } catch (err) {
@@ -366,7 +374,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
             {/* Title & tags */}
             <div>
               <h3 className="text-base font-bold text-zinc-900 leading-tight">
-                {selectedItem.title || selectedItem.attachments[0]?.name || "Untitled"}
+                {selectedItem.title || selectedItem.attachments?.[0]?.name || "Untitled"}
               </h3>
               {selectedItem.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-3">
@@ -456,7 +464,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
 
               {/* Filename */}
               <MetaRow icon={<Tag size={15} className="text-zinc-400" />} label="File">
-                <span className="text-zinc-500 text-xs font-mono break-all line-clamp-2" title={selectedItem.attachments[0]?.name}>{selectedItem.attachments[0]?.name || "None"}</span>
+                <span className="text-zinc-500 text-xs font-mono break-all line-clamp-2" title={selectedItem.attachments?.[0]?.name}>{selectedItem.attachments?.[0]?.name || "None"}</span>
               </MetaRow>
             </div>
 
