@@ -180,6 +180,7 @@ npm run tauri build -- --bundles nsis --ci
   - macOS 包
   - Windows 绿色版
   - Windows 安装版
+- 构建完成后会自动创建或更新一个 **Draft Release**
 
 ### 产物说明
 
@@ -193,6 +194,17 @@ npm run tauri build -- --bundles nsis --ci
 
 - `Lume-windows-portable` 为免安装运行版
 - `Lume-windows-installer` 为安装器版
+
+此外，workflow 还会基于 `package.json` 中的版本号自动创建或更新一个草稿发布：
+
+- Tag 形式：`v<version>`
+- Release 标题：`Lume v<version>`
+
+草稿发布会附带以下资源：
+
+- macOS `.dmg`
+- Windows 安装版 `.exe`
+- Windows 绿色版 `.zip`
 
 ---
 
@@ -256,7 +268,6 @@ npm run tauri build -- --bundles nsis --ci
 
 后续可以继续补充：
 
-- GitHub Release 自动上传 artifact
 - 版本号驱动的正式发布流
 - macOS 签名 / notarization
 - Windows 代码签名

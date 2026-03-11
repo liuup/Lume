@@ -3,6 +3,9 @@ name: Build Lume Desktop
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build-macos:
     name: Build macOS bundle
@@ -10,10 +13,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
@@ -36,7 +39,7 @@ jobs:
         run: npm run tauri build -- --target aarch64-apple-darwin --ci
 
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Lume-macos-aarch64
           path: |
@@ -50,10 +53,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm
@@ -89,15 +92,110 @@ jobs:
         run: npm run tauri build -- --bundles nsis --ci
 
       - name: Upload portable artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Lume-windows-portable
           path: dist-portable/Lume
           if-no-files-found: error
 
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: Lume-windows-installer
           path: src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
+
+  create-draft-release:
+    name: Create draft release
+    runs-on: ubuntu-latest
+    needs:
+      - build-macos
+      - build-windows
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: release-assets
+
+      - name: Create release asset bundle
+        id: bundle_assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION=$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")
+          TAG="v${VERSION}"
+          TITLE="Lume v${VERSION}"
+          DIST_DIR="$PWD/release-dist"
+
+          mkdir -p "$DIST_DIR"
+
+          shopt -s nullglob
+          mac_dmg=(release-assets/Lume-macos-aarch64/*.dmg)
+          windows_installer=(release-assets/Lume-windows-installer/*.exe)
+          shopt -u nullglob
+
+          if [ ${#mac_dmg[@]} -eq 0 ]; then
+            echo "No macOS DMG asset was found." >&2
+            exit 1
+          fi
+
+          if [ ${#windows_installer[@]} -eq 0 ]; then
+            echo "No Windows installer asset was found." >&2
+            exit 1
+          fi
+
+          PORTABLE_ZIP="$DIST_DIR/Lume-windows-portable-${TAG}.zip"
+          (
+            cd release-assets/Lume-windows-portable
+            zip -r "$PORTABLE_ZIP" .
+          )
+
+          cp "${mac_dmg[0]}" "$DIST_DIR/"
+          cp "${windows_installer[0]}" "$DIST_DIR/"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "dist_dir=$DIST_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.bundle_assets.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.bundle_assets.outputs.title }}
+          RELEASE_DIST_DIR: ${{ steps.bundle_assets.outputs.dist_dir }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t ASSETS < <(find "$RELEASE_DIST_DIR" -maxdepth 1 -type f | sort)
+
+          if [ ${#ASSETS[@]} -eq 0 ]; then
+            echo "No release assets were prepared." >&2
+            exit 1
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --title "$RELEASE_TITLE" \
+              --draft
+            gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${ASSETS[@]}" \
+              --title "$RELEASE_TITLE" \
+              --draft \
+              --target "$GITHUB_SHA" \
+              --generate-notes
+          fi
