@@ -106,7 +106,26 @@ async function requestRenderedPage(pdfPath: string, pageIndex: number, scale: nu
 }
 
 export function PdfViewer({ pdfPath, totalPages, dimensions, scale, activeTool, currentPage }: PdfViewerProps) {
-  if (dimensions.length === 0) return null;
+  if (dimensions.length === 0) {
+    // Show a loading skeleton instead of a blank white screen while dimensions are loading
+    return (
+      <div className="flex flex-col items-center py-6 space-y-4 min-w-full">
+        {Array.from({ length: Math.max(totalPages, 1) }).map((_, i) => (
+          <div key={i} className="flex flex-col items-center space-y-3 group">
+            <div
+              className="bg-white shadow-[0_10px_30px_-10px_rgba(0,0,0,0.1)] relative shrink-0 border border-zinc-200/50 rounded-sm overflow-hidden"
+              style={{ width: 680, height: 880 }}
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-zinc-50 to-zinc-100 animate-pulse" />
+              <div className="absolute top-3 right-3 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-medium text-zinc-400 shadow-sm backdrop-blur-sm">
+                Page {i + 1}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   const prefetchPages = useMemo(() => {
     const indices: number[] = [];
@@ -196,15 +215,28 @@ function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool, shouldPr
     if (!isVisible && !shouldPrefetch) return;
     let isMounted = true;
 
-    requestRenderedPage(pdfPath, pageIndex, previewScale)
-      .then((base64) => {
-        if (isMounted) {
-          setImgSrc(base64);
+    const loadPage = async () => {
+      try {
+        const base64 = await requestRenderedPage(pdfPath, pageIndex, previewScale);
+        if (isMounted) setImgSrc(base64);
+      } catch (err: any) {
+        const errMsg = String(err);
+        if (errMsg.includes('No PDF loaded') || errMsg.includes('no pdf loaded')) {
+          // Backend cache was cleared (e.g. app restart/tab switch race). Re-load the PDF then retry.
+          try {
+            await invoke('load_pdf', { path: pdfPath });
+            const base64 = await requestRenderedPage(pdfPath, pageIndex, previewScale);
+            if (isMounted) setImgSrc(base64);
+          } catch (retryErr) {
+            console.error(`Failed to recover page ${pageIndex} after reload`, retryErr);
+          }
+        } else {
+          console.error(`Failed to load page ${pageIndex}`, err);
         }
-      })
-      .catch((err) => {
-        console.error(`Failed to load page ${pageIndex}`, err);
-      });
+      }
+    };
+
+    loadPage();
 
     return () => { 
       isMounted = false;

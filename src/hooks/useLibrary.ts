@@ -34,7 +34,8 @@ export function useLibrary() {
   const dimensions = activeTab?.dimensions || [];
   const currentPage = activeTab?.currentPage || 1;
 
-  // Sync background Rust PDF context when switching tabs
+  // Sync background Rust PDF context when switching tabs.
+  // Also re-fetch dimensions if they are somehow missing (guards against white screen).
   useEffect(() => {
     if (!pdfPath) return;
     let isMounted = true;
@@ -42,7 +43,28 @@ export function useLibrary() {
       try {
         setIsLoading(true);
         await invoke("load_pdf", { path: pdfPath });
-        if (isMounted) setIsLoading(false);
+        if (!isMounted) return;
+
+        // If the active tab has no dimensions (e.g. data was lost), re-fetch them now
+        setOpenTabs(prev => {
+          const tab = prev.find(t => t.item.attachments?.[0]?.path === pdfPath || t.item.id === pdfPath);
+          if (tab && tab.dimensions.length === 0) {
+            // Kick off async dimension fetch and patch the tab in state once done
+            invoke<PageDimension[]>("get_pdf_dimensions", { path: pdfPath })
+              .then(dims => {
+                if (!isMounted) return;
+                setOpenTabs(tabs => tabs.map(t =>
+                  (t.item.attachments?.[0]?.path === pdfPath || t.item.id === pdfPath)
+                    ? { ...t, dimensions: dims }
+                    : t
+                ));
+              })
+              .catch(err => console.error("Failed to recover PDF dimensions", err));
+          }
+          return prev; // no synchronous change
+        });
+
+        setIsLoading(false);
       } catch (err) {
         console.error("Failed to switch PDF context", err);
         if (isMounted) setIsLoading(false);
