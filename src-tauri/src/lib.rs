@@ -16,19 +16,44 @@ use tauri::Manager;
 use crate::db::init_db;
 use crate::pdf_handlers::GlobalPdfium;
 
+fn candidate_pdfium_dirs(app: &tauri::App) -> Vec<std::path::PathBuf> {
+    let mut dirs = Vec::new();
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        dirs.push(resource_dir);
+    }
+
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            dirs.push(parent.to_path_buf());
+        }
+    }
+
+    dirs.push(std::path::PathBuf::from("./"));
+    dirs.push(std::path::PathBuf::from("./src-tauri/"));
+
+    dirs
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             // Warm up PDFium lazily
             if pdf_handlers::GLOBAL_PDFIUM.get().is_none() {
-                let resource_dir = app.path().resource_dir().unwrap_or_else(|_| std::path::PathBuf::from("./"));
-                let resource_dir_str = resource_dir.to_str().unwrap_or("./");
-                
-                let bindings = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(resource_dir_str))
-                    .or_else(|_| Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./")))
-                    .or_else(|_| Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./src-tauri/")))
-                    .or_else(|_| Pdfium::bind_to_system_library())
+                let mut bindings = None;
+
+                for dir in candidate_pdfium_dirs(app) {
+                    if let Some(dir_str) = dir.to_str() {
+                        if let Ok(found) = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(dir_str)) {
+                            bindings = Some(found);
+                            break;
+                        }
+                    }
+                }
+
+                let bindings = bindings
+                    .or_else(|| Pdfium::bind_to_system_library().ok())
                     .expect("Failed to bind to libpdfium");
 
                 let pdfium = Box::leak(Box::new(Pdfium::new(bindings)));

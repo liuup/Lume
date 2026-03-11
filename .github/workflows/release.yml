@@ -1,25 +1,13 @@
-name: "Build and Release Lume"
+name: Build Lume Windows
 
 on:
-  push:
-    tags:
-      - "v*" # Trigger on pushes to tags starting with "v" (e.g., v0.1.0)
-  workflow_dispatch: # Allow manual trigger from the GitHub Actions page
+  workflow_dispatch:
 
 jobs:
-  release:
-    permissions:
-      contents: write # Allow workflow to create releases
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: "macos-latest" # Build on macOS (M1/arm64)
-            args: "--target aarch64-apple-darwin"
-          - platform: "windows-latest" # Build on Windows (x64)
-            args: ""
+  build-windows:
+    name: Build Windows portable + installer
+    runs-on: windows-latest
 
-    runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,24 +16,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          # Target for macOS (aarch64)
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
-      # Download and extract the macOS PDFium dynamic library
-      - name: Inject PDFium (macOS)
-        if: matrix.platform == 'macos-latest'
-        run: |
-          curl -L -o pdfium.tgz https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-arm64.tgz
-          tar -xzf pdfium.tgz lib/libpdfium.dylib
-          mv lib/libpdfium.dylib src-tauri/libpdfium.dylib
+      - name: Install NSIS
+        run: choco install nsis -y
 
-      # Download and extract the Windows PDFium dynamic library
       - name: Inject PDFium (Windows)
-        if: matrix.platform == 'windows-latest'
         shell: bash
         run: |
           curl -L -o pdfium.tgz https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-win-x64.tgz
@@ -55,14 +34,30 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: Build and Publish with Tauri Action
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build portable executable
+        run: npm run tauri build -- --no-bundle --ci
+
+      - name: Package portable executable
+        shell: pwsh
+        run: |
+          $portableRoot = "dist-portable/Lume"
+          New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
+          Copy-Item "src-tauri/target/release/Lume.exe" "$portableRoot/Lume.exe" -Force
+          Copy-Item "src-tauri/pdfium.dll" "$portableRoot/pdfium.dll" -Force
+
+      - name: Build installer executable (NSIS)
+        run: npm run tauri build -- --bundles nsis --ci
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
         with:
-          tagName: v__VERSION__ # Automatically extracts version from tauri.conf.json
-          releaseName: "Lume v__VERSION__"
-          releaseBody: "New release of Lume, the cross-platform PDF reader."
-          releaseDraft: true # Create a draft release so you can review before publishing
-          prerelease: false
-          args: ${{ matrix.args }}
+          name: Lume-windows-portable
+          path: dist-portable/Lume
+          if-no-files-found: error
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lume-windows-installer
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
