@@ -13,6 +13,13 @@ import { TagInfo, ToolType } from "./types";
 import { useLibrary } from "./hooks/useLibrary";
 import { useSettings } from "./hooks/useSettings";
 
+type LibraryDragState = {
+  itemId: string;
+  title: string;
+  x: number;
+  y: number;
+};
+
 function App() {
   const {
     openTabs,
@@ -50,7 +57,22 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [annotationsRefreshKey, setAnnotationsRefreshKey] = useState(0);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [dragState, setDragState] = useState<LibraryDragState | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const draggedItemIdRef = useRef<string | null>(null);
+  const dragOverFolderIdRef = useRef<string | null>(null);
   const { settings, isLoading: isSettingsLoading } = useSettings();
+
+  const handleDragItemEnd = useCallback(() => {
+    draggedItemIdRef.current = null;
+    dragOverFolderIdRef.current = null;
+    setDraggedItemId(null);
+    setDragState(null);
+    setDragOverFolderId(null);
+    document.body.style.userSelect = "";
+    document.body.style.webkitUserSelect = "";
+    document.body.style.cursor = "";
+  }, []);
 
   // ── Tag system state ─────────────────────────────────────────────────────
   const [allTags, setAllTags] = useState<TagInfo[]>([]);
@@ -169,6 +191,90 @@ function App() {
   const selectedItem = selectedItemId ? findItem(folderTree, selectedItemId) : null;
   const isLibrary = activeTabId === 'library' || activeTabId === null;
 
+  const updateDragOverFolder = useCallback((clientX: number, clientY: number) => {
+    const target = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
+    const folderTarget = target?.closest("[data-folder-drop-id]") as HTMLElement | null;
+    const nextFolderId = folderTarget?.dataset.folderDropId ?? null;
+
+    if (dragOverFolderIdRef.current !== nextFolderId) {
+      dragOverFolderIdRef.current = nextFolderId;
+      setDragOverFolderId(nextFolderId);
+    }
+  }, []);
+
+  const handleFolderHover = useCallback((folderId: string | null) => {
+    if (dragOverFolderIdRef.current !== folderId) {
+      dragOverFolderIdRef.current = folderId;
+      setDragOverFolderId(folderId);
+    }
+  }, []);
+
+  const handleItemPointerDown = useCallback((item: { id: string; title: string }, event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+
+    const target = event.target as HTMLElement;
+    if (target.closest("button, input, textarea, select, a")) return;
+
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let isDragging = false;
+
+    const title = item.title || "Untitled";
+
+    const cleanup = () => {
+      window.removeEventListener("mousemove", handlePointerMove);
+      window.removeEventListener("mouseup", handlePointerUp);
+    };
+
+    const handlePointerMove = (moveEvent: MouseEvent) => {
+      const dx = moveEvent.clientX - startX;
+      const dy = moveEvent.clientY - startY;
+
+      if (!isDragging && Math.hypot(dx, dy) < 6) {
+        return;
+      }
+
+      if (!isDragging) {
+        isDragging = true;
+        draggedItemIdRef.current = item.id;
+        setDraggedItemId(item.id);
+        document.body.style.userSelect = "none";
+        document.body.style.webkitUserSelect = "none";
+        document.body.style.cursor = "grabbing";
+      }
+
+      setDragState({
+        itemId: item.id,
+        title,
+        x: moveEvent.clientX,
+        y: moveEvent.clientY,
+      });
+      updateDragOverFolder(moveEvent.clientX, moveEvent.clientY);
+    };
+
+    const handlePointerUp = () => {
+      cleanup();
+
+      if (!isDragging) {
+        return;
+      }
+
+      const targetFolderId = dragOverFolderIdRef.current;
+      const draggedId = draggedItemIdRef.current;
+
+      handleDragItemEnd();
+
+      if (draggedId && targetFolderId) {
+        void handleMoveItemToFolder(draggedId, targetFolderId);
+      }
+    };
+
+    window.addEventListener("mousemove", handlePointerMove);
+    window.addEventListener("mouseup", handlePointerUp);
+  }, [handleDragItemEnd, handleMoveItemToFolder, updateDragOverFolder]);
+
   const handleAnnotationsSaved = useCallback((savedPdfPath: string) => {
     if (savedPdfPath && savedPdfPath === (selectedItem?.attachments?.[0]?.path || "")) {
       setAnnotationsRefreshKey(prev => prev + 1);
@@ -260,11 +366,9 @@ function App() {
               onAddFolder={handleAddFolder}
               onRenameFolder={handleRenameFolder}
               onDeleteFolder={handleDeleteFolder}
-              onMoveItemToFolder={async (itemId, folderId) => {
-                await handleMoveItemToFolder(itemId, folderId);
-                setDraggedItemId(null);
-              }}
               draggedItemId={draggedItemId}
+              dragOverFolderId={dragOverFolderId}
+              onFolderHover={handleFolderHover}
               allTags={allTags}
               selectedTagFilter={selectedTagFilter}
               onSelectTag={t => setSelectedTagFilter(prev => prev === t ? null : t)}
@@ -283,8 +387,7 @@ function App() {
               onAddItem={handleAddItem}
               onDeleteItem={handleDeleteItem}
               onRenameItem={handleRenameItem}
-              onDragItemStart={setDraggedItemId}
-              onDragItemEnd={() => setDraggedItemId(null)}
+              onItemPointerDown={handleItemPointerDown}
               tagFilter={selectedTagFilter}
               onClearTagFilter={() => setSelectedTagFilter(null)}
             />
@@ -371,6 +474,19 @@ function App() {
         isOpen={showSettings} 
         onClose={() => setShowSettings(false)} 
       />
+
+      {dragState && (
+        <div
+          className="fixed z-[100] pointer-events-none rounded-xl border border-indigo-200 bg-white/95 px-3 py-2 shadow-xl backdrop-blur-sm"
+          style={{
+            left: dragState.x + 14,
+            top: dragState.y + 14,
+          }}
+        >
+          <div className="text-xs font-semibold text-indigo-600">Move PDF</div>
+          <div className="max-w-64 truncate text-sm text-zinc-700">{dragState.title}</div>
+        </div>
+      )}
     </div>
   );
 }

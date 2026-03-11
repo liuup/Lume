@@ -23,8 +23,9 @@ interface FolderSidebarProps {
   onAddFolder: (parentId: string, name: string) => Promise<void>;
   onRenameFolder: (folder: FolderNode, nextName: string) => Promise<void> | void;
   onDeleteFolder: (folder: FolderNode) => Promise<void> | void;
-  onMoveItemToFolder: (itemId: string, targetFolderId: string) => Promise<void>;
   draggedItemId: string | null;
+  dragOverFolderId: string | null;
+  onFolderHover: (folderId: string | null) => void;
   // ── tag system ────────
   allTags: TagInfo[];
   selectedTagFilter: string | null;
@@ -41,15 +42,15 @@ export function FolderSidebar({
   onAddFolder,
   onRenameFolder,
   onDeleteFolder,
-  onMoveItemToFolder,
   draggedItemId,
+  dragOverFolderId,
+  onFolderHover,
   allTags,
   selectedTagFilter,
   onSelectTag,
   onSetTagColor,
   onOpenSettings
 }: FolderSidebarProps) {
-  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     folder: FolderNode;
     x: number;
@@ -177,32 +178,8 @@ export function FolderSidebar({
     setRenameValue("");
   };
 
-  const hasLibraryItemDragType = (event: React.DragEvent<HTMLElement>) => {
-    const types = Array.from(event.dataTransfer.types || []);
-    return types.includes("application/x-lume-library-item")
-      || types.includes("text/plain")
-      || Boolean(draggedItemId);
-  };
-
-  const hasDraggedLibraryItem = (event: React.DragEvent<HTMLElement>) => {
-    return hasLibraryItemDragType(event);
-  };
-
   return (
-    <aside
-      className="w-64 bg-zinc-50 border-r border-zinc-200 flex flex-col h-full shrink-0"
-      onDragOver={e => {
-        if (!hasDraggedLibraryItem(e)) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-      }}
-      onDragLeave={e => {
-        if (!draggedItemId) return;
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-          setDragOverFolderId(null);
-        }
-      }}
-    >
+    <aside className="w-64 bg-zinc-50 border-r border-zinc-200 flex flex-col h-full shrink-0">
       <div className="h-14 px-4 border-b border-zinc-200 shrink-0 flex items-center">
         <button
           onClick={() => { setNewFolderParentId(selectedFolderId); setNewFolderName(""); }}
@@ -214,7 +191,14 @@ export function FolderSidebar({
       </div>
 
       {/* Folder Tree */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-2 py-2">
+      <div
+        className="flex-1 min-h-0 overflow-y-auto px-2 py-2"
+        onMouseLeave={() => {
+          if (draggedItemId) {
+            onFolderHover(null);
+          }
+        }}
+      >
         {folderTree.map(node => (
           <FolderTreeItem
             key={node.id}
@@ -223,10 +207,9 @@ export function FolderSidebar({
             selectedFolderId={selectedFolderId}
             draggedItemId={draggedItemId}
             dragOverFolderId={dragOverFolderId}
-            onSetDragOverFolder={setDragOverFolderId}
+            onFolderHover={onFolderHover}
             onSelectFolder={onSelectFolder}
             onDeleteFolder={onDeleteFolder}
-            onMoveItemToFolder={onMoveItemToFolder}
             onOpenNewFolderDialog={parentId => { setNewFolderParentId(parentId); setNewFolderName(""); }}
             onOpenContextMenu={(folder, event) => {
               onSelectFolder(folder.id);
@@ -498,10 +481,9 @@ function FolderTreeItem({
   selectedFolderId,
   draggedItemId,
   dragOverFolderId,
-  onSetDragOverFolder,
+  onFolderHover,
   onSelectFolder,
   onDeleteFolder,
-  onMoveItemToFolder,
   onOpenNewFolderDialog,
   onOpenContextMenu,
 }: {
@@ -510,35 +492,27 @@ function FolderTreeItem({
   selectedFolderId: string;
   draggedItemId: string | null;
   dragOverFolderId: string | null;
-  onSetDragOverFolder: (folderId: string | null) => void;
+  onFolderHover: (folderId: string | null) => void;
   onSelectFolder: (id: string) => void;
   onDeleteFolder: (folder: FolderNode) => Promise<void> | void;
-  onMoveItemToFolder: (itemId: string, targetFolderId: string) => Promise<void>;
   onOpenNewFolderDialog: (parentId: string) => void;
   onOpenContextMenu: (folder: FolderNode, event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
   const [open, setOpen] = useState(true);
   const isSelected = node.id === selectedFolderId;
   const hasChildren = node.children.length > 0;
-  const isDropTarget = dragOverFolderId === node.id;
+  const isDropTarget = Boolean(draggedItemId) && dragOverFolderId === node.id;
 
-  const hasLibraryItemDragType = (event: React.DragEvent<HTMLDivElement>) => {
-    const types = Array.from(event.dataTransfer.types || []);
-    return types.includes("application/x-lume-library-item")
-      || types.includes("text/plain")
-      || Boolean(draggedItemId);
-  };
-
-  const getDraggedItemId = (event: React.DragEvent<HTMLDivElement>) => {
-    return event.dataTransfer.getData("application/x-lume-library-item")
-      || event.dataTransfer.getData("text/plain")
-      || draggedItemId
-      || "";
-  };
+  useEffect(() => {
+    if (isDropTarget && hasChildren && !open) {
+      setOpen(true);
+    }
+  }, [isDropTarget, hasChildren, open]);
 
   return (
     <div>
       <div
+        data-folder-drop-id={node.id}
         className={`group flex items-center space-x-1.5 px-2 py-1.5 rounded-md cursor-pointer select-none transition-colors ${
           isDropTarget
             ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-300"
@@ -547,35 +521,17 @@ function FolderTreeItem({
             : "text-zinc-600 hover:bg-zinc-100"
         }`}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
+        onMouseEnter={() => {
+          if (draggedItemId) {
+            onFolderHover(node.id);
+          }
+        }}
+        onMouseMove={() => {
+          if (draggedItemId) {
+            onFolderHover(node.id);
+          }
+        }}
         onClick={() => { onSelectFolder(node.id); }}
-        onDragOver={e => {
-          if (!hasLibraryItemDragType(e)) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "move";
-          onSetDragOverFolder(node.id);
-          if (hasChildren && !open) {
-            setOpen(true);
-          }
-        }}
-        onDragEnter={e => {
-          if (!hasLibraryItemDragType(e)) return;
-          e.preventDefault();
-          onSetDragOverFolder(node.id);
-        }}
-        onDragLeave={e => {
-          if (!draggedItemId && dragOverFolderId !== node.id) return;
-          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-            onSetDragOverFolder(null);
-          }
-        }}
-        onDrop={async e => {
-          const itemId = getDraggedItemId(e);
-          if (!itemId) return;
-          e.preventDefault();
-          e.stopPropagation();
-          onSetDragOverFolder(null);
-          await onMoveItemToFolder(itemId, node.id);
-        }}
         onContextMenu={e => {
           if (depth === 0) return;
           e.preventDefault();
@@ -620,10 +576,9 @@ function FolderTreeItem({
               selectedFolderId={selectedFolderId}
               draggedItemId={draggedItemId}
               dragOverFolderId={dragOverFolderId}
-              onSetDragOverFolder={onSetDragOverFolder}
+              onFolderHover={onFolderHover}
               onSelectFolder={onSelectFolder}
               onDeleteFolder={onDeleteFolder}
-              onMoveItemToFolder={onMoveItemToFolder}
               onOpenNewFolderDialog={onOpenNewFolderDialog}
               onOpenContextMenu={onOpenContextMenu}
             />
