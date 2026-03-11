@@ -1,9 +1,49 @@
-name: Build Lume Windows
+name: Build Lume Desktop
 
 on:
   workflow_dispatch:
 
 jobs:
+  build-macos:
+    name: Build macOS bundle
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Inject PDFium (macOS)
+        run: |
+          curl -L -o pdfium.tgz https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-mac-arm64.tgz
+          tar -xzf pdfium.tgz lib/libpdfium.dylib
+          mv lib/libpdfium.dylib src-tauri/libpdfium.dylib
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build macOS bundle
+        run: npm run tauri build -- --target aarch64-apple-darwin --ci
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lume-macos-aarch64
+          path: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*
+          if-no-files-found: error
+
   build-windows:
     name: Build Windows portable + installer
     runs-on: windows-latest
