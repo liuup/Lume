@@ -338,6 +338,66 @@ export function useLibrary() {
       window.alert("Failed to rename folder.");
     }
   };
+
+  const handleDeleteFolder = async (folder: FolderNode) => {
+    if (folder.id === DEFAULT_FOLDER.id || !folder.path) return;
+
+    try {
+      setIsLoading(true);
+      await invoke("delete_library_folder", { path: folder.path });
+
+      const parentFolderId = folder.path.split("/").slice(0, -1).join("/") || DEFAULT_FOLDER.id;
+      await refreshLibrary(parentFolderId);
+
+      setOpenTabs(prev => {
+        const next = prev.filter(tab => !(tab.id === folder.path || tab.id.startsWith(`${folder.path}/`)));
+        if (activeTabId && (activeTabId === folder.path || activeTabId.startsWith(`${folder.path}/`))) {
+          const nextActiveId = next.length > 0 ? next[next.length - 1].id : "library";
+          setActiveTabId(nextActiveId);
+          setSelectedItemId(nextActiveId !== "library" ? nextActiveId : null);
+        }
+        return next;
+      });
+
+      setSelectedFolderId(parentFolderId);
+      setSelectedItemId(prev => prev && (prev === folder.path || prev.startsWith(`${folder.path}/`)) ? null : prev);
+    } catch (err) {
+      console.error("Failed to delete folder", err);
+      window.alert("Failed to delete folder.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleMoveItemToFolder = async (itemId: string, targetFolderId: string) => {
+    const item = findItem(folderTree, itemId);
+    const targetFolder = findFolder(folderTree, targetFolderId);
+    if (!item || !targetFolder) return;
+    if (item.folder_path === targetFolder.path) return;
+
+    try {
+      setIsLoading(true);
+      const movedPath: string = await invoke("move_library_pdf", {
+        path: item.id,
+        targetFolderPath: targetFolder.path,
+      });
+
+      const refreshedTree = await refreshLibrary(selectedFolderId);
+      const movedItem = findItem(refreshedTree, movedPath) ?? createLibraryItem(movedPath);
+
+      setOpenTabs(prev => prev.map(tab => {
+        if (tab.id !== item.id) return tab;
+        return { ...tab, id: movedItem.id, item: movedItem };
+      }));
+      setSelectedItemId(prev => prev === item.id ? movedItem.id : prev);
+      setActiveTabId(prev => prev === item.id ? movedItem.id : prev);
+    } catch (err) {
+      console.error("Failed to move Item", err);
+      window.alert("Failed to move Item.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
   
   const handleItemUpdatedLocally = async () => {
        const tree = await refreshLibrary(selectedFolderId);
@@ -376,7 +436,9 @@ export function useLibrary() {
     handleAddFolder,
     handleDeleteItem,
     handleRenameItem,
+    handleMoveItemToFolder,
     handleRenameFolder,
+    handleDeleteFolder,
     handleItemUpdatedLocally
   };
 }

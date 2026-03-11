@@ -37,7 +37,9 @@ function App() {
     handleAddFolder,
     handleDeleteItem,
     handleRenameItem,
+    handleMoveItemToFolder,
     handleRenameFolder,
+    handleDeleteFolder,
     handleItemUpdatedLocally
   } = useLibrary();
 
@@ -47,6 +49,7 @@ function App() {
   const [showSearch, setShowSearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [annotationsRefreshKey, setAnnotationsRefreshKey] = useState(0);
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const { settings, isLoading: isSettingsLoading } = useSettings();
 
   // ── Tag system state ─────────────────────────────────────────────────────
@@ -256,6 +259,12 @@ function App() {
               onSelectFolder={id => { setSelectedFolderId(id); setSelectedTagFilter(null); }}
               onAddFolder={handleAddFolder}
               onRenameFolder={handleRenameFolder}
+              onDeleteFolder={handleDeleteFolder}
+              onMoveItemToFolder={async (itemId, folderId) => {
+                await handleMoveItemToFolder(itemId, folderId);
+                setDraggedItemId(null);
+              }}
+              draggedItemId={draggedItemId}
               allTags={allTags}
               selectedTagFilter={selectedTagFilter}
               onSelectTag={t => setSelectedTagFilter(prev => prev === t ? null : t)}
@@ -274,6 +283,8 @@ function App() {
               onAddItem={handleAddItem}
               onDeleteItem={handleDeleteItem}
               onRenameItem={handleRenameItem}
+              onDragItemStart={setDraggedItemId}
+              onDragItemEnd={() => setDraggedItemId(null)}
               tagFilter={selectedTagFilter}
               onClearTagFilter={() => setSelectedTagFilter(null)}
             />

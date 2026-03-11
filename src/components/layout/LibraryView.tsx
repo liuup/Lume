@@ -43,6 +43,8 @@ interface LibraryViewProps {
   onAddItem: () => void;
   onDeleteItem: (item: LibraryItem) => void;
   onRenameItem: (item: LibraryItem, nextName: string) => Promise<void> | void;
+  onDragItemStart: (itemId: string) => void;
+  onDragItemEnd: () => void;
   /** Sidebar tag filter (null = no filter active). */
   tagFilter: string | null;
   onClearTagFilter: () => void;
@@ -57,6 +59,8 @@ export function LibraryView({
   onAddItem,
   onDeleteItem,
   onRenameItem,
+  onDragItemStart,
+  onDragItemEnd,
   tagFilter,
   onClearTagFilter,
 }: LibraryViewProps) {
@@ -321,6 +325,8 @@ export function LibraryView({
                 showFolderPath={isGlobalSearch}
                 onSelect={() => onSelectItem(item.id)}
                 onOpen={() => onOpenItem(item)}
+                onDragStart={onDragItemStart}
+                onDragEnd={onDragItemEnd}
                 onContextMenu={event => {
                   onSelectItem(item.id);
                   setContextMenu({ item, x: event.clientX, y: event.clientY });
@@ -474,6 +480,8 @@ function LibraryItemRow({
   showFolderPath,
   onSelect,
   onOpen,
+  onDragStart,
+  onDragEnd,
   onContextMenu,
 }: {
   item: LibraryItem;
@@ -482,6 +490,8 @@ function LibraryItemRow({
   showFolderPath: boolean;
   onSelect: () => void;
   onOpen: () => void;
+  onDragStart: (itemId: string) => void;
+  onDragEnd: () => void;
   onContextMenu: (event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
   const displayTitle   = item.title || item.attachments[0]?.name || "Untitled";
@@ -493,8 +503,17 @@ function LibraryItemRow({
         isSelected ? "bg-indigo-50" : "bg-white hover:bg-zinc-50"
       }`}
       data-selected={isSelected ? "true" : "false"}
+      draggable
       onClick={onSelect}
       onDoubleClick={onOpen}
+      onDragStart={e => {
+        onSelect();
+        onDragStart(item.id);
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("application/x-lume-library-item", item.id);
+        e.dataTransfer.setData("text/plain", item.id);
+      }}
+      onDragEnd={onDragEnd}
       onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu(e); }}
       title="Double-click to open"
     >

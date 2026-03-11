@@ -425,6 +425,41 @@ pub fn sync_item_to_db(conn: &rusqlite::Connection, item: &LibraryItem) -> rusql
     Ok(())
 }
 
+pub fn rekey_library_item_in_db(
+    conn: &rusqlite::Connection,
+    old_id: &str,
+    new_id: &str,
+    new_folder_path: &str,
+) -> rusqlite::Result<()> {
+    if let Some(mut item) = fetch_item_from_db(conn, old_id)? {
+        item.id = new_id.to_string();
+        item.folder_path = new_folder_path.to_string();
+
+        if let Some(att) = item.attachments.first_mut() {
+            att.id = format!("att-{}", new_id);
+            att.item_id = new_id.to_string();
+            att.path = new_id.to_string();
+        }
+
+        sync_item_to_db(conn, &item)?;
+        conn.execute(
+            "UPDATE notes SET item_id = ?1 WHERE item_id = ?2",
+            rusqlite::params![new_id, old_id],
+        )?;
+        conn.execute(
+            "UPDATE item_tags SET item_id = ?1 WHERE item_id = ?2",
+            rusqlite::params![new_id, old_id],
+        )?;
+        conn.execute(
+            "DELETE FROM attachments WHERE item_id = ?1",
+            rusqlite::params![old_id],
+        )?;
+        conn.execute("DELETE FROM items WHERE id = ?1", rusqlite::params![old_id])?;
+    }
+
+    Ok(())
+}
+
 pub fn build_library_tree(path: &Path, is_root: bool, conn: &rusqlite::Connection) -> Result<crate::models::LibraryFolderNode, String> {
     fs::create_dir_all(path)
         .map_err(|e| format!("Failed to prepare library folder: {}", e))?;
@@ -739,16 +774,71 @@ pub fn rename_library_pdf(path: String, new_name: String, state: tauri::State<'_
     let target_path_str = target.to_string_lossy().to_string();
     
     if let Ok(conn) = state.db.lock() {
-        if let Ok(Some(mut item)) = fetch_item_from_db(&conn, &path) {
-            item.id = target_path_str.clone();
-            if let Some(att) = item.attachments.first_mut() {
-                att.id = format!("att-{}", target_path_str);
-                att.item_id = target_path_str.clone();
-                att.path = target_path_str.clone();
-            }
-            let _ = conn.execute("DELETE FROM items WHERE id = ?1", rusqlite::params![&path]);
-            let _ = sync_item_to_db(&conn, &item);
-        }
+        let new_folder_path = target
+            .parent()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let _ = rekey_library_item_in_db(&conn, &path, &target_path_str, &new_folder_path);
+    }
+
+    Ok(target_path_str)
+}
+
+#[tauri::command]
+pub fn move_library_pdf(
+    app: tauri::AppHandle,
+    path: String,
+    target_folder_path: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<String, String> {
+    let source = PathBuf::from(&path);
+    if !source.exists() {
+        return Err("PDF does not exist".to_string());
+    }
+
+    if !source.is_file() || !is_pdf_file(&source) {
+        return Err("Only library PDF files can be moved".to_string());
+    }
+
+    let target_folder = PathBuf::from(&target_folder_path);
+    if !target_folder.exists() {
+        return Err("Target folder does not exist".to_string());
+    }
+
+    if !target_folder.is_dir() {
+        return Err("Target must be a folder".to_string());
+    }
+
+    let library_root = library_root_dir(&app)?;
+    if !is_path_within(&library_root, &source) || !is_path_within(&library_root, &target_folder) {
+        return Err("Source or target is outside the library".to_string());
+    }
+
+    let source_parent = source.parent().ok_or("Invalid PDF path")?;
+    if source_parent == target_folder {
+        return Ok(path);
+    }
+
+    let file_name = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or("Invalid PDF name")?;
+    let target = unique_file_path(&target_folder, file_name);
+
+    {
+        let mut docs = state.documents.lock().unwrap();
+        docs.remove(&path);
+    }
+
+    fs::rename(&source, &target)
+        .map_err(|e| format!("Failed to move PDF: {}", e))?;
+
+    rename_cached_pdf_metadata(&source, &target);
+    rename_annotation_sidecar(&source, &target);
+
+    let target_path_str = target.to_string_lossy().to_string();
+    if let Ok(conn) = state.db.lock() {
+        let _ = rekey_library_item_in_db(&conn, &path, &target_path_str, &target_folder_path);
     }
 
     Ok(target_path_str)
@@ -823,6 +913,67 @@ pub fn rename_library_folder(
     }
 
     Ok(target.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn delete_library_folder(
+    app: tauri::AppHandle,
+    path: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    if !target.exists() {
+        return Err("Folder does not exist".to_string());
+    }
+    if !target.is_dir() {
+        return Err("Only library folders can be deleted".to_string());
+    }
+
+    let library_root = library_root_dir(&app)?;
+    if target == library_root {
+        return Err("The library root folder cannot be deleted".to_string());
+    }
+    if !is_path_within(&library_root, &target) {
+        return Err("Folder is outside the library".to_string());
+    }
+
+    {
+        let mut docs = state.documents.lock().unwrap();
+        let keys_to_remove = docs
+            .keys()
+            .filter(|key| key.starts_with(&format!("{}/", path)))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        for key in keys_to_remove {
+            docs.remove(&key);
+        }
+    }
+
+    fs::remove_dir_all(&target)
+        .map_err(|e| format!("Failed to delete folder: {}", e))?;
+
+    if let Ok(conn) = state.db.lock() {
+        let pattern = format!("{}/%", path);
+        let _ = conn.execute(
+            "DELETE FROM attachments WHERE item_id LIKE ?1",
+            rusqlite::params![&pattern],
+        );
+        let _ = conn.execute(
+            "DELETE FROM notes WHERE item_id LIKE ?1",
+            rusqlite::params![&pattern],
+        );
+        let _ = conn.execute(
+            "DELETE FROM item_tags WHERE item_id LIKE ?1",
+            rusqlite::params![&pattern],
+        );
+        let _ = conn.execute(
+            "DELETE FROM items WHERE id LIKE ?1",
+            rusqlite::params![&pattern],
+        );
+    }
+
+    Ok(())
 }
 
 // ─────────────────────────────────────────────────────────────

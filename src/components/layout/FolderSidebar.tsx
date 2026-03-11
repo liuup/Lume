@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, FilePenLine, Folder, FolderOpen, FolderPlus, Hash, Plus, Settings } from "lucide-react";
+import { ChevronRight, FilePenLine, Folder, FolderOpen, FolderPlus, Hash, Plus, Settings, Trash2 } from "lucide-react";
 import { FolderNode, TagInfo } from "../../types";
 
 // ── Preset tag palette ──────────────────────────────────────────────────────
@@ -22,6 +22,9 @@ interface FolderSidebarProps {
   onSelectFolder: (id: string) => void;
   onAddFolder: (parentId: string, name: string) => Promise<void>;
   onRenameFolder: (folder: FolderNode, nextName: string) => Promise<void> | void;
+  onDeleteFolder: (folder: FolderNode) => Promise<void> | void;
+  onMoveItemToFolder: (itemId: string, targetFolderId: string) => Promise<void>;
+  draggedItemId: string | null;
   // ── tag system ────────
   allTags: TagInfo[];
   selectedTagFilter: string | null;
@@ -37,12 +40,16 @@ export function FolderSidebar({
   onSelectFolder,
   onAddFolder,
   onRenameFolder,
+  onDeleteFolder,
+  onMoveItemToFolder,
+  draggedItemId,
   allTags,
   selectedTagFilter,
   onSelectTag,
   onSetTagColor,
   onOpenSettings
 }: FolderSidebarProps) {
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     folder: FolderNode;
     x: number;
@@ -170,8 +177,32 @@ export function FolderSidebar({
     setRenameValue("");
   };
 
+  const hasLibraryItemDragType = (event: React.DragEvent<HTMLElement>) => {
+    const types = Array.from(event.dataTransfer.types || []);
+    return types.includes("application/x-lume-library-item")
+      || types.includes("text/plain")
+      || Boolean(draggedItemId);
+  };
+
+  const hasDraggedLibraryItem = (event: React.DragEvent<HTMLElement>) => {
+    return hasLibraryItemDragType(event);
+  };
+
   return (
-    <aside className="w-64 bg-zinc-50 border-r border-zinc-200 flex flex-col h-full shrink-0">
+    <aside
+      className="w-64 bg-zinc-50 border-r border-zinc-200 flex flex-col h-full shrink-0"
+      onDragOver={e => {
+        if (!hasDraggedLibraryItem(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      }}
+      onDragLeave={e => {
+        if (!draggedItemId) return;
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setDragOverFolderId(null);
+        }
+      }}
+    >
       <div className="h-14 px-4 border-b border-zinc-200 shrink-0 flex items-center">
         <button
           onClick={() => { setNewFolderParentId(selectedFolderId); setNewFolderName(""); }}
@@ -190,7 +221,12 @@ export function FolderSidebar({
             node={node}
             depth={0}
             selectedFolderId={selectedFolderId}
+            draggedItemId={draggedItemId}
+            dragOverFolderId={dragOverFolderId}
+            onSetDragOverFolder={setDragOverFolderId}
             onSelectFolder={onSelectFolder}
+            onDeleteFolder={onDeleteFolder}
+            onMoveItemToFolder={onMoveItemToFolder}
             onOpenNewFolderDialog={parentId => { setNewFolderParentId(parentId); setNewFolderName(""); }}
             onOpenContextMenu={(folder, event) => {
               onSelectFolder(folder.id);
@@ -274,6 +310,17 @@ export function FolderSidebar({
           >
             <FilePenLine size={15} />
             <span>Rename Folder</span>
+          </button>
+          <button
+            onClick={async () => {
+              const folder = contextMenu.folder;
+              setContextMenu(null);
+              await onDeleteFolder(folder);
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+          >
+            <Trash2 size={15} />
+            <span>Delete Folder</span>
           </button>
         </div>
       )}
@@ -449,31 +496,86 @@ function FolderTreeItem({
   node,
   depth,
   selectedFolderId,
+  draggedItemId,
+  dragOverFolderId,
+  onSetDragOverFolder,
   onSelectFolder,
+  onDeleteFolder,
+  onMoveItemToFolder,
   onOpenNewFolderDialog,
   onOpenContextMenu,
 }: {
   node: FolderNode;
   depth: number;
   selectedFolderId: string;
+  draggedItemId: string | null;
+  dragOverFolderId: string | null;
+  onSetDragOverFolder: (folderId: string | null) => void;
   onSelectFolder: (id: string) => void;
+  onDeleteFolder: (folder: FolderNode) => Promise<void> | void;
+  onMoveItemToFolder: (itemId: string, targetFolderId: string) => Promise<void>;
   onOpenNewFolderDialog: (parentId: string) => void;
   onOpenContextMenu: (folder: FolderNode, event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
   const [open, setOpen] = useState(true);
   const isSelected = node.id === selectedFolderId;
   const hasChildren = node.children.length > 0;
+  const isDropTarget = dragOverFolderId === node.id;
+
+  const hasLibraryItemDragType = (event: React.DragEvent<HTMLDivElement>) => {
+    const types = Array.from(event.dataTransfer.types || []);
+    return types.includes("application/x-lume-library-item")
+      || types.includes("text/plain")
+      || Boolean(draggedItemId);
+  };
+
+  const getDraggedItemId = (event: React.DragEvent<HTMLDivElement>) => {
+    return event.dataTransfer.getData("application/x-lume-library-item")
+      || event.dataTransfer.getData("text/plain")
+      || draggedItemId
+      || "";
+  };
 
   return (
     <div>
       <div
         className={`group flex items-center space-x-1.5 px-2 py-1.5 rounded-md cursor-pointer select-none transition-colors ${
-          isSelected
+          isDropTarget
+            ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-300"
+            : isSelected
             ? "bg-indigo-50 text-indigo-700"
             : "text-zinc-600 hover:bg-zinc-100"
         }`}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
         onClick={() => { onSelectFolder(node.id); }}
+        onDragOver={e => {
+          if (!hasLibraryItemDragType(e)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          onSetDragOverFolder(node.id);
+          if (hasChildren && !open) {
+            setOpen(true);
+          }
+        }}
+        onDragEnter={e => {
+          if (!hasLibraryItemDragType(e)) return;
+          e.preventDefault();
+          onSetDragOverFolder(node.id);
+        }}
+        onDragLeave={e => {
+          if (!draggedItemId && dragOverFolderId !== node.id) return;
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+            onSetDragOverFolder(null);
+          }
+        }}
+        onDrop={async e => {
+          const itemId = getDraggedItemId(e);
+          if (!itemId) return;
+          e.preventDefault();
+          e.stopPropagation();
+          onSetDragOverFolder(null);
+          await onMoveItemToFolder(itemId, node.id);
+        }}
         onContextMenu={e => {
           if (depth === 0) return;
           e.preventDefault();
@@ -516,7 +618,12 @@ function FolderTreeItem({
               node={child}
               depth={depth + 1}
               selectedFolderId={selectedFolderId}
+              draggedItemId={draggedItemId}
+              dragOverFolderId={dragOverFolderId}
+              onSetDragOverFolder={onSetDragOverFolder}
               onSelectFolder={onSelectFolder}
+              onDeleteFolder={onDeleteFolder}
+              onMoveItemToFolder={onMoveItemToFolder}
               onOpenNewFolderDialog={onOpenNewFolderDialog}
               onOpenContextMenu={onOpenContextMenu}
             />
