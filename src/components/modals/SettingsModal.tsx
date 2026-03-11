@@ -1,5 +1,5 @@
 import { X, Moon, Sun, Monitor, Type, FileArchive, Settings } from "lucide-react";
-import { useSettings } from "../../hooks/useSettings";
+import { AppTheme, useSettings } from "../../hooks/useSettings";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -7,7 +7,13 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const { settings, updateSetting, isLoading } = useSettings();
+  const { settings, updateSetting, isLoading, resolvedTheme } = useSettings();
+
+  const themeOptions: { value: AppTheme; label: string }[] = [
+    { value: "light", label: "Light" },
+    { value: "dark", label: "Dark" },
+    { value: "auto", label: "Auto" },
+  ];
 
   if (!isOpen) return null;
 
@@ -40,19 +46,19 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-sm font-medium text-zinc-800">Theme</div>
-                    <div className="text-xs text-zinc-500">Choose the app's visual style</div>
+                    <div className="text-xs text-zinc-500">Choose the app's visual style{settings.theme === "auto" ? ` · now following ${resolvedTheme}` : ""}</div>
                   </div>
                   <div className="flex p-1 bg-zinc-100 rounded-lg">
-                    {['light', 'dark', 'system'].map(t => (
+                    {themeOptions.map(({ value, label }) => (
                       <button
-                        key={t}
-                        onClick={() => updateSetting('theme', t as any)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${settings.theme === t ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
+                        key={value}
+                        onClick={() => updateSetting('theme', value)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md capitalize transition-colors ${settings.theme === value ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'}`}
                       >
-                        {t === 'light' && <Sun size={14} />}
-                        {t === 'dark' && <Moon size={14} />}
-                        {t === 'system' && <Monitor size={14} />}
-                        {t}
+                        {value === 'light' && <Sun size={14} />}
+                        {value === 'dark' && <Moon size={14} />}
+                        {value === 'auto' && <Monitor size={14} />}
+                        {label}
                       </button>
                     ))}
                   </div>

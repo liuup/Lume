@@ -9,6 +9,7 @@ interface AnnotationLayerProps {
   height: number;
   scale: number;
   activeTool: ToolType;
+  onAnnotationsSaved?: (pdfPath: string) => void;
 }
 
 interface Point {
@@ -45,7 +46,7 @@ interface ActiveTextInput {
 const BASE_FONT_SIZE = 13;
 const FONT_FAMILY = "system-ui, -apple-system, sans-serif";
 
-export function AnnotationLayer({ pdfPath, pageIndex, width, height, scale, activeTool }: AnnotationLayerProps) {
+export function AnnotationLayer({ pdfPath, pageIndex, width, height, scale, activeTool, onAnnotationsSaved }: AnnotationLayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hasLoadedAnnotationsRef = useRef(false);
@@ -99,17 +100,23 @@ export function AnnotationLayer({ pdfPath, pageIndex, width, height, scale, acti
         textAnnotations,
       };
 
-      invoke("save_pdf_annotations", { path: pdfPath, pageIndex, annotations: payload }).catch((error) => {
-        if (latestSaveRequestRef.current === requestId) {
-          console.error(`Failed to save annotations for page ${pageIndex + 1}`, error);
-        }
-      });
+      invoke("save_pdf_annotations", { path: pdfPath, pageIndex, annotations: payload })
+        .then(() => {
+          if (latestSaveRequestRef.current === requestId) {
+            onAnnotationsSaved?.(pdfPath);
+          }
+        })
+        .catch((error) => {
+          if (latestSaveRequestRef.current === requestId) {
+            console.error(`Failed to save annotations for page ${pageIndex + 1}`, error);
+          }
+        });
     }, 250);
 
     return () => {
       window.clearTimeout(timer);
     };
-  }, [paths, textAnnotations, pdfPath, pageIndex]);
+  }, [paths, textAnnotations, pdfPath, pageIndex, onAnnotationsSaved]);
 
   // ── Canvas redraw ────────────────────────────────────────────────────────────
   useEffect(() => {

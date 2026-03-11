@@ -6,8 +6,10 @@ export interface Setting {
   value: string;
 }
 
+export type AppTheme = 'light' | 'dark' | 'auto';
+
 export interface AppSettings {
-  theme: 'light' | 'dark' | 'system';
+  theme: AppTheme;
   defaultPdfZoom: string;
   autoRenamePdf: boolean;
   renamePattern: string;
@@ -15,17 +17,38 @@ export interface AppSettings {
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  theme: 'system',
+  theme: 'auto',
   defaultPdfZoom: 'page-fit',
   autoRenamePdf: true,
   renamePattern: '[Year] - [Author] - [Title]',
   defaultCitationFormat: 'apa',
 };
 
+function normalizeTheme(value: string | undefined): AppTheme {
+  if (value === 'dark' || value === 'light' || value === 'auto') {
+    return value;
+  }
+
+  if (value === 'system') {
+    return 'auto';
+  }
+
+  return DEFAULT_SETTINGS.theme;
+}
+
+function resolveTheme(theme: AppTheme, prefersDark: boolean): 'light' | 'dark' {
+  if (theme === 'auto') {
+    return prefersDark ? 'dark' : 'light';
+  }
+
+  return theme;
+}
+
 interface SettingsContextType {
   settings: AppSettings;
   updateSetting: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => Promise<void>;
   isLoading: boolean;
+  resolvedTheme: 'light' | 'dark';
 }
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
@@ -33,6 +56,10 @@ const SettingsContext = createContext<SettingsContextType | undefined>(undefined
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isLoading, setIsLoading] = useState(true);
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window === 'undefined') return 'light';
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
 
   useEffect(() => {
     async function loadSettings() {
@@ -43,6 +70,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         for (const s of storedSettings) {
            if (s.key === 'autoRenamePdf') {
              loaded[s.key] = s.value === 'true';
+           } else if (s.key === 'theme') {
+             loaded.theme = normalizeTheme(s.value);
            } else {
              loaded[s.key as keyof AppSettings] = s.value as any;
            }
@@ -57,6 +86,33 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     }
     loadSettings();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+
+    const applyTheme = () => {
+      const nextResolvedTheme = resolveTheme(settings.theme, mediaQuery.matches);
+      const root = document.documentElement;
+
+      root.classList.toggle('dark', nextResolvedTheme === 'dark');
+      root.dataset.theme = settings.theme;
+      root.style.colorScheme = nextResolvedTheme;
+      setResolvedTheme(nextResolvedTheme);
+    };
+
+    applyTheme();
+
+    const handleSystemThemeChange = () => {
+      if (settings.theme === 'auto') {
+        applyTheme();
+      }
+    };
+
+    mediaQuery.addEventListener('change', handleSystemThemeChange);
+    return () => mediaQuery.removeEventListener('change', handleSystemThemeChange);
+  }, [settings.theme]);
 
   const updateSetting = async <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     const stringValue = typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value);
@@ -73,7 +129,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <SettingsContext.Provider value={{ settings, updateSetting, isLoading }}>
+    <SettingsContext.Provider value={{ settings, updateSetting, isLoading, resolvedTheme }}>
       {children}
     </SettingsContext.Provider>
   );

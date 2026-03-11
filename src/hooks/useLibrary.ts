@@ -45,26 +45,25 @@ export function useLibrary() {
         await invoke("load_pdf", { path: pdfPath });
         if (!isMounted) return;
 
-        // If the active tab has no dimensions (e.g. data was lost), re-fetch them now
-        setOpenTabs(prev => {
-          const tab = prev.find(t => t.item.attachments?.[0]?.path === pdfPath || t.item.id === pdfPath);
-          if (tab && tab.dimensions.length === 0) {
-            // Kick off async dimension fetch and patch the tab in state once done
-            invoke<PageDimension[]>("get_pdf_dimensions", { path: pdfPath })
-              .then(dims => {
-                if (!isMounted) return;
-                setOpenTabs(tabs => tabs.map(t =>
-                  (t.item.attachments?.[0]?.path === pdfPath || t.item.id === pdfPath)
-                    ? { ...t, dimensions: dims }
-                    : t
-                ));
-              })
-              .catch(err => console.error("Failed to recover PDF dimensions", err));
+        // If the active tab has no dimensions (e.g. data was lost), re-fetch them now.
+        // Read current tabs to check, then kick off an async fetch OUTSIDE setState.
+        const currentTabs = openTabs;
+        const tab = currentTabs.find(t => t.item.attachments?.[0]?.path === pdfPath || t.item.id === pdfPath);
+        if (tab && tab.dimensions.length === 0) {
+          try {
+            const dims = await invoke<PageDimension[]>("get_pdf_dimensions", { path: pdfPath });
+            if (!isMounted) return;
+            setOpenTabs(tabs => tabs.map(t =>
+              (t.item.attachments?.[0]?.path === pdfPath || t.item.id === pdfPath)
+                ? { ...t, dimensions: dims }
+                : t
+            ));
+          } catch (err) {
+            console.error("Failed to recover PDF dimensions", err);
           }
-          return prev; // no synchronous change
-        });
+        }
 
-        setIsLoading(false);
+        if (isMounted) setIsLoading(false);
       } catch (err) {
         console.error("Failed to switch PDF context", err);
         if (isMounted) setIsLoading(false);

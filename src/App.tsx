@@ -46,6 +46,7 @@ function App() {
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
   const [showSearch, setShowSearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [annotationsRefreshKey, setAnnotationsRefreshKey] = useState(0);
   const { settings, isLoading: isSettingsLoading } = useSettings();
 
   // ── Tag system state ─────────────────────────────────────────────────────
@@ -164,6 +165,12 @@ function App() {
 
   const selectedItem = selectedItemId ? findItem(folderTree, selectedItemId) : null;
   const isLibrary = activeTabId === 'library' || activeTabId === null;
+
+  const handleAnnotationsSaved = useCallback((savedPdfPath: string) => {
+    if (savedPdfPath && savedPdfPath === (selectedItem?.attachments?.[0]?.path || "")) {
+      setAnnotationsRefreshKey(prev => prev + 1);
+    }
+  }, [selectedItem?.attachments]);
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-50">
@@ -324,6 +331,7 @@ function App() {
                     scale={scale} 
                     activeTool={activeTool}
                     currentPage={tab.currentPage}
+                    onAnnotationsSaved={handleAnnotationsSaved}
                   />
                 </div>
               ))}
@@ -342,6 +350,7 @@ function App() {
               refreshAllTags();
             }}
             onPageJump={handlePageJump}
+            annotationsRefreshKey={annotationsRefreshKey}
           />
         )}
       </div>

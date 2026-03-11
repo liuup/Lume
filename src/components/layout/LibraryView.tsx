@@ -489,9 +489,10 @@ function LibraryItemRow({
 
   return (
     <div
-      className={`group flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors select-none ${
+      className={`library-item-row group flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors select-none ${
         isSelected ? "bg-indigo-50" : "bg-white hover:bg-zinc-50"
       }`}
+      data-selected={isSelected ? "true" : "false"}
       onClick={onSelect}
       onDoubleClick={onOpen}
       onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu(e); }}
@@ -504,7 +505,7 @@ function LibraryItemRow({
       </div>
 
       <div className="min-w-0 flex-1">
-        <h3 className="text-sm font-semibold text-zinc-800 truncate group-hover:text-indigo-900 transition-colors">
+        <h3 className="library-item-title text-sm font-semibold text-zinc-800 truncate group-hover:text-indigo-900 transition-colors">
           {highlight ? highlightText(displayTitle, highlight) : displayTitle}
         </h3>
         <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500 min-w-0 flex-wrap">

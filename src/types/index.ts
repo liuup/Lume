@@ -88,12 +88,12 @@ export interface SavedTextAnnotation {
   x: number;
   y: number;
   text: string;
-  font_size: number;
+  fontSize: number;
 }
 
 export interface SavedPdfPageAnnotations {
   paths: SavedAnnotationPath[];
-  text_annotations: SavedTextAnnotation[];
+  textAnnotations: SavedTextAnnotation[];
 }
 
 export interface SavedPdfAnnotationsDocument {

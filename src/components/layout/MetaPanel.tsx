@@ -21,9 +21,61 @@ interface MetaPanelProps {
   onItemUpdated?: () => void;
   tagColors?: Record<string, string>;
   onPageJump?: (page: number) => void;
+  annotationsRefreshKey?: number;
 }
 
-export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagColors = {}, onPageJump }: MetaPanelProps) {
+type RawSavedTextAnnotation = {
+  x: number;
+  y: number;
+  text: string;
+  fontSize?: number;
+  font_size?: number;
+};
+
+type RawSavedPdfPageAnnotations = {
+  paths?: SavedPdfAnnotationsDocument["pages"][string]["paths"];
+  textAnnotations?: RawSavedTextAnnotation[];
+  text_annotations?: RawSavedTextAnnotation[];
+};
+
+type RawSavedPdfAnnotationsDocument = {
+  version?: number;
+  pages?: Record<string, RawSavedPdfPageAnnotations>;
+};
+
+function normalizePdfAnnotations(document: RawSavedPdfAnnotationsDocument | null | undefined): SavedPdfAnnotationsDocument | null {
+  if (!document) return null;
+
+  const normalizedPages = Object.fromEntries(
+    Object.entries(document.pages ?? {}).map(([pageKey, pageData]) => {
+      const rawTextAnnotations = Array.isArray(pageData?.textAnnotations)
+        ? pageData.textAnnotations
+        : Array.isArray(pageData?.text_annotations)
+          ? pageData.text_annotations
+          : [];
+
+      return [
+        pageKey,
+        {
+          paths: Array.isArray(pageData?.paths) ? pageData.paths : [],
+          textAnnotations: rawTextAnnotations.map((annotation) => ({
+            x: annotation.x,
+            y: annotation.y,
+            text: annotation.text,
+            fontSize: annotation.fontSize ?? annotation.font_size ?? 13,
+          })),
+        },
+      ];
+    }),
+  );
+
+  return {
+    version: document.version ?? 1,
+    pages: normalizedPages,
+  };
+}
+
+export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagColors = {}, onPageJump, annotationsRefreshKey = 0 }: MetaPanelProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editFormData, setEditFormData] = useState<Partial<LibraryItem>>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -50,6 +102,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   // ── Annotations list state ───────────────────────────────────────────────────
   const [pdfAnnotations, setPdfAnnotations] = useState<SavedPdfAnnotationsDocument | null>(null);
   const [isLoadingAnnotations, setIsLoadingAnnotations] = useState(false);
+  const hasLoadedAnnotationsRef = useRef(false);
 
   const generateCite = useCallback(async (itemId: string, fmt: CitationFormat) => {
     try {
@@ -99,7 +152,12 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
     setIsEditing(false);
   }, [selectedItem?.id]);
 
-  // Load note and annotations when selection changes
+  useEffect(() => {
+    setPdfAnnotations(null);
+    hasLoadedAnnotationsRef.current = false;
+  }, [selectedItem?.attachments?.[0]?.path]);
+
+  // Load note when selection changes
   useEffect(() => {
     const loadNote = async () => {
       if (!selectedItem) {
@@ -119,30 +177,44 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
       }
     };
 
+    loadNote();
+  }, [selectedItem?.id, isOpen]);
+
+  // Load annotations when selection changes or annotations are updated
+  useEffect(() => {
     const loadAnnotations = async () => {
       if (!selectedItem || !selectedItem.attachments?.[0]?.path) {
         setPdfAnnotations(null);
         return;
       }
-      setIsLoadingAnnotations(true);
+
+      const shouldShowLoadingState = !hasLoadedAnnotationsRef.current;
+      if (shouldShowLoadingState) {
+        setIsLoadingAnnotations(true);
+      }
+
       try {
-        const result = await invoke<SavedPdfAnnotationsDocument>("get_all_annotations", {
+        const result = await invoke<RawSavedPdfAnnotationsDocument>("get_all_annotations", {
           path: selectedItem.attachments?.[0]?.path,
         });
-        setPdfAnnotations(result);
+        setPdfAnnotations(normalizePdfAnnotations(result));
+        hasLoadedAnnotationsRef.current = true;
       } catch (err) {
         console.error("Failed to load full annotations array:", err);
-        setPdfAnnotations(null);
+        if (shouldShowLoadingState) {
+          setPdfAnnotations(null);
+        }
       } finally {
-        setIsLoadingAnnotations(false);
+        if (shouldShowLoadingState) {
+          setIsLoadingAnnotations(false);
+        }
       }
     };
 
-    loadNote();
     // Use setTimeout or a background queue to not block the main note loading UI immediately
     const t = setTimeout(loadAnnotations, 100);
     return () => clearTimeout(t);
-  }, [selectedItem?.id, isOpen]);
+  }, [selectedItem?.id, selectedItem?.attachments, isOpen, annotationsRefreshKey]);
 
   if (!isOpen) return null;
 
@@ -520,7 +592,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                 <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Pdf Annotations</span>
               </div>
               
-              {isLoadingAnnotations ? (
+                {isLoadingAnnotations && !pdfAnnotations ? (
                  <div className="py-4 text-center text-xs text-zinc-400 animate-pulse">Loading annotations...</div>
               ) : !pdfAnnotations || Object.keys(pdfAnnotations.pages).length === 0 ? (
                  <div className="py-4 text-center text-xs text-zinc-400 bg-zinc-50 rounded-lg border border-dashed border-zinc-200">
@@ -533,12 +605,14 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                     .map(([pageKey, pageData]) => {
                       const pageIdx = parseInt(pageKey, 10);
                       const displayPage = pageIdx + 1;
+                      const textAnnotations = pageData.textAnnotations ?? [];
+                      const paths = pageData.paths ?? [];
                       
-                      const hasItems = pageData.text_annotations.length > 0 || pageData.paths.length > 0;
+                      const hasItems = textAnnotations.length > 0 || paths.length > 0;
                       if (!hasItems) return null;
 
                       // Sort text annotations top to bottom
-                      const sortedTextAnns = [...pageData.text_annotations].sort((a, b) => a.y - b.y);
+                      const sortedTextAnns = [...textAnnotations].sort((a, b) => a.y - b.y);
 
                       return (
                         <div key={pageKey} className="text-sm">
@@ -560,7 +634,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                               </div>
                             ))}
                             {/* Render Draw/Highlight summaries (if any, keeping it compact) */}
-                            {pageData.paths.length > 0 && (
+                            {paths.length > 0 && (
                                <div 
                                  className="pl-3 py-0.5 flex items-center gap-2 cursor-pointer hover:opacity-80"
                                  onClick={() => onPageJump && onPageJump(displayPage)}
@@ -568,7 +642,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                                   <div className="w-4 h-4 rounded bg-yellow-200/50 flex items-center justify-center border border-yellow-300">
                                     <Highlighter size={10} className="text-yellow-600" />
                                   </div>
-                                  <span className="text-xs text-zinc-500">{pageData.paths.length} draw/highlight actions</span>
+                                  <span className="text-xs text-zinc-500">{paths.length} draw/highlight actions</span>
                                </div>
                             )}
                           </div>

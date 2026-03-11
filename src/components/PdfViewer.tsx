@@ -11,6 +11,7 @@ interface PdfViewerProps {
   scale: number;
   activeTool: ToolType;
   currentPage: number;
+  onAnnotationsSaved?: (pdfPath: string) => void;
 }
 
 const pageImageCache = new Map<string, string>();
@@ -105,7 +106,31 @@ async function requestRenderedPage(pdfPath: string, pageIndex: number, scale: nu
   return nextRequest;
 }
 
-export function PdfViewer({ pdfPath, totalPages, dimensions, scale, activeTool, currentPage }: PdfViewerProps) {
+export function PdfViewer({ pdfPath, totalPages, dimensions, scale, activeTool, currentPage, onAnnotationsSaved }: PdfViewerProps) {
+  const prefetchPages = useMemo(() => {
+    if (dimensions.length === 0) return [];
+    const indices: number[] = [];
+    const centerIndex = Math.max(0, currentPage - 1);
+
+    for (let offset = -1; offset <= 2; offset += 1) {
+      const nextIndex = centerIndex + offset;
+      if (nextIndex >= 0 && nextIndex < totalPages) {
+        indices.push(nextIndex);
+      }
+    }
+
+    return indices;
+  }, [currentPage, totalPages, dimensions.length]);
+
+  useEffect(() => {
+    if (dimensions.length === 0) return;
+    prefetchPages.forEach((pageIndex) => {
+      requestRenderedPage(pdfPath, pageIndex, getPreviewRenderScale(scale)).catch((error) => {
+        console.error(`Failed to prefetch page ${pageIndex}`, error);
+      });
+    });
+  }, [pdfPath, prefetchPages, scale, dimensions.length]);
+
   if (dimensions.length === 0) {
     // Show a loading skeleton instead of a blank white screen while dimensions are loading
     return (
@@ -127,40 +152,19 @@ export function PdfViewer({ pdfPath, totalPages, dimensions, scale, activeTool, 
     );
   }
 
-  const prefetchPages = useMemo(() => {
-    const indices: number[] = [];
-    const centerIndex = Math.max(0, currentPage - 1);
-
-    for (let offset = -1; offset <= 2; offset += 1) {
-      const nextIndex = centerIndex + offset;
-      if (nextIndex >= 0 && nextIndex < totalPages) {
-        indices.push(nextIndex);
-      }
-    }
-
-    return indices;
-  }, [currentPage, totalPages]);
-
-  useEffect(() => {
-    prefetchPages.forEach((pageIndex) => {
-      requestRenderedPage(pdfPath, pageIndex, getPreviewRenderScale(scale)).catch((error) => {
-        console.error(`Failed to prefetch page ${pageIndex}`, error);
-      });
-    });
-  }, [pdfPath, prefetchPages, scale]);
-
   return (
     <div className="flex flex-col items-center py-6 space-y-4 min-w-full">
-      {Array.from({ length: totalPages }).map((_, i) => (
-        <MemoPageRender 
-          key={`page-${i}`} 
+      {dimensions.map((dim, i) => (
+        <MemoPageRender
+          key={`page-${i}`}
           pdfPath={pdfPath}
-          pageIndex={i} 
-          dimension={dimensions[i]} 
-          scale={scale} 
+          pageIndex={i}
+          dimension={dim}
+          scale={scale}
           activeTool={activeTool}
           shouldPrefetch={prefetchPages.includes(i)}
           shouldLoadText={true}
+          onAnnotationsSaved={onAnnotationsSaved}
         />
       ))}
     </div>
@@ -175,9 +179,10 @@ interface PageRenderProps {
   activeTool: ToolType;
   shouldPrefetch: boolean;
   shouldLoadText: boolean;
+  onAnnotationsSaved?: (pdfPath: string) => void;
 }
 
-function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool, shouldPrefetch, shouldLoadText }: PageRenderProps) {
+function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool, shouldPrefetch, shouldLoadText, onAnnotationsSaved }: PageRenderProps) {
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
@@ -297,7 +302,7 @@ function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool, shouldPr
         )}
         
         <TextLayer pdfPath={pdfPath} pageIndex={pageIndex} scale={scale} width={width} height={height} isVisible={isVisible} shouldLoad={shouldLoadText} />
-        <AnnotationLayer pdfPath={pdfPath} pageIndex={pageIndex} width={width} height={height} scale={scale} activeTool={activeTool} />
+        <AnnotationLayer pdfPath={pdfPath} pageIndex={pageIndex} width={width} height={height} scale={scale} activeTool={activeTool} onAnnotationsSaved={onAnnotationsSaved} />
       </div>
     </div>
   );
