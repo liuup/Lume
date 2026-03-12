@@ -141,10 +141,16 @@ jobs:
 
           mkdir -p "$DIST_DIR"
 
-          shopt -s nullglob
-          mac_dmg=(release-assets/Lume-macos-aarch64/*.dmg)
-          windows_installer=(release-assets/Lume-windows-installer/*.exe)
-          shopt -u nullglob
+          echo "Downloaded release assets:"
+          find release-assets -maxdepth 4 -type f | sort
+
+          mapfile -t mac_dmg < <(find release-assets/Lume-macos-aarch64 -type f -name '*.dmg' | sort)
+          mapfile -t windows_installer < <(find release-assets/Lume-windows-installer -type f -name '*.exe' | sort)
+          portable_root="release-assets/Lume-windows-portable"
+
+          if [ -d "$portable_root/Lume" ]; then
+            portable_root="$portable_root/Lume"
+          fi
 
           if [ ${#mac_dmg[@]} -eq 0 ]; then
             echo "No macOS DMG asset was found." >&2
@@ -158,7 +164,7 @@ jobs:
 
           PORTABLE_ZIP="$DIST_DIR/Lume-windows-portable-${TAG}.zip"
           (
-            cd release-assets/Lume-windows-portable
+            cd "$portable_root"
             zip -r "$PORTABLE_ZIP" .
           )
 
