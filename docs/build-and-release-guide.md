@@ -145,6 +145,13 @@ npm run tauri build -- --bundles nsis --ci
 
 - `src-tauri/target/release/bundle/nsis/`
 
+安装完成后，主程序本体仍然是 `Lume.exe`，因此安装版默认也支持：
+
+```powershell
+Lume.exe --list-papers
+Lume.exe --list-papers --json
+```
+
 ### 5. 重要说明
 
 当前项目中的 PDFium 加载逻辑已兼容以下位置：
@@ -161,6 +168,7 @@ npm run tauri build -- --bundles nsis --ci
 
 - **安装版** 可从 bundle 资源中找到 `pdfium.dll`
 - **绿色版** 可从 `Lume.exe` 同目录找到 `pdfium.dll`
+- **安装版 / 绿色版** 都复用同一个 `Lume.exe`，因此都内置 `--list-papers` CLI 参数
 
 ---
 
@@ -180,6 +188,7 @@ npm run tauri build -- --bundles nsis --ci
   - macOS 包
   - Windows 绿色版
   - Windows 安装版
+- 在上传 Windows artifact 之前，会自动验证 `Lume.exe --list-papers` 是否可用
 - 构建完成后会自动创建或更新一个 **Draft Release**
 
 ### 产物说明
@@ -194,6 +203,13 @@ npm run tauri build -- --bundles nsis --ci
 
 - `Lume-windows-portable` 为免安装运行版
 - `Lume-windows-installer` 为安装器版
+
+Windows job 当前还包含两步 CLI 冒烟验证：
+
+- 直接运行绿色版中的 `Lume.exe --list-papers`
+- 静默安装 NSIS 包后，再运行安装目录里的 `Lume.exe --list-papers`
+
+如果这两步中的任意一步失败，artifact 不会上传，草稿发布也不会继续更新。
 
 此外，workflow 还会基于 `package.json` 中的版本号自动创建或更新一个草稿发布：
 

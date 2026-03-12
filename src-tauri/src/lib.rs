@@ -3,6 +3,7 @@
 /// Capabilities: Defines AppState, declares the `tauri::mobile_entry_point`, and registers all commands.
 
 pub mod models;
+pub mod cli;
 pub mod db;
 pub mod metadata_fetch;
 pub mod pdf_handlers;

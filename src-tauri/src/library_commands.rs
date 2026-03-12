@@ -381,6 +381,65 @@ pub fn fetch_item_from_db(conn: &rusqlite::Connection, id: &str) -> rusqlite::Re
     }
 }
 
+pub fn fetch_all_items_from_db(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<LibraryItem>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, item_type, title, authors, year, abstract, doi, arxiv_id, publication, volume, issue, pages, publisher, isbn, url, language, date_added, date_modified, folder_path
+         FROM items
+         ORDER BY LOWER(title) ASC, LOWER(authors) ASC, LOWER(id) ASC",
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(LibraryItem {
+            id: row.get(0)?,
+            item_type: row.get(1)?,
+            title: row.get(2)?,
+            authors: row.get(3)?,
+            year: row.get(4)?,
+            r#abstract: row.get(5)?,
+            doi: row.get(6)?,
+            arxiv_id: row.get(7)?,
+            publication: row.get(8)?,
+            volume: row.get(9)?,
+            issue: row.get(10)?,
+            pages: row.get(11)?,
+            publisher: row.get(12)?,
+            isbn: row.get(13)?,
+            url: row.get(14)?,
+            language: row.get(15)?,
+            date_added: row.get(16)?,
+            date_modified: row.get(17)?,
+            folder_path: row.get(18)?,
+            tags: Vec::new(),
+            attachments: Vec::new(),
+        })
+    })?;
+
+    let mut items = Vec::new();
+
+    for row in rows {
+        let mut item = row?;
+        item.tags = fetch_item_tags(conn, &item.id);
+
+        let mut att_stmt = conn.prepare(
+            "SELECT id, item_id, name, path, attachment_type FROM attachments WHERE item_id = ?1",
+        )?;
+        let att_iter = att_stmt.query_map(rusqlite::params![&item.id], |row| {
+            Ok(crate::models::LibraryAttachment {
+                id: row.get(0)?,
+                item_id: row.get(1)?,
+                name: row.get(2)?,
+                path: row.get(3)?,
+                attachment_type: row.get(4)?,
+            })
+        })?;
+
+        item.attachments = att_iter.filter_map(|result| result.ok()).collect();
+        items.push(item);
+    }
+
+    Ok(items)
+}
+
 pub fn sync_item_to_db(conn: &rusqlite::Connection, item: &LibraryItem) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT OR IGNORE INTO items (id, item_type, title, authors, year, abstract, doi, arxiv_id, publication, volume, issue, pages, publisher, isbn, url, language, date_added, date_modified, folder_path)

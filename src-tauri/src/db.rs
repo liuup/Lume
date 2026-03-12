@@ -2,16 +2,13 @@
 /// Purpose: Encapsulates database initialization and shared operations.
 /// Capabilities: Creates missing tables upon application startup. Returns a SQLite connection.
 
+use std::path::Path;
+
 use rusqlite::{Connection, Result as SqlResult};
+
 use crate::library_commands::library_root_dir;
 
-pub fn init_db(app: &tauri::AppHandle) -> SqlResult<Connection> {
-    let db_path = library_root_dir(app)
-        .map_err(|e| rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(1), Some(e)))?
-        .join("lume_library.db");
-    
-    let conn = Connection::open(db_path)?;
-    
+pub fn ensure_schema(conn: &Connection) -> SqlResult<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS items (
             id TEXT PRIMARY KEY,
@@ -87,5 +84,19 @@ pub fn init_db(app: &tauri::AppHandle) -> SqlResult<Connection> {
         [],
     )?;
 
+    Ok(())
+}
+
+pub fn init_db_at_path(db_path: &Path) -> SqlResult<Connection> {
+    let conn = Connection::open(db_path)?;
+    ensure_schema(&conn)?;
     Ok(conn)
+}
+
+pub fn init_db(app: &tauri::AppHandle) -> SqlResult<Connection> {
+    let db_path = library_root_dir(app)
+        .map_err(|e| rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(1), Some(e)))?
+        .join("lume_library.db");
+
+    init_db_at_path(&db_path)
 }

@@ -74,6 +74,34 @@ npm install
 npm run tauri dev
 ```
 
+### CLI
+
+Lume now supports a built-in CLI flag in the main app binary for reading the local library database.
+
+List the currently saved papers:
+
+```bash
+Lume --list-papers
+```
+
+Print the same list as JSON:
+
+```bash
+Lume --list-papers --json
+```
+
+On Windows, the packaged GUI executable also supports terminal output directly:
+
+```bash
+Lume.exe --list-papers
+```
+
+During development, you can run the same flow from the repo root:
+
+```bash
+npm run cli:list
+```
+
 ### Build
 
 ```bash

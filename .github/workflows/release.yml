@@ -88,8 +88,47 @@ jobs:
           Copy-Item "src-tauri/target/release/Lume.exe" "$portableRoot/Lume.exe" -Force
           Copy-Item "src-tauri/pdfium.dll" "$portableRoot/pdfium.dll" -Force
 
+      - name: Smoke test portable CLI
+        shell: pwsh
+        run: |
+          $output = & "dist-portable/Lume/Lume.exe" --list-papers 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) {
+            throw "Portable CLI smoke test failed with exit code $LASTEXITCODE"
+          }
+          if ($output -notmatch "No saved papers found\.") {
+            throw "Portable CLI smoke test did not produce the expected output. Actual output: $output"
+          }
+          Write-Host $output
+
       - name: Build installer executable (NSIS)
         run: npm run tauri build -- --bundles nsis --ci
+
+      - name: Smoke test installed CLI
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1
+          if (-not $installer) {
+            throw "Installer artifact not found"
+          }
+
+          $installRoot = Join-Path $env:RUNNER_TEMP "LumeInstall"
+          Remove-Item $installRoot -Recurse -Force -ErrorAction SilentlyContinue
+
+          Start-Process -FilePath $installer.FullName -ArgumentList "/S", "/D=$installRoot" -Wait -NoNewWindow
+
+          $installedExe = Get-ChildItem -Path $installRoot -Filter "Lume.exe" -Recurse | Select-Object -First 1
+          if (-not $installedExe) {
+            throw "Installed Lume.exe not found under $installRoot"
+          }
+
+          $output = & $installedExe.FullName --list-papers 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) {
+            throw "Installed CLI smoke test failed with exit code $LASTEXITCODE"
+          }
+          if ($output -notmatch "No saved papers found\.") {
+            throw "Installed CLI smoke test did not produce the expected output. Actual output: $output"
+          }
+          Write-Host $output
 
       - name: Upload portable artifact
         uses: actions/upload-artifact@v6
