@@ -2,6 +2,9 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
+> [!WARNING]
+> Lume 目前仍处于原型阶段，存在较多 bug、未完成功能和体验问题。暂时不建议将它用于重要数据管理或正式研究工作流。
+
 Lume 是一个面向学术阅读与知识整理的桌面文献工具。它将 PDF 阅读、批注、元数据管理、标签、笔记与引用导出整合在一个轻量的本地应用中。
 
 基于 Tauri + React + TypeScript + PDFium 构建，Lume 的目标不是做一个“能打开 PDF 的工具”，而是做一个真正顺手的研究工作台。

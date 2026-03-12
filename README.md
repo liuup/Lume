@@ -2,6 +2,9 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
+> [!WARNING]
+> Lume is still in a prototype stage. It currently contains many bugs, incomplete features, and rough edges. Please do not rely on it yet for important data or production research workflows.
+
 Lume is a desktop literature tool built for academic reading and knowledge organization. It brings PDF reading, annotations, metadata editing, tags, notes, and citation export into one lightweight local-first app.
 
 Built with Tauri + React + TypeScript + PDFium, Lume is not trying to be just another PDF viewer. It is designed to become a smooth research workspace.
