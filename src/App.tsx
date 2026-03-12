@@ -9,7 +9,7 @@ import { SearchBar } from "./components/SearchBar";
 import { SettingsModal } from "./components/modals/SettingsModal";
 import { X } from "lucide-react";
 
-import { TagInfo, ToolType } from "./types";
+import { PdfSearchMatch, TagInfo, ToolType } from "./types";
 import { useLibrary } from "./hooks/useLibrary";
 import { useSettings } from "./hooks/useSettings";
 import { useI18n } from "./hooks/useI18n";
@@ -20,6 +20,11 @@ type LibraryDragState = {
   title: string;
   x: number;
   y: number;
+};
+
+type SearchRequestOptions = {
+  notifyOnNoResults?: boolean;
+  advanceIfSameTerm?: boolean;
 };
 
 function App() {
@@ -58,6 +63,11 @@ function App() {
   const [activeTool, setActiveTool] = useState<ToolType>('none');
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
   const [showSearch, setShowSearch] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchMatches, setSearchMatches] = useState<PdfSearchMatch[]>([]);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(-1);
+  const [isSearchLoading, setIsSearchLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [annotationsRefreshKey, setAnnotationsRefreshKey] = useState(0);
@@ -66,7 +76,21 @@ function App() {
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const draggedItemIdRef = useRef<string | null>(null);
   const dragOverFolderIdRef = useRef<string | null>(null);
+  const searchCacheRef = useRef<Map<string, PdfSearchMatch[]>>(new Map());
+  const searchRequestIdRef = useRef(0);
+  const activePdfScrollRef = useRef<HTMLDivElement | null>(null);
   const { settings, isLoading: isSettingsLoading } = useSettings();
+
+  const clearSearchState = useCallback((keepInput = false) => {
+    searchRequestIdRef.current += 1;
+    setSearchTerm("");
+    setSearchMatches([]);
+    setActiveSearchIndex(-1);
+    setIsSearchLoading(false);
+    if (!keepInput) {
+      setSearchInput("");
+    }
+  }, []);
 
   const handleDragItemEnd = useCallback(() => {
     draggedItemIdRef.current = null;
@@ -110,6 +134,11 @@ function App() {
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
   }, [activeTabId]);
+
+  useEffect(() => {
+    clearSearchState();
+    setShowSearch(false);
+  }, [clearSearchState, pdfPath]);
 
   const tagColors: Record<string, string> = {};
   for (const t of allTags) {
@@ -290,6 +319,162 @@ function App() {
     }
   }, [selectedItem?.attachments]);
 
+  const jumpWithinSearchResults = useCallback((backwards: boolean, totalMatches: number) => {
+    if (totalMatches <= 0) {
+      setActiveSearchIndex(-1);
+      return;
+    }
+
+    setActiveSearchIndex((prev) => {
+      if (prev < 0 || prev >= totalMatches) {
+        return backwards ? totalMatches - 1 : 0;
+      }
+
+      return backwards
+        ? (prev - 1 + totalMatches) % totalMatches
+        : (prev + 1) % totalMatches;
+    });
+  }, []);
+
+  const handleSearchInputChange = useCallback((value: string) => {
+    setSearchInput(value);
+
+    if (value.trim() !== searchTerm) {
+      setSearchTerm("");
+      setSearchMatches([]);
+      setActiveSearchIndex(-1);
+    }
+  }, [searchTerm]);
+
+  const handleDocumentSearch = useCallback(async (
+    term: string,
+    backwards: boolean,
+    options: SearchRequestOptions = {},
+  ) => {
+    const trimmedTerm = term.trim();
+    const {
+      notifyOnNoResults = true,
+      advanceIfSameTerm = true,
+    } = options;
+
+    setSearchInput(term);
+
+    if (!pdfPath || !trimmedTerm) {
+      clearSearchState(true);
+      return;
+    }
+
+    if (trimmedTerm === searchTerm) {
+      if (searchMatches.length === 0) {
+        if (notifyOnNoResults) {
+          feedback.info({
+            title: t("feedback.search.notFound.title"),
+            description: t("feedback.search.notFound.description", { term: trimmedTerm }),
+          });
+        }
+        return;
+      }
+
+      if (advanceIfSameTerm) {
+        jumpWithinSearchResults(backwards, searchMatches.length);
+      }
+      return;
+    }
+
+    const cacheKey = `${pdfPath}::${trimmedTerm.toLocaleLowerCase()}`;
+    const requestId = searchRequestIdRef.current + 1;
+    searchRequestIdRef.current = requestId;
+    setIsSearchLoading(true);
+
+    try {
+      let matches = searchCacheRef.current.get(cacheKey);
+
+      if (!matches) {
+        matches = await invoke<PdfSearchMatch[]>("search_pdf_text", {
+          path: pdfPath,
+          term: trimmedTerm,
+        });
+        searchCacheRef.current.set(cacheKey, matches);
+      }
+
+      if (searchRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setSearchTerm(trimmedTerm);
+      setSearchMatches(matches);
+      setActiveSearchIndex(matches.length > 0 ? (backwards ? matches.length - 1 : 0) : -1);
+
+      if (matches.length === 0 && notifyOnNoResults) {
+        feedback.info({
+          title: t("feedback.search.notFound.title"),
+          description: t("feedback.search.notFound.description", { term: trimmedTerm }),
+        });
+      }
+    } catch (error) {
+      console.error("Failed to search PDF text", error);
+    } finally {
+      if (searchRequestIdRef.current === requestId) {
+        setIsSearchLoading(false);
+      }
+    }
+  }, [clearSearchState, feedback, jumpWithinSearchResults, pdfPath, searchMatches, searchTerm, t]);
+
+  useEffect(() => {
+    if (!showSearch) {
+      return;
+    }
+
+    const trimmedTerm = searchInput.trim();
+    if (!trimmedTerm) {
+      setSearchTerm("");
+      setSearchMatches([]);
+      setActiveSearchIndex(-1);
+      setIsSearchLoading(false);
+      searchRequestIdRef.current += 1;
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void handleDocumentSearch(searchInput, false, {
+        notifyOnNoResults: false,
+        advanceIfSameTerm: false,
+      });
+    }, 180);
+
+    return () => window.clearTimeout(timer);
+  }, [handleDocumentSearch, searchInput, showSearch]);
+
+  useEffect(() => {
+    const container = activePdfScrollRef.current;
+    const activeMatch = searchMatches[activeSearchIndex];
+
+    if (!container || !activeMatch) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const target = container.querySelector(`[data-search-match-id="${activeSearchIndex}"]`) as HTMLElement | null;
+
+      if (target) {
+        const containerRect = container.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const scrollTop = container.scrollTop + (targetRect.top - containerRect.top) - (containerRect.height / 2) + (targetRect.height / 2);
+
+        container.scrollTo({
+          top: Math.max(0, scrollTop),
+          behavior: "smooth",
+        });
+        return;
+      }
+
+      const pageNode = container.querySelector(`#pdf-page-${activeMatch.pageIndex + 1}`) as HTMLElement | null;
+      pageNode?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activeSearchIndex, searchMatches]);
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-50">
       {/* ── Top title-bar / tab strip ── */}
@@ -436,17 +621,16 @@ function App() {
             <main ref={mainRef} className="flex-1 overflow-y-hidden relative flex justify-center canvas-pattern">
               {showSearch && (
                 <SearchBar
-                  onSearch={(term, backwards) => {
-                    // Using basic window.find for finding natively parsed text
-                    const found = (window as any).find(term, false, backwards, true, false, false, false);
-                    if (!found) {
-                      feedback.info({
-                        title: t("feedback.search.notFound.title"),
-                        description: t("feedback.search.notFound.description", { term }),
-                      });
-                    }
+                  value={searchInput}
+                  totalMatches={searchInput.trim() === searchTerm ? searchMatches.length : 0}
+                  activeMatchIndex={searchInput.trim() === searchTerm ? activeSearchIndex : -1}
+                  isSearching={isSearchLoading}
+                  onValueChange={handleSearchInputChange}
+                  onSearch={handleDocumentSearch}
+                  onClose={() => {
+                    clearSearchState();
+                    setShowSearch(false);
                   }}
-                  onClose={() => setShowSearch(false)}
                 />
               )}
               {/* Main Content Area */}
@@ -461,6 +645,7 @@ function App() {
               {openTabs.map(tab => (
                 <div 
                   key={tab.id}
+                  ref={tab.id === activeTabId ? activePdfScrollRef : null}
                   className={`flex-1 w-full bg-zinc-200/50 overflow-y-auto min-h-0 absolute inset-0 ${tab.id === activeTabId ? 'block' : 'hidden'}`} 
                   onScroll={handleScroll}
                 >
@@ -471,6 +656,8 @@ function App() {
                     scale={scale} 
                     activeTool={activeTool}
                     currentPage={tab.currentPage}
+                    searchMatches={tab.id === activeTabId ? searchMatches : []}
+                    activeSearchIndex={tab.id === activeTabId ? activeSearchIndex : -1}
                     onAnnotationsSaved={handleAnnotationsSaved}
                   />
                 </div>

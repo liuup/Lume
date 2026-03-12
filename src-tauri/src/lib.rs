@@ -103,6 +103,7 @@ pub fn run() {
             pdf_handlers::get_pdf_dimensions,
             pdf_handlers::get_text_rects,
             pdf_handlers::get_page_text,
+            pdf_handlers::search_pdf_text,
             pdf_handlers::render_page
         ])
         .run(tauri::generate_context!())

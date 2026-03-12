@@ -21,7 +21,10 @@
     "placeholder": "在文档中查找...",
     "previous": "上一个（Shift+Enter）",
     "next": "下一个（Enter）",
-    "close": "关闭（Esc）"
+    "close": "关闭（Esc）",
+    "count": "{current}/{total}",
+    "searching": "搜索中",
+    "noResults": "0/0"
   },
   "pdfViewer": {
     "pageLabel": "第 {page} 页",

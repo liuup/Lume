@@ -21,7 +21,10 @@
     "placeholder": "Find in document...",
     "previous": "Previous (Shift+Enter)",
     "next": "Next (Enter)",
-    "close": "Close (Esc)"
+    "close": "Close (Esc)",
+    "count": "{current}/{total}",
+    "searching": "...",
+    "noResults": "0/0"
   },
   "pdfViewer": {
     "pageLabel": "Page {page}",

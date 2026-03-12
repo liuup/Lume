@@ -1,15 +1,27 @@
-import { useState, useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import { Search, X, ChevronUp, ChevronDown } from "lucide-react";
 import { useI18n } from "../hooks/useI18n";
 
 interface SearchBarProps {
+  value: string;
+  totalMatches: number;
+  activeMatchIndex: number;
+  isSearching: boolean;
+  onValueChange: (value: string) => void;
   onSearch: (term: string, backwards: boolean) => void;
   onClose: () => void;
 }
 
-export function SearchBar({ onSearch, onClose }: SearchBarProps) {
+export function SearchBar({
+  value,
+  totalMatches,
+  activeMatchIndex,
+  isSearching,
+  onValueChange,
+  onSearch,
+  onClose,
+}: SearchBarProps) {
   const { t } = useI18n();
-  const [term, setTerm] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -17,8 +29,8 @@ export function SearchBar({ onSearch, onClose }: SearchBarProps) {
   }, []);
 
   const handleSearch = (backwards: boolean) => {
-    if (!term) return;
-    onSearch(term, backwards);
+    if (!value.trim()) return;
+    onSearch(value, backwards);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -38,13 +50,23 @@ export function SearchBar({ onSearch, onClose }: SearchBarProps) {
         type="text"
         placeholder={t("searchBar.placeholder")}
         className="w-48 text-sm outline-none text-zinc-700 placeholder:text-zinc-400"
-        value={term}
-        onChange={(e) => setTerm(e.target.value)}
+        value={value}
+        onChange={(e) => onValueChange(e.target.value)}
         onKeyDown={handleKeyDown}
       />
+      <div className="min-w-[56px] text-right text-xs tabular-nums text-zinc-400">
+        {isSearching
+          ? t("searchBar.searching")
+          : totalMatches > 0
+            ? t("searchBar.count", { current: activeMatchIndex + 1, total: totalMatches })
+            : value.trim()
+              ? t("searchBar.noResults")
+              : ""}
+      </div>
       <div className="flex items-center space-x-0.5 border-l border-zinc-200 pl-2">
         <button
           onClick={() => handleSearch(true)}
+          disabled={isSearching || !value.trim()}
           className="p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 rounded"
           title={t("searchBar.previous")}
         >
@@ -52,6 +74,7 @@ export function SearchBar({ onSearch, onClose }: SearchBarProps) {
         </button>
         <button
           onClick={() => handleSearch(false)}
+          disabled={isSearching || !value.trim()}
           className="p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 rounded"
           title={t("searchBar.next")}
         >

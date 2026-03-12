@@ -31,6 +31,12 @@ pub struct TextRect {
 }
 
 #[derive(Serialize)]
+pub struct SearchMatch {
+    pub page_index: u16,
+    pub rects: Vec<TextRect>,
+}
+
+#[derive(Serialize)]
 pub struct TextNode {
     pub text: String,
     pub x: f32,
@@ -45,6 +51,14 @@ pub struct SelectionRect {
     pub top: f32,
     pub right: f32,
     pub bottom: f32,
+}
+
+struct SearchChar {
+    text: String,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
 }
 
 #[tauri::command]
@@ -331,6 +345,195 @@ pub fn merge_page_text_nodes(page: &PdfPage<'_>) -> Result<Vec<TextNode>, String
     }
 
     Ok(nodes)
+}
+
+#[tauri::command]
+pub fn search_pdf_text(
+    path: String,
+    term: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<Vec<SearchMatch>, String> {
+    let normalized_term = normalize_search_term(&term);
+    if normalized_term.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let doc_arc = {
+        let docs = state.documents.lock().unwrap();
+        docs.get(&path).cloned().ok_or("No PDF loaded")?
+    };
+    let doc_lock = doc_arc.lock().unwrap();
+    let doc = &doc_lock.0;
+
+    let mut matches = Vec::new();
+
+    for (page_index, page) in doc.pages().iter().enumerate() {
+        let page_matches = find_page_search_matches(&page, &normalized_term)?;
+
+        for rects in page_matches {
+            matches.push(SearchMatch {
+                page_index: page_index as u16,
+                rects,
+            });
+        }
+    }
+
+    Ok(matches)
+}
+
+fn normalize_search_term(term: &str) -> Vec<char> {
+    let mut normalized = Vec::new();
+    let mut last_was_space = true;
+
+    for ch in term.chars() {
+        if ch.is_whitespace() {
+            if !last_was_space {
+                normalized.push(' ');
+                last_was_space = true;
+            }
+            continue;
+        }
+
+        for lower in ch.to_lowercase() {
+            normalized.push(lower);
+        }
+        last_was_space = false;
+    }
+
+    while normalized.last() == Some(&' ') {
+        normalized.pop();
+    }
+
+    normalized
+}
+
+fn extract_page_search_chars(page: &PdfPage<'_>) -> Result<Vec<SearchChar>, String> {
+    let page_height = page.height().value;
+    let text_obj = page.text().map_err(|e: PdfiumError| e.to_string())?;
+    let chars = text_obj.chars();
+    let mut search_chars = Vec::new();
+
+    for ch in chars.iter() {
+        if let Ok(bounds) = ch.loose_bounds() {
+            let text = ch.unicode_string().unwrap_or_default();
+            if text.is_empty() {
+                continue;
+            }
+
+            let x: f32 = bounds.left().value;
+            let y = page_height - bounds.top().value;
+            let width = bounds.right().value - bounds.left().value;
+            let height = bounds.top().value - bounds.bottom().value;
+
+            if width <= 0.0 || height <= 0.0 {
+                continue;
+            }
+
+            search_chars.push(SearchChar {
+                text,
+                x,
+                y,
+                width,
+                height,
+            });
+        }
+    }
+
+    Ok(search_chars)
+}
+
+fn build_normalized_search_index(search_chars: &[SearchChar]) -> (Vec<char>, Vec<Option<usize>>) {
+    let mut normalized = Vec::new();
+    let mut mapping = Vec::new();
+    let mut last_was_space = true;
+    let mut previous_char: Option<&SearchChar> = None;
+
+    for (char_index, current_char) in search_chars.iter().enumerate() {
+        if let Some(previous) = previous_char {
+            let y_tolerance = f32::max(previous.height, current_char.height) * 0.35;
+            let same_line = (previous.y - current_char.y).abs() < y_tolerance;
+            let horizontal_gap = current_char.x - (previous.x + previous.width);
+            let line_break = !same_line && current_char.x < previous.x + previous.width + previous.height;
+            let word_gap = same_line && horizontal_gap > f32::max(previous.height, current_char.height) * 0.2;
+
+            if (line_break || word_gap) && !last_was_space {
+                normalized.push(' ');
+                mapping.push(None);
+                last_was_space = true;
+            }
+        }
+
+        for raw_char in current_char.text.chars() {
+            if raw_char.is_whitespace() {
+                if !last_was_space {
+                    normalized.push(' ');
+                    mapping.push(Some(char_index));
+                    last_was_space = true;
+                }
+                continue;
+            }
+
+            for lowered in raw_char.to_lowercase() {
+                normalized.push(lowered);
+                mapping.push(Some(char_index));
+            }
+            last_was_space = false;
+        }
+
+        previous_char = Some(current_char);
+    }
+
+    while normalized.last() == Some(&' ') {
+        normalized.pop();
+        mapping.pop();
+    }
+
+    (normalized, mapping)
+}
+
+fn find_page_search_matches(page: &PdfPage<'_>, normalized_term: &[char]) -> Result<Vec<Vec<TextRect>>, String> {
+    let search_chars = extract_page_search_chars(page)?;
+    if search_chars.is_empty() || normalized_term.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let (normalized_text, mapping) = build_normalized_search_index(&search_chars);
+    if normalized_text.len() < normalized_term.len() {
+        return Ok(Vec::new());
+    }
+
+    let mut matches = Vec::new();
+
+    for start in 0..=(normalized_text.len() - normalized_term.len()) {
+        if normalized_text[start..start + normalized_term.len()] != *normalized_term {
+            continue;
+        }
+
+        let mut rects = Vec::new();
+        let mut last_char_index: Option<usize> = None;
+
+        for mapped_index in mapping[start..start + normalized_term.len()].iter().flatten() {
+            if last_char_index == Some(*mapped_index) {
+                continue;
+            }
+
+            let search_char = &search_chars[*mapped_index];
+            rects.push(TextRect {
+                x: search_char.x,
+                y: search_char.y,
+                width: search_char.width,
+                height: search_char.height,
+            });
+            last_char_index = Some(*mapped_index);
+        }
+
+        let merged = merge_text_rects(rects);
+        if !merged.is_empty() {
+            matches.push(merged);
+        }
+    }
+
+    Ok(matches)
 }
 
 pub fn merge_text_rects(mut rects: Vec<TextRect>) -> Vec<TextRect> {

@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { PageDimension, ToolType } from "../types";
+import { PageDimension, PdfSearchMatch, ToolType } from "../types";
 import { AnnotationLayer } from "./AnnotationLayer";
 import { TextLayer } from "./TextLayer";
 import { useI18n } from "../hooks/useI18n";
@@ -12,6 +12,8 @@ interface PdfViewerProps {
   scale: number;
   activeTool: ToolType;
   currentPage: number;
+  searchMatches: PdfSearchMatch[];
+  activeSearchIndex: number;
   onAnnotationsSaved?: (pdfPath: string) => void;
 }
 
@@ -107,8 +109,30 @@ async function requestRenderedPage(pdfPath: string, pageIndex: number, scale: nu
   return nextRequest;
 }
 
-export function PdfViewer({ pdfPath, totalPages, dimensions, scale, activeTool, currentPage, onAnnotationsSaved }: PdfViewerProps) {
+export function PdfViewer({
+  pdfPath,
+  totalPages,
+  dimensions,
+  scale,
+  activeTool,
+  currentPage,
+  searchMatches,
+  activeSearchIndex,
+  onAnnotationsSaved,
+}: PdfViewerProps) {
   const { t } = useI18n();
+  const searchMatchesByPage = useMemo(() => {
+    const grouped = new Map<number, Array<{ match: PdfSearchMatch; globalIndex: number }>>();
+
+    searchMatches.forEach((match, globalIndex) => {
+      const pageMatches = grouped.get(match.pageIndex) ?? [];
+      pageMatches.push({ match, globalIndex });
+      grouped.set(match.pageIndex, pageMatches);
+    });
+
+    return grouped;
+  }, [searchMatches]);
+
   const prefetchPages = useMemo(() => {
     if (dimensions.length === 0) return [];
     const indices: number[] = [];
@@ -166,6 +190,8 @@ export function PdfViewer({ pdfPath, totalPages, dimensions, scale, activeTool, 
           activeTool={activeTool}
           shouldPrefetch={prefetchPages.includes(i)}
           shouldLoadText={true}
+          pageSearchMatches={searchMatchesByPage.get(i) ?? []}
+          activeSearchIndex={activeSearchIndex}
           onAnnotationsSaved={onAnnotationsSaved}
         />
       ))}
@@ -181,10 +207,23 @@ interface PageRenderProps {
   activeTool: ToolType;
   shouldPrefetch: boolean;
   shouldLoadText: boolean;
+  pageSearchMatches: Array<{ match: PdfSearchMatch; globalIndex: number }>;
+  activeSearchIndex: number;
   onAnnotationsSaved?: (pdfPath: string) => void;
 }
 
-function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool, shouldPrefetch, shouldLoadText, onAnnotationsSaved }: PageRenderProps) {
+function PageRender({
+  pdfPath,
+  pageIndex,
+  dimension,
+  scale,
+  activeTool,
+  shouldPrefetch,
+  shouldLoadText,
+  pageSearchMatches,
+  activeSearchIndex,
+  onAnnotationsSaved,
+}: PageRenderProps) {
   const { t } = useI18n();
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -301,6 +340,34 @@ function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool, shouldPr
         {!imgSrc && (
           <div className="absolute top-3 right-3 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-medium text-zinc-400 shadow-sm backdrop-blur-sm">
             {t("pdfViewer.pageLabel", { page: pageIndex + 1 })}
+          </div>
+        )}
+
+        {pageSearchMatches.length > 0 && (
+          <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 5 }}>
+            {pageSearchMatches.flatMap(({ match, globalIndex }) =>
+              match.rects.map((rect, rectIndex) => {
+                const isActive = globalIndex === activeSearchIndex;
+
+                return (
+                  <div
+                    key={`search-${pageIndex}-${globalIndex}-${rectIndex}`}
+                    data-search-match-id={rectIndex === 0 ? String(globalIndex) : undefined}
+                    className="absolute rounded-sm transition-all duration-150"
+                    style={{
+                      left: rect.x * scale,
+                      top: rect.y * scale,
+                      width: rect.width * scale,
+                      height: rect.height * scale,
+                      backgroundColor: isActive ? "rgba(245, 158, 11, 0.45)" : "rgba(250, 204, 21, 0.28)",
+                      boxShadow: isActive
+                        ? "0 0 0 1px rgba(217, 119, 6, 0.65), 0 0 0 3px rgba(251, 191, 36, 0.22)"
+                        : "0 0 0 1px rgba(234, 179, 8, 0.2)",
+                    }}
+                  />
+                );
+              })
+            )}
           </div>
         )}
         

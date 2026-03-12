@@ -10,6 +10,18 @@
 export type PageDimension = { width: number; height: number };
 export type ToolType = 'none' | 'draw' | 'highlight' | 'text-highlight' | 'eraser';
 
+export interface SearchRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface PdfSearchMatch {
+  pageIndex: number;
+  rects: SearchRect[];
+}
+
 export interface Attachment {
   id: string;
   item_id: string;
