@@ -1,6 +1,6 @@
 # Lume 编译、打包与发布指南
 
-本文档说明如何在本地或 GitHub Actions 中构建 Lume 的 macOS 与 Windows 发布产物。
+本文档说明如何在本地或 GitHub Actions 中构建 Lume 的 macOS、Windows 与 Linux 发布产物。
 
 ---
 
@@ -17,6 +17,7 @@ Lume 基于以下技术栈构建：
 
 - macOS: `libpdfium.dylib`
 - Windows: `pdfium.dll`
+- Linux: `libpdfium.so`
 
 ---
 
@@ -172,7 +173,86 @@ Lume.exe --list-papers --json
 
 ---
 
-## 五、GitHub Actions 构建说明
+## 五、Linux `.deb` 构建说明
+
+### 1. 准备 Linux 环境
+
+建议在 Ubuntu 24.04 或兼容的 Debian / Ubuntu 环境中构建。
+
+需要安装：
+
+- Rust 工具链
+- Node.js
+- GTK / WebKitGTK 构建依赖
+
+常用依赖安装命令：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev \
+  libjavascriptcoregtk-4.1-dev \
+  libgtk-3-dev \
+  libayatana-appindicator3-dev \
+  librsvg2-dev \
+  patchelf \
+  build-essential \
+  pkg-config \
+  curl
+```
+
+### 2. 准备 PDFium 动态库
+
+下载 Linux x64 版本 PDFium，提取 `libpdfium.so`，放到 `src-tauri/` 目录下。
+
+当前项目通过平台专用配置文件注入该资源：
+
+- [src-tauri/tauri.linux.conf.json](../src-tauri/tauri.linux.conf.json)
+
+示例命令：
+
+```bash
+curl -L -o pdfium.tgz https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz
+tar -xzf pdfium.tgz lib/libpdfium.so
+mv lib/libpdfium.so src-tauri/libpdfium.so
+```
+
+### 3. 构建 `.deb`
+
+执行：
+
+```bash
+npm run tauri build -- --bundles deb --ci
+```
+
+常见输出目录：
+
+- `src-tauri/target/release/bundle/deb/`
+
+### 4. 安装与验证
+
+安装：
+
+```bash
+sudo dpkg -i src-tauri/target/release/bundle/deb/*.deb
+```
+
+安装后可直接验证 CLI：
+
+```bash
+Lume --list-papers
+Lume --list-papers --json
+```
+
+### 5. 重要说明
+
+- `.deb` 包会携带 `libpdfium.so`
+- Linux 包同样复用主程序二进制，因此默认支持 `--list-papers`
+- 当前配置为 Debian 包声明了常见运行时依赖，减少安装后缺库概率
+
+---
+
+## 六、GitHub Actions 构建说明
 
 当前仓库的发布工作流为：
 
@@ -188,7 +268,8 @@ Lume.exe --list-papers --json
   - macOS 包
   - Windows 绿色版
   - Windows 安装版
-- 在上传 Windows artifact 之前，会自动验证 `Lume.exe --list-papers` 是否可用
+  - Linux `.deb`
+- 在上传 Windows / Linux artifact 之前，会自动验证 CLI 是否可用
 - 构建完成后会自动创建或更新一个 **Draft Release**
 
 ### 产物说明
@@ -198,18 +279,24 @@ Lume.exe --list-papers --json
 - `Lume-macos-aarch64`
 - `Lume-windows-portable`
 - `Lume-windows-installer`
+- `Lume-linux-deb`
 
 其中：
 
 - `Lume-windows-portable` 为免安装运行版
 - `Lume-windows-installer` 为安装器版
+- `Lume-linux-deb` 为 Debian / Ubuntu 安装包
 
 Windows job 当前还包含两步 CLI 冒烟验证：
 
 - 直接运行绿色版中的 `Lume.exe --list-papers`
 - 静默安装 NSIS 包后，再运行安装目录里的 `Lume.exe --list-papers`
 
-如果这两步中的任意一步失败，artifact 不会上传，草稿发布也不会继续更新。
+Linux job 当前还包含一步 CLI 冒烟验证：
+
+- 安装 `.deb` 后直接运行包内安装出的 `Lume --list-papers`
+
+如果这些检查中的任意一步失败，artifact 不会上传，草稿发布也不会继续更新。
 
 此外，workflow 还会基于 `package.json` 中的版本号自动创建或更新一个草稿发布：
 
@@ -221,10 +308,11 @@ Windows job 当前还包含两步 CLI 冒烟验证：
 - macOS `.dmg`
 - Windows 安装版 `.exe`
 - Windows 绿色版 `.zip`
+- Linux `.deb`
 
 ---
 
-## 六、关于“免安装可运行 exe”的边界
+## 七、关于“免安装可运行 exe”的边界
 
 这里的“免安装”指：
 
@@ -239,7 +327,7 @@ Windows job 当前还包含两步 CLI 冒烟验证：
 
 ---
 
-## 七、推荐发布方式
+## 八、推荐发布方式
 
 如果你准备开始公开宣传，建议同时提供两种 Windows 下载项：
 
@@ -255,25 +343,33 @@ Windows job 当前还包含两步 CLI 冒烟验证：
 - 提供 `.dmg`
 - 如无签名，说明首次打开的系统放行方法
 
+### 4. Linux 用户
+- 提供 `.deb`
+- 明确说明当前优先支持 Debian / Ubuntu 系发行版
+
 ---
 
-## 八、推荐宣传页下载文案
+## 九、推荐宣传页下载文案
 
 你可以在官网或发布页上直接使用类似文案：
 
 - **macOS (Apple Silicon)** — DMG 安装包
 - **Windows Installer** — 推荐大多数用户下载
 - **Windows Portable** — 免安装绿色版，解压即用
+- **Linux (.deb)** — Debian / Ubuntu 安装包
 
 ---
 
-## 九、常见问题
+## 十、常见问题
 
 ### 1. 为什么 Windows 绿色版不能只有一个 exe？
 因为 PDF 渲染依赖 `pdfium.dll`，它必须和 `Lume.exe` 一起分发。
 
 ### 2. 为什么用户电脑上可能仍然打不开？
 最常见原因是缺少 WebView2 Runtime，或系统安全策略阻止未签名程序。
+
+### 3. Linux `.deb` 安装后打不开怎么办？
+最常见原因是系统缺少 WebKitGTK 相关运行库，或目标发行版不是 Debian / Ubuntu 兼容环境。建议优先在 Ubuntu 24.04 / 22.04 上验证。
 
 ### 3. 为什么 macOS 会提示无法验证开发者？
 因为应用尚未完成 Apple Developer 签名与公证。

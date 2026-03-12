@@ -144,12 +144,98 @@ jobs:
           path: src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
 
+  build-linux:
+    name: Build Linux deb
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            pkg-config \
+            curl
+
+      - name: Inject PDFium (Linux)
+        run: |
+          curl -L -o pdfium.tgz https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz
+          tar -xzf pdfium.tgz lib/libpdfium.so
+          mv lib/libpdfium.so src-tauri/libpdfium.so
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Build deb package
+        run: npm run tauri build -- --bundles deb --ci
+
+      - name: Smoke test installed deb CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t DEB_FILES < <(find src-tauri/target/release/bundle/deb -maxdepth 1 -type f -name '*.deb' | sort)
+          if [ ${#DEB_FILES[@]} -eq 0 ]; then
+            echo "No deb artifact was found." >&2
+            exit 1
+          fi
+
+          DEB_PATH="${DEB_FILES[0]}"
+          sudo dpkg -i "$DEB_PATH"
+
+          BINARY_PATH=$(dpkg-deb -c "$DEB_PATH" | awk '/\.\/usr\/bin\// { sub(/^\./, "", $NF); print $NF; exit }')
+          if [ -z "$BINARY_PATH" ]; then
+            echo "Could not determine installed binary path from $DEB_PATH" >&2
+            exit 1
+          fi
+
+          OUTPUT=$("$BINARY_PATH" --list-papers 2>&1)
+          STATUS=$?
+          if [ $STATUS -ne 0 ]; then
+            echo "$OUTPUT"
+            echo "Installed deb CLI smoke test failed with exit code $STATUS" >&2
+            exit $STATUS
+          fi
+
+          echo "$OUTPUT"
+
+          if ! grep -Fq "No saved papers found." <<< "$OUTPUT"; then
+            echo "Installed deb CLI smoke test did not produce the expected output." >&2
+            exit 1
+          fi
+
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: Lume-linux-deb
+          path: src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
+
   create-draft-release:
     name: Create draft release
     runs-on: ubuntu-latest
     needs:
       - build-macos
       - build-windows
+      - build-linux
     permissions:
       contents: write
 
@@ -185,6 +271,7 @@ jobs:
 
           mapfile -t mac_dmg < <(find release-assets/Lume-macos-aarch64 -type f -name '*.dmg' | sort)
           mapfile -t windows_installer < <(find release-assets/Lume-windows-installer -type f -name '*.exe' | sort)
+          mapfile -t linux_deb < <(find release-assets/Lume-linux-deb -type f -name '*.deb' | sort)
           portable_root="release-assets/Lume-windows-portable"
 
           if [ -d "$portable_root/Lume" ]; then
@@ -201,6 +288,11 @@ jobs:
             exit 1
           fi
 
+          if [ ${#linux_deb[@]} -eq 0 ]; then
+            echo "No Linux deb asset was found." >&2
+            exit 1
+          fi
+
           PORTABLE_ZIP="$DIST_DIR/Lume-windows-portable-${TAG}.zip"
           (
             cd "$portable_root"
@@ -209,6 +301,7 @@ jobs:
 
           cp "${mac_dmg[0]}" "$DIST_DIR/"
           cp "${windows_installer[0]}" "$DIST_DIR/"
+          cp "${linux_deb[0]}" "$DIST_DIR/"
 
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
