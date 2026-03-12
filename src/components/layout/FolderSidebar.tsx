@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronRight, FilePenLine, Folder, FolderOpen, FolderPlus, Hash, Plus, Settings, Trash2 } from "lucide-react";
 import { FolderNode, TagInfo } from "../../types";
+import { useI18n } from "../../hooks/useI18n";
 
 // ── Preset tag palette ──────────────────────────────────────────────────────
 const TAG_COLORS: { label: string; value: string }[] = [
@@ -51,6 +52,7 @@ export function FolderSidebar({
   onSetTagColor,
   onOpenSettings
 }: FolderSidebarProps) {
+  const { t } = useI18n();
   const [contextMenu, setContextMenu] = useState<{
     folder: FolderNode;
     x: number;
@@ -184,7 +186,7 @@ export function FolderSidebar({
         <button
           onClick={() => { setNewFolderParentId(selectedFolderId); setNewFolderName(""); }}
           className="inline-flex items-center justify-center w-9 h-9 text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
-          title="New Folder"
+          title={t("folderSidebar.actions.newFolder")}
         >
           <FolderPlus size={15} />
         </button>
@@ -226,7 +228,7 @@ export function FolderSidebar({
           <div className="flex items-center justify-between px-4 pt-3 pb-1.5">
             <div className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
               <Hash size={11} />
-              Tags
+              {t("folderSidebar.tags.title")}
             </div>
             <span className="text-[10px] text-zinc-400 font-medium">{allTags.length}</span>
           </div>
@@ -250,7 +252,9 @@ export function FolderSidebar({
                     e.stopPropagation();
                     setTagColorMenu({ tag: tagInfo.tag, currentColor: dotColor, x: e.clientX, y: e.clientY });
                   }}
-                  title={`${tagInfo.tag} — ${tagInfo.count} paper${tagInfo.count !== 1 ? 's' : ''} (right-click to change color)`}
+                  title={tagInfo.count === 1
+                    ? t("folderSidebar.tags.tooltip.one", { tag: tagInfo.tag, count: tagInfo.count })
+                    : t("folderSidebar.tags.tooltip.other", { tag: tagInfo.tag, count: tagInfo.count })}
                 >
                   {/* Colored dot */}
                   <span
@@ -273,7 +277,7 @@ export function FolderSidebar({
           className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium text-zinc-600 rounded-lg hover:bg-zinc-100 transition-colors"
         >
           <Settings size={15} className="text-zinc-400" />
-          Settings
+          {t("folderSidebar.actions.settings")}
         </button>
       </div>
 
@@ -292,7 +296,7 @@ export function FolderSidebar({
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
           >
             <FilePenLine size={15} />
-            <span>Rename Folder</span>
+            <span>{t("folderSidebar.context.rename")}</span>
           </button>
           <button
             onClick={async () => {
@@ -303,7 +307,7 @@ export function FolderSidebar({
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
           >
             <Trash2 size={15} />
-            <span>Delete Folder</span>
+            <span>{t("folderSidebar.context.delete")}</span>
           </button>
         </div>
       )}
@@ -322,8 +326,8 @@ export function FolderSidebar({
                 <FolderPlus size={18} />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-zinc-900">New Folder</h3>
-                <p className="text-xs text-zinc-500">Create a new folder in your library.</p>
+                <h3 className="text-sm font-semibold text-zinc-900">{t("folderSidebar.newDialog.title")}</h3>
+                <p className="text-xs text-zinc-500">{t("folderSidebar.newDialog.description")}</p>
               </div>
             </div>
 
@@ -335,7 +339,7 @@ export function FolderSidebar({
               }}
             >
               <div>
-                <label className="mb-2 block text-xs font-medium text-zinc-500">Folder name</label>
+                <label className="mb-2 block text-xs font-medium text-zinc-500">{t("folderSidebar.newDialog.name")}</label>
                 <div className="flex items-center rounded-xl border border-zinc-200 bg-zinc-50 px-3 focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-400/15">
                   <input
                     ref={newFolderInputRef}
@@ -343,7 +347,7 @@ export function FolderSidebar({
                     value={newFolderName}
                     onChange={e => setNewFolderName(e.target.value)}
                     className="w-full bg-transparent py-2.5 text-sm text-zinc-800 outline-none"
-                    placeholder="Enter folder name"
+                    placeholder={t("folderSidebar.newDialog.placeholder")}
                   />
                 </div>
               </div>
@@ -354,14 +358,14 @@ export function FolderSidebar({
                   onClick={() => { setNewFolderParentId(null); setNewFolderName(""); }}
                   className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
                 >
-                  Cancel
+                  {t("folderSidebar.newDialog.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={!newFolderName.trim()}
                   className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300"
                 >
-                  Create
+                  {t("folderSidebar.newDialog.create")}
                 </button>
               </div>
             </form>
@@ -386,8 +390,8 @@ export function FolderSidebar({
                 <FilePenLine size={18} />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-zinc-900">Rename Folder</h3>
-                <p className="text-xs text-zinc-500">Edit the folder name in your library.</p>
+                <h3 className="text-sm font-semibold text-zinc-900">{t("folderSidebar.renameDialog.title")}</h3>
+                <p className="text-xs text-zinc-500">{t("folderSidebar.renameDialog.description")}</p>
               </div>
             </div>
 
@@ -399,7 +403,7 @@ export function FolderSidebar({
               }}
             >
               <div>
-                <label className="mb-2 block text-xs font-medium text-zinc-500">Folder name</label>
+                <label className="mb-2 block text-xs font-medium text-zinc-500">{t("folderSidebar.renameDialog.name")}</label>
                 <div className="flex items-center rounded-xl border border-zinc-200 bg-zinc-50 px-3 focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-400/15">
                   <input
                     ref={renameInputRef}
@@ -407,7 +411,7 @@ export function FolderSidebar({
                     value={renameValue}
                     onChange={e => setRenameValue(e.target.value)}
                     className="w-full bg-transparent py-2.5 text-sm text-zinc-800 outline-none"
-                    placeholder="Enter folder name"
+                    placeholder={t("folderSidebar.renameDialog.placeholder")}
                   />
                 </div>
               </div>
@@ -421,14 +425,14 @@ export function FolderSidebar({
                   }}
                   className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
                 >
-                  Cancel
+                  {t("folderSidebar.renameDialog.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={!renameValue.trim()}
                   className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300"
                 >
-                  Save
+                  {t("folderSidebar.renameDialog.save")}
                 </button>
               </div>
             </form>
@@ -447,13 +451,13 @@ export function FolderSidebar({
           onClick={e => e.stopPropagation()}
         >
           <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 px-0.5">
-            Tag color
+            {t("folderSidebar.tags.color")}
           </p>
           <div className="grid grid-cols-4 gap-1.5">
             {TAG_COLORS.map(c => (
               <button
                 key={c.value}
-                title={c.label}
+                title={t(`folderSidebar.colors.${c.label.toLowerCase()}`, undefined, c.label)}
                 onClick={async () => {
                   await onSetTagColor(tagColorMenu.tag, c.value);
                   setTagColorMenu(null);
@@ -498,6 +502,7 @@ function FolderTreeItem({
   onOpenNewFolderDialog: (parentId: string) => void;
   onOpenContextMenu: (folder: FolderNode, event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(true);
   const isSelected = node.id === selectedFolderId;
   const hasChildren = node.children.length > 0;
@@ -559,7 +564,7 @@ function FolderTreeItem({
         {/* Add sub-folder button shown on hover */}
         <button
           className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-indigo-500 transition-opacity shrink-0"
-          title="New sub-folder"
+          title={t("folderSidebar.actions.newSubFolder")}
           onClick={e => { e.stopPropagation(); onOpenNewFolderDialog(node.id); }}
         >
           <Plus size={12} />

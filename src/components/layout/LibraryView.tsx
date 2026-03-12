@@ -3,19 +3,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { Download, FilePenLine, FileText, FileUp, Globe, Loader2, Search, Trash2 } from "lucide-react";
 import { FolderNode, LibraryItem } from "../../types";
 import { ExportModal } from "./ExportModal";
+import { useI18n } from "../../hooks/useI18n";
 
 // ─── Search field types ──────────────────────────────────────────────────────
 
 type SearchField = "all" | "title" | "authors" | "year" | "doi" | "arxiv";
 
-const FIELD_LABELS: { id: SearchField; label: string }[] = [
-  { id: "all",     label: "All Fields" },
-  { id: "title",   label: "Title" },
-  { id: "authors", label: "Authors" },
-  { id: "year",    label: "Year" },
-  { id: "doi",     label: "DOI" },
-  { id: "arxiv",   label: "arXiv" },
-];
+const SEARCH_FIELDS: SearchField[] = ["all", "title", "authors", "year", "doi", "arxiv"];
 
 // ─── Highlight utility ──────────────────────────────────────────────────────
 
@@ -62,6 +56,7 @@ export function LibraryView({
   tagFilter,
   onClearTagFilter,
 }: LibraryViewProps) {
+  const { t } = useI18n();
   // Search state
   const [query, setQuery]             = useState("");
   const [searchField, setSearchField] = useState<SearchField>("all");
@@ -183,7 +178,28 @@ export function LibraryView({
     setRenameValue("");
   };
 
-  const folderLabel = selectedFolder?.name ?? "My Library";
+  const folderLabel = selectedFolder?.name ?? t("libraryView.myLibrary");
+  const resultCountLabel = displayItems.length === 1
+    ? t("libraryView.scope.results.one", { count: displayItems.length })
+    : t("libraryView.scope.results.other", { count: displayItems.length });
+  const paperCountLabel = folderItems.length === 1
+    ? t("libraryView.scope.papers.one", { count: folderItems.length })
+    : t("libraryView.scope.papers.other", { count: folderItems.length });
+  const exportScopeLabel = isGlobalSearch
+    ? (displayItems.length === 1
+      ? t("libraryView.export.searchScope.one", { count: displayItems.length })
+      : t("libraryView.export.searchScope.other", { count: displayItems.length }))
+    : (displayItems.length === 1
+      ? t("libraryView.export.folderScope.one", { count: displayItems.length, folder: folderLabel })
+      : t("libraryView.export.folderScope.other", { count: displayItems.length, folder: folderLabel }));
+
+  const searchPlaceholder =
+    searchField === "title"   ? t("libraryView.search.placeholder.title") :
+    searchField === "authors" ? t("libraryView.search.placeholder.authors") :
+    searchField === "year"    ? t("libraryView.search.placeholder.year") :
+    searchField === "doi"     ? t("libraryView.search.placeholder.doi") :
+    searchField === "arxiv"   ? t("libraryView.search.placeholder.arxiv") :
+                                  t("libraryView.search.placeholder.all");
 
   return (
     <div className="flex-1 min-w-0 flex flex-col h-full bg-white relative">
@@ -202,54 +218,47 @@ export function LibraryView({
               type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder={
-                searchField === "title"   ? "Search by title..." :
-                searchField === "authors" ? "Search by author..." :
-                searchField === "year"    ? "Search by year, e.g. 2024..." :
-                searchField === "doi"     ? "Search by DOI..." :
-                searchField === "arxiv"   ? "Search by arXiv ID..." :
-                                            "Search across all fields..."
-              }
+              placeholder={searchPlaceholder}
               className="w-full pl-10 pr-4 py-2 bg-zinc-100 border-transparent focus:bg-white border focus:border-indigo-400 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-400/20 transition-all placeholder:text-zinc-400 shadow-sm"
             />
           </div>
           <button
             onClick={() => setShowExport(true)}
             className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
-            title="Export references"
+            title={t("libraryView.actions.exportTitle")}
           >
             <Download size={15} />
-            <span>Export</span>
+            <span>{t("libraryView.actions.export")}</span>
           </button>
           <button
             onClick={onAddItem}
             className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
           >
             <FileUp size={15} />
-            <span>Add Library Item</span>
+            <span>{t("libraryView.actions.addItem")}</span>
           </button>
         </div>
 
         {/* Row 2 – field filter pills + year input + scope indicator */}
         <div className="flex items-center gap-2 px-6 pb-3 flex-wrap min-w-0">
-          {FIELD_LABELS.map(f => (
+          {SEARCH_FIELDS.map(fieldId => (
             <button
-              key={f.id}
-              onClick={() => setSearchField(f.id)}
+              key={fieldId}
+              onClick={() => setSearchField(fieldId)}
               className={[
                 "px-3 py-1 rounded-full text-xs font-medium transition-colors border whitespace-nowrap",
-                searchField === f.id
+                searchField === fieldId
                   ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
                   : "bg-white text-zinc-500 border-zinc-200 hover:border-indigo-300 hover:text-indigo-600",
               ].join(" ")}
             >
-              {f.label}
+              {t(`libraryView.search.fields.${fieldId}`)}
             </button>
           ))}
 
           {/* Year filter */}
           <div className="flex items-center gap-1.5 ml-1">
-            <span className="text-xs text-zinc-400">Year:</span>
+            <span className="text-xs text-zinc-400">{t("libraryView.search.yearLabel")}</span>
             <input
               type="text"
               value={yearFilter}
@@ -268,7 +277,7 @@ export function LibraryView({
               <button
                 onClick={onClearTagFilter}
                 className="ml-0.5 text-indigo-400 hover:text-indigo-700 transition-colors leading-none"
-                title="Clear tag filter"
+                title={t("libraryView.search.clearTag")}
               >
                 ×
               </button>
@@ -282,13 +291,13 @@ export function LibraryView({
                 <Globe size={13} className="text-indigo-400 shrink-0" />
                 <span className="text-indigo-500 font-medium">
                   {isSearching
-                    ? "Searching entire library…"
-                    : `${displayItems.length} result${displayItems.length !== 1 ? "s" : ""} across all library`}
+                    ? t("libraryView.scope.searching")
+                    : resultCountLabel}
                 </span>
               </>
             ) : (
               <span>
-                {folderItems.length} paper{folderItems.length !== 1 ? "s" : ""} in{" "}
+                {paperCountLabel}{" "}
                 <strong className="text-zinc-600">{folderLabel}</strong>
               </span>
             )}
@@ -304,11 +313,11 @@ export function LibraryView({
               <FileText size={32} className="opacity-40" />
             </div>
             {isGlobalSearch ? (
-              <p className="text-sm">{isSearching ? "Searching…" : "No results found"}</p>
+              <p className="text-sm">{isSearching ? t("libraryView.empty.searching") : t("libraryView.empty.noResults")}</p>
             ) : (
               <>
-                <p className="text-sm">No items in this folder</p>
-                <p className="text-xs text-zinc-400">Use the Add Library Item button above to add a paper.</p>
+                <p className="text-sm">{t("libraryView.empty.noItems")}</p>
+                <p className="text-xs text-zinc-400">{t("libraryView.empty.hint")}</p>
               </>
             )}
           </div>
@@ -344,13 +353,13 @@ export function LibraryView({
           <button
             onClick={() => {
               setRenameTarget(contextMenu.item);
-              setRenameValue(contextMenu.item.title || contextMenu.item.attachments[0]?.name || "Untitled");
+              setRenameValue(contextMenu.item.title || contextMenu.item.attachments[0]?.name || t("libraryView.item.untitled"));
               setContextMenu(null);
             }}
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
           >
             <FilePenLine size={15} />
-            <span>Rename Item</span>
+            <span>{t("libraryView.context.rename")}</span>
           </button>
           <button
             onClick={() => {
@@ -360,7 +369,7 @@ export function LibraryView({
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
           >
             <Trash2 size={15} />
-            <span>Delete Item</span>
+            <span>{t("libraryView.context.delete")}</span>
           </button>
         </div>
       )}
@@ -382,8 +391,8 @@ export function LibraryView({
                 <FilePenLine size={18} />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-zinc-900">Rename PDF</h3>
-                <p className="text-xs text-zinc-500">Edit the file name stored in your library.</p>
+                <h3 className="text-sm font-semibold text-zinc-900">{t("libraryView.renameDialog.title")}</h3>
+                <p className="text-xs text-zinc-500">{t("libraryView.renameDialog.description")}</p>
               </div>
             </div>
 
@@ -395,7 +404,7 @@ export function LibraryView({
               }}
             >
               <div>
-                <label className="mb-2 block text-xs font-medium text-zinc-500">File name</label>
+                <label className="mb-2 block text-xs font-medium text-zinc-500">{t("libraryView.renameDialog.fileName")}</label>
                 <div className="flex items-center rounded-xl border border-zinc-200 bg-zinc-50 px-3 focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-400/15">
                   <input
                     ref={renameInputRef}
@@ -403,7 +412,7 @@ export function LibraryView({
                     value={renameValue}
                     onChange={e => setRenameValue(e.target.value)}
                     className="w-full bg-transparent py-2.5 text-sm text-zinc-800 outline-none"
-                    placeholder="Enter PDF name"
+                    placeholder={t("libraryView.renameDialog.placeholder")}
                   />
                   <span className="shrink-0 text-sm text-zinc-400">.pdf</span>
                 </div>
@@ -418,14 +427,14 @@ export function LibraryView({
                   }}
                   className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
                 >
-                  Cancel
+                  {t("libraryView.renameDialog.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={!renameValue.trim()}
                   className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300"
                 >
-                  Save
+                  {t("libraryView.renameDialog.save")}
                 </button>
               </div>
             </form>
@@ -438,11 +447,7 @@ export function LibraryView({
       items={displayItems}
       isOpen={showExport}
       onClose={() => setShowExport(false)}
-      scopeLabel={
-        isGlobalSearch
-          ? `${displayItems.length} item${displayItems.length !== 1 ? "s" : ""} from search results`
-          : `${displayItems.length} item${displayItems.length !== 1 ? "s" : ""} in ${folderLabel}`
-      }
+      scopeLabel={exportScopeLabel}
     />
   </div>
   );
@@ -451,21 +456,21 @@ export function LibraryView({
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function formatAuthorsForList(authors: string): string {
-  if (authors === "—") return "Unknown Author";
+  if (authors === "—") return authors;
   const parts = authors.split(",").map(p => p.trim()).filter(Boolean);
   if (parts.length <= 3) return authors;
   return `${parts.slice(0, 3).join(", ")}, etc.`;
 }
 
 /** Derive a display-friendly folder label from a filesystem item id */
-function folderPathLabel(itemId: string): string {
+function folderPathLabel(itemId: string, rootLabel: string): string {
   const segments = itemId.split("/");
   const libIdx   = segments.findIndex(s => s === "library");
   if (libIdx !== -1) {
     const relative = segments.slice(libIdx + 1, -1);
-    return relative.length > 0 ? relative.join(" / ") : "My Library";
+    return relative.length > 0 ? relative.join(" / ") : rootLabel;
   }
-  return segments.length > 2 ? segments[segments.length - 2] : "My Library";
+  return segments.length > 2 ? segments[segments.length - 2] : rootLabel;
 }
 
 // ─── LibraryItemRow ──────────────────────────────────────────────────────────
@@ -489,7 +494,8 @@ function LibraryItemRow({
   onPointerDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   onContextMenu: (event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
-  const displayTitle   = item.title || item.attachments[0]?.name || "Untitled";
+  const { t } = useI18n();
+  const displayTitle   = item.title || item.attachments[0]?.name || t("libraryView.item.untitled");
   const displayAuthors = formatAuthorsForList(item.authors);
 
   return (
@@ -503,7 +509,7 @@ function LibraryItemRow({
       onDoubleClick={onOpen}
       onMouseDown={onPointerDown}
       onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu(e); }}
-      title="Double-click to open"
+      title={t("libraryView.item.openHint")}
     >
       <div className={`p-2 rounded-lg shrink-0 ${
         isSelected ? "bg-indigo-100 text-indigo-600" : "bg-zinc-100 text-zinc-500 group-hover:text-indigo-500 transition-colors"
@@ -517,11 +523,13 @@ function LibraryItemRow({
         </h3>
         <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500 min-w-0 flex-wrap">
           <span className="truncate">
-            {highlight ? highlightText(displayAuthors, highlight) : displayAuthors}
+            {highlight
+              ? highlightText(displayAuthors === "—" ? t("libraryView.item.unknownAuthor") : displayAuthors, highlight)
+              : (displayAuthors === "—" ? t("libraryView.item.unknownAuthor") : displayAuthors)}
           </span>
           <span className="text-zinc-300">•</span>
           <span className="shrink-0 text-zinc-400">
-            {item.year !== "—" ? item.year : "No Year"}
+            {item.year !== "—" ? item.year : t("libraryView.item.noYear")}
           </span>
           {item.tags && item.tags.length > 0 && (
             <>
@@ -541,7 +549,7 @@ function LibraryItemRow({
         </div>
         {showFolderPath && (
           <div className="mt-0.5 text-[10px] text-zinc-400 truncate">
-            📁 {folderPathLabel(item.id)}
+            📁 {folderPathLabel(item.id, t("libraryView.myLibrary"))}
           </div>
         )}
       </div>

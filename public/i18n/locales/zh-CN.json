@@ -1,0 +1,457 @@
+{
+  "toolbar": {
+    "zoomOut": "缩小",
+    "zoomIn": "放大",
+    "zoomOptions": "缩放选项",
+    "fitWidth": "适应宽度",
+    "fitHeight": "适应高度",
+    "tool": {
+      "pointer": "指针 — 自由滚动和拖动",
+      "textNote": "文字批注 — 在 PDF 任意位置点击输入备注",
+      "highlight": "自由高亮 — 在文字上绘制高亮轨迹",
+      "draw": "画笔 — 手绘批注",
+      "eraser": "橡皮擦 — 点击或拖动删除批注"
+    },
+    "infoPanel": {
+      "show": "显示信息面板",
+      "hide": "隐藏信息面板"
+    }
+  },
+  "searchBar": {
+    "placeholder": "在文档中查找...",
+    "previous": "上一个（Shift+Enter）",
+    "next": "下一个（Enter）",
+    "close": "关闭（Esc）"
+  },
+  "pdfViewer": {
+    "pageLabel": "第 {page} 页",
+    "pageAlt": "第 {page} 页"
+  },
+  "app": {
+    "loading": {
+      "switchingDocument": "正在切换文档..."
+    },
+    "drag": {
+      "movePdf": "移动 PDF"
+    }
+  },
+  "feedback": {
+    "search": {
+      "notFound": {
+        "title": "未找到匹配内容",
+        "description": "当前文档中未找到“{term}”。"
+      }
+    },
+    "library": {
+      "loadError": {
+        "title": "加载资料库失败",
+        "description": "当前无法加载资料库数据。"
+      },
+      "openError": {
+        "title": "打开 PDF 失败",
+        "description": "无法打开所选 PDF。"
+      },
+      "import": {
+        "success": {
+          "title": "PDF 已导入",
+          "description": "{title} 已添加到资料库。"
+        },
+        "error": {
+          "title": "导入失败",
+          "description": "无法导入所选 PDF。"
+        }
+      },
+      "tags": {
+        "loadError": {
+          "title": "加载标签失败",
+          "description": "无法刷新标签信息。"
+        },
+        "colorUpdated": {
+          "title": "标签颜色已更新",
+          "description": "已更新 #{tag} 的颜色。"
+        },
+        "colorUpdateError": {
+          "title": "更新标签颜色失败",
+          "description": "无法更新 #{tag} 的颜色。"
+        }
+      },
+      "item": {
+        "deleteSuccess": {
+          "title": "条目已删除",
+          "description": "已从资料库移除 {title}。"
+        },
+        "deleteError": {
+          "title": "删除条目失败",
+          "description": "无法删除所选条目。"
+        },
+        "renameSuccess": {
+          "title": "条目已重命名",
+          "description": "已将条目重命名为 {title}。"
+        },
+        "renameError": {
+          "title": "重命名条目失败",
+          "description": "无法重命名所选条目。"
+        },
+        "moveSuccess": {
+          "title": "条目已移动",
+          "description": "已将条目移动到 {folder}。"
+        },
+        "moveError": {
+          "title": "移动条目失败",
+          "description": "无法移动所选条目。"
+        }
+      },
+      "folder": {
+        "createError": {
+          "title": "创建文件夹失败",
+          "description": "无法创建文件夹 {name}。"
+        },
+        "renameSuccess": {
+          "title": "文件夹已重命名",
+          "description": "已将文件夹重命名为 {name}。"
+        },
+        "renameError": {
+          "title": "重命名文件夹失败",
+          "description": "无法重命名所选文件夹。"
+        },
+        "deleteSuccess": {
+          "title": "文件夹已删除",
+          "description": "已删除文件夹 {name}。"
+        },
+        "deleteError": {
+          "title": "删除文件夹失败",
+          "description": "无法删除所选文件夹。"
+        }
+      }
+    },
+    "meta": {
+      "saveSuccess": {
+        "title": "元数据已保存",
+        "description": "更改已成功保存。"
+      },
+      "saveError": {
+        "title": "保存元数据失败",
+        "description": "无法保存元数据更改。"
+      },
+      "noteSaveSuccess": {
+        "title": "笔记已保存",
+        "description": "笔记已成功保存。"
+      },
+      "noteSaveError": {
+        "title": "保存笔记失败",
+        "description": "无法保存笔记。"
+      },
+      "extractSuccess": {
+        "title": "批注已提取",
+        "description": "PDF 文字批注已添加到笔记中。"
+      },
+      "extractError": {
+        "title": "提取批注失败",
+        "description": "无法将 PDF 批注追加到笔记中。"
+      }
+    },
+    "export": {
+      "error": {
+        "title": "导出失败",
+        "description": "无法生成导出预览。"
+      }
+    }
+  },
+  "settings": {
+    "title": "设置",
+    "loading": "正在加载设置...",
+    "sections": {
+      "appearance": "外观",
+      "language": "语言与地区",
+      "library": "资料库与文件管理",
+      "export": "导出与集成"
+    },
+    "theme": {
+      "label": "主题",
+      "description": "选择应用的外观主题",
+      "following": " · 当前跟随 {theme}",
+      "light": "浅色",
+      "dark": "深色",
+      "auto": "自动"
+    },
+    "defaultPdfZoom": {
+      "label": "默认 PDF 缩放",
+      "description": "打开文档时的初始缩放级别",
+      "pageFit": "适应页面",
+      "pageWidth": "适应宽度"
+    },
+    "language": {
+      "label": "界面语言",
+      "description": "选择界面显示语言",
+      "current": "当前语言：{language}",
+      "systemOption": "跟随系统"
+    },
+    "autoRenamePdf": {
+      "label": "自动重命名 PDF",
+      "description": "根据元数据自动重命名导入文件"
+    },
+    "renamePattern": {
+      "label": "重命名模式",
+      "placeholder": "例如：[Year] - [Author] - [Title]"
+    },
+    "defaultCitationFormat": {
+      "label": "默认引用格式",
+      "description": "快速复制时使用的引用格式"
+    },
+    "citationFormats": {
+      "apa": "APA",
+      "mla": "MLA",
+      "chicago": "Chicago",
+      "gbt": "GB/T 7714",
+      "bibtex": "BibTeX"
+    }
+  },
+  "libraryView": {
+    "myLibrary": "我的资料库",
+    "search": {
+      "fields": {
+        "all": "全部字段",
+        "title": "标题",
+        "authors": "作者",
+        "year": "年份",
+        "doi": "DOI",
+        "arxiv": "arXiv"
+      },
+      "placeholder": {
+        "all": "搜索所有字段...",
+        "title": "按标题搜索...",
+        "authors": "按作者搜索...",
+        "year": "按年份搜索，例如 2024...",
+        "doi": "按 DOI 搜索...",
+        "arxiv": "按 arXiv ID 搜索..."
+      },
+      "yearLabel": "年份：",
+      "clearTag": "清除标签筛选"
+    },
+    "actions": {
+      "export": "导出",
+      "exportTitle": "导出参考文献",
+      "addItem": "添加文献条目"
+    },
+    "scope": {
+      "searching": "正在搜索整个资料库…",
+      "results": {
+        "one": "整个资料库中共 {count} 条结果",
+        "other": "整个资料库中共 {count} 条结果"
+      },
+      "papers": {
+        "one": "{count} 篇文献位于",
+        "other": "{count} 篇文献位于"
+      }
+    },
+    "empty": {
+      "searching": "搜索中…",
+      "noResults": "未找到结果",
+      "noItems": "此文件夹中没有条目",
+      "hint": "使用上方的“添加文献条目”按钮添加论文。"
+    },
+    "context": {
+      "rename": "重命名条目",
+      "delete": "删除条目"
+    },
+    "renameDialog": {
+      "title": "重命名 PDF",
+      "description": "编辑资料库中保存的文件名。",
+      "fileName": "文件名",
+      "placeholder": "输入 PDF 名称",
+      "cancel": "取消",
+      "save": "保存"
+    },
+    "export": {
+      "searchScope": {
+        "one": "搜索结果中的 {count} 个条目",
+        "other": "搜索结果中的 {count} 个条目"
+      },
+      "folderScope": {
+        "one": "{folder} 中的 {count} 个条目",
+        "other": "{folder} 中的 {count} 个条目"
+      }
+    },
+    "item": {
+      "untitled": "未命名",
+      "openHint": "双击打开",
+      "unknownAuthor": "未知作者",
+      "noYear": "无年份"
+    }
+  },
+  "folderSidebar": {
+    "colors": {
+      "indigo": "靛蓝",
+      "sky": "天蓝",
+      "teal": "蓝绿",
+      "emerald": "翠绿",
+      "amber": "琥珀",
+      "orange": "橙色",
+      "rose": "玫瑰",
+      "violet": "紫罗兰"
+    },
+    "actions": {
+      "newFolder": "新建文件夹",
+      "newSubFolder": "新建子文件夹",
+      "settings": "设置"
+    },
+    "tags": {
+      "title": "标签",
+      "tooltip": {
+        "one": "{tag} — {count} 篇文献（右键修改颜色）",
+        "other": "{tag} — {count} 篇文献（右键修改颜色）"
+      },
+      "color": "标签颜色"
+    },
+    "context": {
+      "rename": "重命名文件夹",
+      "delete": "删除文件夹"
+    },
+    "newDialog": {
+      "title": "新建文件夹",
+      "description": "在资料库中创建一个新文件夹。",
+      "name": "文件夹名称",
+      "placeholder": "输入文件夹名称",
+      "cancel": "取消",
+      "create": "创建"
+    },
+    "renameDialog": {
+      "title": "重命名文件夹",
+      "description": "编辑资料库中的文件夹名称。",
+      "name": "文件夹名称",
+      "placeholder": "输入文件夹名称",
+      "cancel": "取消",
+      "save": "保存"
+    }
+  },
+  "exportModal": {
+    "title": "导出参考文献",
+    "scope": {
+      "one": "{count} 个条目",
+      "other": "{count} 个条目"
+    },
+    "outputFormat": "输出格式",
+    "preview": {
+      "one": "预览 — {format}（{count} 个条目）",
+      "other": "预览 — {format}（{count} 个条目）"
+    },
+    "generating": "生成中…",
+    "noItems": "没有可导出的条目",
+    "footer": {
+      "one": "{count} 条参考文献 • {ext} 文件",
+      "other": "{count} 条参考文献 • {ext} 文件"
+    },
+    "copyAll": "复制全部",
+    "copied": "已复制！",
+    "download": "下载 {ext}",
+    "error": "错误：{error}",
+    "formats": {
+      "apa": {
+        "label": "APA 第 7 版",
+        "description": "美国心理学会格式"
+      },
+      "mla": {
+        "label": "MLA 第 9 版",
+        "description": "现代语言协会格式"
+      },
+      "chicago": {
+        "label": "Chicago 第 17 版",
+        "description": "芝加哥作者-日期制"
+      },
+      "gbt": {
+        "label": "GB/T 7714",
+        "description": "中国国家标准（2015）"
+      },
+      "bibtex": {
+        "label": "BibTeX",
+        "description": "兼容 LaTeX / Overleaf"
+      },
+      "ris": {
+        "label": "RIS",
+        "description": "参考文献管理器 / Zotero / Mendeley"
+      },
+      "csljson": {
+        "label": "CSL JSON",
+        "description": "Citation Style Language JSON"
+      }
+    }
+  },
+  "metaPanel": {
+    "title": "信息",
+    "empty": "从列表中选择一篇论文以查看信息",
+    "untitled": "未命名",
+    "unknown": "未知",
+    "none": "无",
+    "fields": {
+      "title": "标题",
+      "authors": "作者",
+      "year": "年份",
+      "language": "语言",
+      "tags": "标签",
+      "publication": "出版物",
+      "volume": "卷",
+      "issue": "期",
+      "pages": "页码",
+      "publisher": "出版社",
+      "doi": "DOI",
+      "arxiv": "arXiv",
+      "isbn": "ISBN",
+      "url": "URL",
+      "abstract": "摘要",
+      "file": "文件"
+    },
+    "placeholders": {
+      "authors": "用逗号分隔作者",
+      "tagInput": "输入标签，按 Enter 或逗号添加"
+    },
+    "tagsHelp": "按 Enter 或逗号添加 · 按 Backspace 删除最后一个",
+    "actions": {
+      "saveChanges": "保存更改",
+      "saving": "保存中",
+      "savingWithDots": "保存中...",
+      "save": "保存",
+      "edit": "编辑",
+      "editMetadata": "编辑元数据",
+      "cancelEdit": "取消编辑",
+      "closePanel": "关闭面板",
+      "cancel": "取消"
+    },
+    "publication": {
+      "volume": "第 {value} 卷",
+      "issue": "第 {value} 期",
+      "pages": "第 {value} 页"
+    },
+    "notes": {
+      "title": "笔记",
+      "extract": "提取",
+      "extractTitle": "将 PDF 文字批注提取到笔记中",
+      "placeholder": "以 Markdown 记录你的想法、总结或摘录...",
+      "save": "保存笔记"
+    },
+    "annotations": {
+      "title": "PDF 批注",
+      "loading": "正在加载批注...",
+      "empty": "此 PDF 中没有批注。",
+      "page": "第 {page} 页",
+      "actions": {
+        "one": "{count} 个绘制/高亮操作",
+        "other": "{count} 个绘制/高亮操作"
+      }
+    },
+    "cite": {
+      "title": "引用",
+      "copyTitle": "复制引用",
+      "formats": {
+        "ris": "RIS"
+      }
+    },
+    "errors": {
+      "saveChanges": "保存更改失败。",
+      "saveNote": "保存笔记失败。"
+    }
+  },
+  "errorBoundary": {
+    "title": "出现了一些问题",
+    "reload": "重新加载"
+  }
+}

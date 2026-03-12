@@ -10,6 +10,8 @@
 
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useFeedback } from "./useFeedback";
+import { useI18n } from "./useI18n";
 import { 
   FolderNode, 
   LibraryItem, 
@@ -19,6 +21,8 @@ import {
 } from "../types";
 
 export function useLibrary() {
+  const feedback = useFeedback();
+  const { t } = useI18n();
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
@@ -146,8 +150,14 @@ export function useLibrary() {
   }
 
   useEffect(() => {
-    refreshLibrary().catch(err => console.error("Failed to load library", err));
-  }, []);
+    refreshLibrary().catch(err => {
+      console.error("Failed to load library", err);
+      feedback.error({
+        title: t("feedback.library.loadError.title"),
+        description: t("feedback.library.loadError.description"),
+      });
+    });
+  }, [feedback, t]);
 
   const handleAddItem = async () => {
     const { open } = await import("@tauri-apps/plugin-dialog");
@@ -183,9 +193,17 @@ export function useLibrary() {
         setActiveTabId(newItem.id);
         setSelectedItemId(newItem.id);
         setIsLoading(false);
+        feedback.success({
+          title: t("feedback.library.import.success.title"),
+          description: t("feedback.library.import.success.description", { title: newItem.title || newItem.attachments[0]?.name || trimmedFileName(selected) }),
+        });
       }
     } catch (err) {
       console.error("Failed to open PDF", err);
+      feedback.error({
+        title: t("feedback.library.import.error.title"),
+        description: t("feedback.library.import.error.description"),
+      });
       setIsLoading(false);
     }
   };
@@ -212,6 +230,10 @@ export function useLibrary() {
       setIsLoading(false);
     } catch (err) {
       console.error("Failed to open PDF", err);
+      feedback.error({
+        title: t("feedback.library.openError.title"),
+        description: t("feedback.library.openError.description"),
+      });
       setIsLoading(false);
     }
   };
@@ -257,6 +279,10 @@ export function useLibrary() {
       setSelectedFolderId(createdPath);
     } catch (err) {
       console.error("Failed to create folder", err);
+      feedback.error({
+        title: t("feedback.library.folder.createError.title"),
+        description: t("feedback.library.folder.createError.description", { name: trimmedName }),
+      });
     }
   };
 
@@ -273,9 +299,16 @@ export function useLibrary() {
         return next;
       });
       setSelectedItemId(prev => prev === item.id ? null : prev);
+      feedback.success({
+        title: t("feedback.library.item.deleteSuccess.title"),
+        description: t("feedback.library.item.deleteSuccess.description", { title: item.title || item.attachments[0]?.name || item.id.split("/").pop() || item.id }),
+      });
     } catch (err) {
       console.error("Failed to delete Item", err);
-      window.alert("Failed to delete Item.");
+      feedback.error({
+        title: t("feedback.library.item.deleteError.title"),
+        description: t("feedback.library.item.deleteError.description"),
+      });
     }
   };
 
@@ -297,9 +330,16 @@ export function useLibrary() {
       }));
       setSelectedItemId(prev => prev === item.id ? renamedItem.id : prev);
       setActiveTabId(prev => prev === item.id ? renamedItem.id : prev);
+      feedback.success({
+        title: t("feedback.library.item.renameSuccess.title"),
+        description: t("feedback.library.item.renameSuccess.description", { title: trimmedName }),
+      });
     } catch (err) {
       console.error("Failed to rename Item", err);
-      window.alert("Failed to rename Item.");
+      feedback.error({
+        title: t("feedback.library.item.renameError.title"),
+        description: t("feedback.library.item.renameError.description"),
+      });
     }
   };
 
@@ -333,9 +373,16 @@ export function useLibrary() {
       setSelectedFolderId(nextSelectedFolderId);
       setSelectedItemId(nextSelectedItemId);
       setActiveTabId(nextActiveTabId);
+      feedback.success({
+        title: t("feedback.library.folder.renameSuccess.title"),
+        description: t("feedback.library.folder.renameSuccess.description", { name: trimmedName }),
+      });
     } catch (err) {
       console.error("Failed to rename folder", err);
-      window.alert("Failed to rename folder.");
+      feedback.error({
+        title: t("feedback.library.folder.renameError.title"),
+        description: t("feedback.library.folder.renameError.description"),
+      });
     }
   };
 
@@ -361,9 +408,16 @@ export function useLibrary() {
 
       setSelectedFolderId(parentFolderId);
       setSelectedItemId(prev => prev && (prev === folder.path || prev.startsWith(`${folder.path}/`)) ? null : prev);
+      feedback.success({
+        title: t("feedback.library.folder.deleteSuccess.title"),
+        description: t("feedback.library.folder.deleteSuccess.description", { name: folder.name }),
+      });
     } catch (err) {
       console.error("Failed to delete folder", err);
-      window.alert("Failed to delete folder.");
+      feedback.error({
+        title: t("feedback.library.folder.deleteError.title"),
+        description: t("feedback.library.folder.deleteError.description"),
+      });
     } finally {
       setIsLoading(false);
     }
@@ -391,9 +445,16 @@ export function useLibrary() {
       }));
       setSelectedItemId(prev => prev === item.id ? movedItem.id : prev);
       setActiveTabId(prev => prev === item.id ? movedItem.id : prev);
+      feedback.success({
+        title: t("feedback.library.item.moveSuccess.title"),
+        description: t("feedback.library.item.moveSuccess.description", { folder: targetFolder.name }),
+      });
     } catch (err) {
       console.error("Failed to move Item", err);
-      window.alert("Failed to move Item.");
+      feedback.error({
+        title: t("feedback.library.item.moveError.title"),
+        description: t("feedback.library.item.moveError.description"),
+      });
     } finally {
       setIsLoading(false);
     }
@@ -441,4 +502,8 @@ export function useLibrary() {
     handleDeleteFolder,
     handleItemUpdatedLocally
   };
+}
+
+function trimmedFileName(path: string) {
+  return path.split("/").pop()?.replace(/\.pdf$/i, "") || path;
 }

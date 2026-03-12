@@ -10,6 +10,7 @@ export type AppTheme = 'light' | 'dark' | 'auto';
 
 export interface AppSettings {
   theme: AppTheme;
+  language: string;
   defaultPdfZoom: string;
   autoRenamePdf: boolean;
   renamePattern: string;
@@ -18,6 +19,7 @@ export interface AppSettings {
 
 const DEFAULT_SETTINGS: AppSettings = {
   theme: 'auto',
+  language: 'system',
   defaultPdfZoom: 'page-fit',
   autoRenamePdf: true,
   renamePattern: '[Year] - [Author] - [Title]',

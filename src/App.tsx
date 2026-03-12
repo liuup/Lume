@@ -12,6 +12,8 @@ import { X } from "lucide-react";
 import { TagInfo, ToolType } from "./types";
 import { useLibrary } from "./hooks/useLibrary";
 import { useSettings } from "./hooks/useSettings";
+import { useI18n } from "./hooks/useI18n";
+import { useFeedback } from "./hooks/useFeedback";
 
 type LibraryDragState = {
   itemId: string;
@@ -21,6 +23,8 @@ type LibraryDragState = {
 };
 
 function App() {
+  const { t } = useI18n();
+  const feedback = useFeedback();
   const {
     openTabs,
     activeTabId,
@@ -84,8 +88,12 @@ function App() {
       setAllTags(tags);
     } catch (err) {
       console.error("Failed to load tags", err);
+      feedback.error({
+        title: t("feedback.library.tags.loadError.title"),
+        description: t("feedback.library.tags.loadError.description"),
+      });
     }
-  }, []);
+  }, [feedback, t]);
 
   useEffect(() => { refreshAllTags(); }, [refreshAllTags]);
 
@@ -373,8 +381,20 @@ function App() {
               selectedTagFilter={selectedTagFilter}
               onSelectTag={t => setSelectedTagFilter(prev => prev === t ? null : t)}
               onSetTagColor={async (tag, color) => {
-                await invoke("set_tag_color", { tag, color });
-                await refreshAllTags();
+                try {
+                  await invoke("set_tag_color", { tag, color });
+                  await refreshAllTags();
+                  feedback.success({
+                    title: t("feedback.library.tags.colorUpdated.title"),
+                    description: t("feedback.library.tags.colorUpdated.description", { tag }),
+                  });
+                } catch (error) {
+                  console.error("Failed to set tag color", error);
+                  feedback.error({
+                    title: t("feedback.library.tags.colorUpdateError.title"),
+                    description: t("feedback.library.tags.colorUpdateError.description", { tag }),
+                  });
+                }
               }}
               onOpenSettings={() => setShowSettings(true)}
             />
@@ -417,7 +437,10 @@ function App() {
                     // Using basic window.find for finding natively parsed text
                     const found = (window as any).find(term, false, backwards, true, false, false, false);
                     if (!found) {
-                      // Optionally we could show a "not found" toast or handle it
+                      feedback.info({
+                        title: t("feedback.search.notFound.title"),
+                        description: t("feedback.search.notFound.description", { term }),
+                      });
                     }
                   }}
                   onClose={() => setShowSearch(false)}
@@ -428,7 +451,7 @@ function App() {
                 <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-200/50 backdrop-blur-sm">
                   <div className="flex flex-col items-center space-y-4">
                     <div className="w-8 h-8 border-2 border-zinc-400 border-t-zinc-600 rounded-full animate-spin" />
-                    <div className="text-sm font-medium text-zinc-600">Switching document...</div>
+                    <div className="text-sm font-medium text-zinc-600">{t("app.loading.switchingDocument")}</div>
                   </div>
                 </div>
               )}
@@ -483,7 +506,7 @@ function App() {
             top: dragState.y + 14,
           }}
         >
-          <div className="text-xs font-semibold text-indigo-600">Move PDF</div>
+          <div className="text-xs font-semibold text-indigo-600">{t("app.drag.movePdf")}</div>
           <div className="max-w-64 truncate text-sm text-zinc-700">{dragState.title}</div>
         </div>
       )}

@@ -1,0 +1,160 @@
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
+
+export type FeedbackVariant = "success" | "error" | "info";
+
+interface FeedbackItem {
+  id: string;
+  variant: FeedbackVariant;
+  title: string;
+  description?: string;
+  duration: number;
+}
+
+interface FeedbackPayload {
+  title: string;
+  description?: string;
+  duration?: number;
+}
+
+interface FeedbackContextType {
+  notify: (variant: FeedbackVariant, payload: FeedbackPayload) => string;
+  success: (payload: FeedbackPayload) => string;
+  error: (payload: FeedbackPayload) => string;
+  info: (payload: FeedbackPayload) => string;
+  dismiss: (id: string) => void;
+}
+
+const DEFAULT_DURATION: Record<FeedbackVariant, number> = {
+  success: 2600,
+  error: 4200,
+  info: 3200,
+};
+
+const FeedbackContext = createContext<FeedbackContextType | undefined>(undefined);
+
+function getToastStyles(variant: FeedbackVariant) {
+  switch (variant) {
+    case "success":
+      return {
+        panel: "border-emerald-200 bg-white",
+        iconWrap: "bg-emerald-50 text-emerald-600",
+        title: "text-emerald-900",
+        description: "text-emerald-700/80",
+        button: "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100",
+      };
+    case "error":
+      return {
+        panel: "border-red-200 bg-white",
+        iconWrap: "bg-red-50 text-red-600",
+        title: "text-red-900",
+        description: "text-red-700/80",
+        button: "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100",
+      };
+    default:
+      return {
+        panel: "border-indigo-200 bg-white",
+        iconWrap: "bg-indigo-50 text-indigo-600",
+        title: "text-indigo-900",
+        description: "text-zinc-600",
+        button: "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100",
+      };
+  }
+}
+
+function FeedbackViewport({ items, onDismiss }: { items: FeedbackItem[]; onDismiss: (id: string) => void }) {
+  return (
+    <div className="pointer-events-none fixed bottom-4 right-4 z-[120] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
+      {items.map((item) => {
+        const styles = getToastStyles(item.variant);
+        const Icon = item.variant === "success" ? CheckCircle2 : item.variant === "error" ? AlertCircle : Info;
+
+        return (
+          <div
+            key={item.id}
+            className={`pointer-events-auto rounded-2xl border px-3 py-3 shadow-[0_18px_45px_-18px_rgba(0,0,0,0.28)] backdrop-blur-sm transition-all ${styles.panel}`}
+            role="status"
+            aria-live={item.variant === "error" ? "assertive" : "polite"}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`mt-0.5 rounded-xl p-2 ${styles.iconWrap}`}>
+                <Icon size={16} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className={`text-sm font-semibold ${styles.title}`}>{item.title}</div>
+                {item.description ? (
+                  <div className={`mt-0.5 text-xs leading-relaxed ${styles.description}`}>{item.description}</div>
+                ) : null}
+              </div>
+              <button
+                onClick={() => onDismiss(item.id)}
+                className={`rounded-lg p-1 transition-colors ${styles.button}`}
+                aria-label="Dismiss notification"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function FeedbackProvider({ children }: { children: ReactNode }) {
+  const [items, setItems] = useState<FeedbackItem[]>([]);
+
+  const dismiss = useCallback((id: string) => {
+    setItems((prev) => prev.filter((item) => item.id !== id));
+  }, []);
+
+  const notify = useCallback((variant: FeedbackVariant, payload: FeedbackPayload) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const item: FeedbackItem = {
+      id,
+      variant,
+      title: payload.title,
+      description: payload.description,
+      duration: payload.duration ?? DEFAULT_DURATION[variant],
+    };
+
+    setItems((prev) => [...prev, item]);
+    return id;
+  }, []);
+
+  useEffect(() => {
+    if (items.length === 0) return;
+
+    const timers = items
+      .filter((item) => item.duration > 0)
+      .map((item) => window.setTimeout(() => dismiss(item.id), item.duration));
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [dismiss, items]);
+
+  const value = useMemo<FeedbackContextType>(() => ({
+    notify,
+    success: (payload) => notify("success", payload),
+    error: (payload) => notify("error", payload),
+    info: (payload) => notify("info", payload),
+    dismiss,
+  }), [dismiss, notify]);
+
+  return (
+    <FeedbackContext.Provider value={value}>
+      {children}
+      <FeedbackViewport items={items} onDismiss={dismiss} />
+    </FeedbackContext.Provider>
+  );
+}
+
+export function useFeedback() {
+  const context = useContext(FeedbackContext);
+  if (!context) {
+    throw new Error("useFeedback must be used within a FeedbackProvider");
+  }
+
+  return context;
+}

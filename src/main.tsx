@@ -2,8 +2,10 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
 import App from "./App";
+import { FeedbackProvider } from "./hooks/useFeedback";
 import { SettingsProvider } from "./hooks/useSettings";
-import { ErrorBoundary } from "./components/ErrorBoundary";
+import { I18nProvider } from "./hooks/useI18n";
+import { AppErrorBoundary } from "./components/ErrorBoundary";
 
 window.addEventListener(
   "contextmenu",
@@ -15,11 +17,15 @@ window.addEventListener(
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <ErrorBoundary>
+    <FeedbackProvider>
       <SettingsProvider>
-        <App />
+        <I18nProvider>
+          <AppErrorBoundary>
+            <App />
+          </AppErrorBoundary>
+        </I18nProvider>
       </SettingsProvider>
-    </ErrorBoundary>
+    </FeedbackProvider>
   </React.StrictMode>
 );
 

@@ -1,0 +1,457 @@
+{
+  "toolbar": {
+    "zoomOut": "Zoom Out",
+    "zoomIn": "Zoom In",
+    "zoomOptions": "Zoom Options",
+    "fitWidth": "Fit to Width",
+    "fitHeight": "Fit to Height",
+    "tool": {
+      "pointer": "Pointer — scroll & pan freely",
+      "textNote": "Text Note — click anywhere on the PDF to type a note",
+      "highlight": "Freehand Highlight — draw a highlight stroke over text",
+      "draw": "Pen — annotate with freehand drawing",
+      "eraser": "Eraser — click or drag to remove annotations"
+    },
+    "infoPanel": {
+      "show": "Show Info Panel",
+      "hide": "Hide Info Panel"
+    }
+  },
+  "searchBar": {
+    "placeholder": "Find in document...",
+    "previous": "Previous (Shift+Enter)",
+    "next": "Next (Enter)",
+    "close": "Close (Esc)"
+  },
+  "pdfViewer": {
+    "pageLabel": "Page {page}",
+    "pageAlt": "Page {page}"
+  },
+  "app": {
+    "loading": {
+      "switchingDocument": "Switching document..."
+    },
+    "drag": {
+      "movePdf": "Move PDF"
+    }
+  },
+  "feedback": {
+    "search": {
+      "notFound": {
+        "title": "No matches found",
+        "description": "Could not find “{term}” in the current document."
+      }
+    },
+    "library": {
+      "loadError": {
+        "title": "Failed to load library",
+        "description": "The library data could not be loaded right now."
+      },
+      "openError": {
+        "title": "Failed to open PDF",
+        "description": "The selected PDF could not be opened."
+      },
+      "import": {
+        "success": {
+          "title": "PDF imported",
+          "description": "{title} was added to your library."
+        },
+        "error": {
+          "title": "Import failed",
+          "description": "The selected PDF could not be imported."
+        }
+      },
+      "tags": {
+        "loadError": {
+          "title": "Failed to load tags",
+          "description": "Tag information could not be refreshed."
+        },
+        "colorUpdated": {
+          "title": "Tag color updated",
+          "description": "Updated the color for #{tag}."
+        },
+        "colorUpdateError": {
+          "title": "Failed to update tag color",
+          "description": "Could not update the color for #{tag}."
+        }
+      },
+      "item": {
+        "deleteSuccess": {
+          "title": "Item deleted",
+          "description": "Removed {title} from the library."
+        },
+        "deleteError": {
+          "title": "Failed to delete item",
+          "description": "The selected item could not be deleted."
+        },
+        "renameSuccess": {
+          "title": "Item renamed",
+          "description": "Renamed the item to {title}."
+        },
+        "renameError": {
+          "title": "Failed to rename item",
+          "description": "The selected item could not be renamed."
+        },
+        "moveSuccess": {
+          "title": "Item moved",
+          "description": "Moved the item to {folder}."
+        },
+        "moveError": {
+          "title": "Failed to move item",
+          "description": "The selected item could not be moved."
+        }
+      },
+      "folder": {
+        "createError": {
+          "title": "Failed to create folder",
+          "description": "Could not create the folder {name}."
+        },
+        "renameSuccess": {
+          "title": "Folder renamed",
+          "description": "Renamed the folder to {name}."
+        },
+        "renameError": {
+          "title": "Failed to rename folder",
+          "description": "The selected folder could not be renamed."
+        },
+        "deleteSuccess": {
+          "title": "Folder deleted",
+          "description": "Deleted the folder {name}."
+        },
+        "deleteError": {
+          "title": "Failed to delete folder",
+          "description": "The selected folder could not be deleted."
+        }
+      }
+    },
+    "meta": {
+      "saveSuccess": {
+        "title": "Metadata saved",
+        "description": "Your changes were saved successfully."
+      },
+      "saveError": {
+        "title": "Failed to save metadata",
+        "description": "Your metadata changes could not be saved."
+      },
+      "noteSaveSuccess": {
+        "title": "Note saved",
+        "description": "Your note was saved successfully."
+      },
+      "noteSaveError": {
+        "title": "Failed to save note",
+        "description": "Your note could not be saved."
+      },
+      "extractSuccess": {
+        "title": "Annotations extracted",
+        "description": "PDF text annotations were added to the note."
+      },
+      "extractError": {
+        "title": "Failed to extract annotations",
+        "description": "PDF annotations could not be appended to the note."
+      }
+    },
+    "export": {
+      "error": {
+        "title": "Export failed",
+        "description": "The export preview could not be generated."
+      }
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "loading": "Loading settings...",
+    "sections": {
+      "appearance": "Appearance",
+      "language": "Language & Region",
+      "library": "Library & File Management",
+      "export": "Export & Integrations"
+    },
+    "theme": {
+      "label": "Theme",
+      "description": "Choose the app's visual style",
+      "following": " · now following {theme}",
+      "light": "Light",
+      "dark": "Dark",
+      "auto": "Auto"
+    },
+    "defaultPdfZoom": {
+      "label": "Default PDF Zoom",
+      "description": "Initial zoom level when opening a document",
+      "pageFit": "Fit Page",
+      "pageWidth": "Fit Width"
+    },
+    "language": {
+      "label": "Interface Language",
+      "description": "Choose the language used across the interface",
+      "current": "Current language: {language}",
+      "systemOption": "Follow system"
+    },
+    "autoRenamePdf": {
+      "label": "Auto-Rename PDFs",
+      "description": "Automatically rename imported files based on metadata"
+    },
+    "renamePattern": {
+      "label": "Rename Pattern",
+      "placeholder": "e.g. [Year] - [Author] - [Title]"
+    },
+    "defaultCitationFormat": {
+      "label": "Default Citation Format",
+      "description": "Format used for quick copy operations"
+    },
+    "citationFormats": {
+      "apa": "APA",
+      "mla": "MLA",
+      "chicago": "Chicago",
+      "gbt": "GB/T 7714",
+      "bibtex": "BibTeX"
+    }
+  },
+  "libraryView": {
+    "myLibrary": "My Library",
+    "search": {
+      "fields": {
+        "all": "All Fields",
+        "title": "Title",
+        "authors": "Authors",
+        "year": "Year",
+        "doi": "DOI",
+        "arxiv": "arXiv"
+      },
+      "placeholder": {
+        "all": "Search across all fields...",
+        "title": "Search by title...",
+        "authors": "Search by author...",
+        "year": "Search by year, e.g. 2024...",
+        "doi": "Search by DOI...",
+        "arxiv": "Search by arXiv ID..."
+      },
+      "yearLabel": "Year:",
+      "clearTag": "Clear tag filter"
+    },
+    "actions": {
+      "export": "Export",
+      "exportTitle": "Export references",
+      "addItem": "Add Library Item"
+    },
+    "scope": {
+      "searching": "Searching entire library…",
+      "results": {
+        "one": "{count} result across all library",
+        "other": "{count} results across all library"
+      },
+      "papers": {
+        "one": "{count} paper in",
+        "other": "{count} papers in"
+      }
+    },
+    "empty": {
+      "searching": "Searching…",
+      "noResults": "No results found",
+      "noItems": "No items in this folder",
+      "hint": "Use the Add Library Item button above to add a paper."
+    },
+    "context": {
+      "rename": "Rename Item",
+      "delete": "Delete Item"
+    },
+    "renameDialog": {
+      "title": "Rename PDF",
+      "description": "Edit the file name stored in your library.",
+      "fileName": "File name",
+      "placeholder": "Enter PDF name",
+      "cancel": "Cancel",
+      "save": "Save"
+    },
+    "export": {
+      "searchScope": {
+        "one": "{count} item from search results",
+        "other": "{count} items from search results"
+      },
+      "folderScope": {
+        "one": "{count} item in {folder}",
+        "other": "{count} items in {folder}"
+      }
+    },
+    "item": {
+      "untitled": "Untitled",
+      "openHint": "Double-click to open",
+      "unknownAuthor": "Unknown Author",
+      "noYear": "No Year"
+    }
+  },
+  "folderSidebar": {
+    "colors": {
+      "indigo": "Indigo",
+      "sky": "Sky",
+      "teal": "Teal",
+      "emerald": "Emerald",
+      "amber": "Amber",
+      "orange": "Orange",
+      "rose": "Rose",
+      "violet": "Violet"
+    },
+    "actions": {
+      "newFolder": "New Folder",
+      "newSubFolder": "New sub-folder",
+      "settings": "Settings"
+    },
+    "tags": {
+      "title": "Tags",
+      "tooltip": {
+        "one": "{tag} — {count} paper (right-click to change color)",
+        "other": "{tag} — {count} papers (right-click to change color)"
+      },
+      "color": "Tag color"
+    },
+    "context": {
+      "rename": "Rename Folder",
+      "delete": "Delete Folder"
+    },
+    "newDialog": {
+      "title": "New Folder",
+      "description": "Create a new folder in your library.",
+      "name": "Folder name",
+      "placeholder": "Enter folder name",
+      "cancel": "Cancel",
+      "create": "Create"
+    },
+    "renameDialog": {
+      "title": "Rename Folder",
+      "description": "Edit the folder name in your library.",
+      "name": "Folder name",
+      "placeholder": "Enter folder name",
+      "cancel": "Cancel",
+      "save": "Save"
+    }
+  },
+  "exportModal": {
+    "title": "Export References",
+    "scope": {
+      "one": "{count} item",
+      "other": "{count} items"
+    },
+    "outputFormat": "Output Format",
+    "preview": {
+      "one": "Preview — {format} ({count} item)",
+      "other": "Preview — {format} ({count} items)"
+    },
+    "generating": "Generating…",
+    "noItems": "No items to export",
+    "footer": {
+      "one": "{count} reference • {ext} file",
+      "other": "{count} references • {ext} file"
+    },
+    "copyAll": "Copy All",
+    "copied": "Copied!",
+    "download": "Download {ext}",
+    "error": "Error: {error}",
+    "formats": {
+      "apa": {
+        "label": "APA 7th",
+        "description": "American Psychological Association"
+      },
+      "mla": {
+        "label": "MLA 9th",
+        "description": "Modern Language Association"
+      },
+      "chicago": {
+        "label": "Chicago 17th",
+        "description": "Chicago Author-Date"
+      },
+      "gbt": {
+        "label": "GB/T 7714",
+        "description": "Chinese National Standard (2015)"
+      },
+      "bibtex": {
+        "label": "BibTeX",
+        "description": "LaTeX / Overleaf compatible"
+      },
+      "ris": {
+        "label": "RIS",
+        "description": "Reference Manager / Zotero / Mendeley"
+      },
+      "csljson": {
+        "label": "CSL JSON",
+        "description": "Citation Style Language JSON"
+      }
+    }
+  },
+  "metaPanel": {
+    "title": "Info",
+    "empty": "Select a paper from the list to view its info",
+    "untitled": "Untitled",
+    "unknown": "Unknown",
+    "none": "None",
+    "fields": {
+      "title": "Title",
+      "authors": "Authors",
+      "year": "Year",
+      "language": "Language",
+      "tags": "Tags",
+      "publication": "Publication",
+      "volume": "Vol.",
+      "issue": "Issue",
+      "pages": "Pages",
+      "publisher": "Publisher",
+      "doi": "DOI",
+      "arxiv": "arXiv",
+      "isbn": "ISBN",
+      "url": "URL",
+      "abstract": "Abstract",
+      "file": "File"
+    },
+    "placeholders": {
+      "authors": "Comma-separated authors",
+      "tagInput": "Type a tag, press Enter or comma"
+    },
+    "tagsHelp": "Press Enter or comma to add · Backspace to remove last",
+    "actions": {
+      "saveChanges": "Save Changes",
+      "saving": "Saving",
+      "savingWithDots": "Saving...",
+      "save": "Save",
+      "edit": "Edit",
+      "editMetadata": "Edit metadata",
+      "cancelEdit": "Cancel edit",
+      "closePanel": "Close panel",
+      "cancel": "Cancel"
+    },
+    "publication": {
+      "volume": "vol. {value}",
+      "issue": "no. {value}",
+      "pages": "pp. {value}"
+    },
+    "notes": {
+      "title": "Notes",
+      "extract": "Extract",
+      "extractTitle": "Extract PDF text annotations to note",
+      "placeholder": "Write your thoughts, summaries, or quotes in Markdown...",
+      "save": "Save Note"
+    },
+    "annotations": {
+      "title": "Pdf Annotations",
+      "loading": "Loading annotations...",
+      "empty": "No annotations in this PDF.",
+      "page": "Page {page}",
+      "actions": {
+        "one": "{count} draw/highlight action",
+        "other": "{count} draw/highlight actions"
+      }
+    },
+    "cite": {
+      "title": "Cite",
+      "copyTitle": "Copy citation",
+      "formats": {
+        "ris": "RIS"
+      }
+    },
+    "errors": {
+      "saveChanges": "Failed to save changes.",
+      "saveNote": "Failed to save note."
+    }
+  },
+  "errorBoundary": {
+    "title": "Something went wrong",
+    "reload": "Reload"
+  }
+}

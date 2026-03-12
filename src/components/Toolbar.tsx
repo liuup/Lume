@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type, PanelRight, ChevronDown, Eraser } from "lucide-react";
 import { ToolType } from "../types";
+import { useI18n } from "../hooks/useI18n";
 
 interface ToolbarProps {
   onZoomIn: () => void;
@@ -33,6 +34,7 @@ export function Toolbar({
   totalPages,
   onPageJump,
 }: ToolbarProps) {
+  const { t } = useI18n();
   const [showZoomMenu, setShowZoomMenu] = useState(false);
   const zoomMenuRef = useRef<HTMLDivElement>(null);
   
@@ -94,7 +96,7 @@ export function Toolbar({
         <div className="flex items-center space-x-1 px-1">
           <TooltipButton
             onClick={onZoomOut}
-            tooltip="Zoom Out"
+            tooltip={t("toolbar.zoomOut")}
             className="p-1.5 text-zinc-500 hover:text-zinc-900 hover:bg-white rounded-xl transition-all active:scale-90"
           >
             <ZoomOut size={16} />
@@ -103,7 +105,7 @@ export function Toolbar({
             <button 
               onClick={() => setShowZoomMenu(!showZoomMenu)}
               className="w-16 h-8 flex items-center justify-center space-x-1 hover:bg-white rounded-md transition-colors"
-              title="Zoom Options"
+              title={t("toolbar.zoomOptions")}
             >
               <span className="text-[11px] font-semibold text-zinc-600 select-none">
                 {Math.round(scale * 100)}%
@@ -114,17 +116,17 @@ export function Toolbar({
             {showZoomMenu && (
               <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 w-32 bg-white border border-zinc-200 rounded-xl shadow-lg py-1.5 z-50">
                 <button className="w-full text-left px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors" onClick={() => { onFitWidth(); setShowZoomMenu(false); }}>
-                  Fit to Width
+                  {t("toolbar.fitWidth")}
                 </button>
                 <button className="w-full text-left px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors" onClick={() => { onFitHeight(); setShowZoomMenu(false); }}>
-                  Fit to Height
+                  {t("toolbar.fitHeight")}
                 </button>
               </div>
             )}
           </div>
           <TooltipButton
             onClick={onZoomIn}
-            tooltip="Zoom In"
+            tooltip={t("toolbar.zoomIn")}
             className="p-1.5 text-zinc-500 hover:text-zinc-900 hover:bg-white rounded-xl transition-all active:scale-90"
           >
             <ZoomIn size={16} />
@@ -139,34 +141,34 @@ export function Toolbar({
             active={activeTool === "none"}
             onClick={() => onToolChange("none")}
             icon={<MousePointer2 size={16} />}
-            tooltip="Pointer — scroll & pan freely"
+            tooltip={t("toolbar.tool.pointer")}
           />
           <ToolButton
             active={activeTool === "text-highlight"}
             onClick={() => onToolChange("text-highlight")}
             icon={<Type size={16} />}
-            tooltip="Text Note — click anywhere on the PDF to type a note"
+            tooltip={t("toolbar.tool.textNote")}
             activeClass="text-indigo-600 bg-white"
           />
           <ToolButton
             active={activeTool === "highlight"}
             onClick={() => onToolChange("highlight")}
             icon={<Highlighter size={16} />}
-            tooltip="Freehand Highlight — draw a highlight stroke over text"
+            tooltip={t("toolbar.tool.highlight")}
             activeClass="text-amber-600 bg-white"
           />
           <ToolButton
             active={activeTool === "draw"}
             onClick={() => onToolChange("draw")}
             icon={<Pencil size={16} />}
-            tooltip="Pen — annotate with freehand drawing"
+            tooltip={t("toolbar.tool.draw")}
             activeClass="text-blue-600 bg-white"
           />
           <ToolButton
             active={activeTool === "eraser"}
             onClick={() => onToolChange("eraser")}
             icon={<Eraser size={16} />}
-            tooltip="Eraser — click or drag to remove annotations"
+            tooltip={t("toolbar.tool.eraser")}
             activeClass="text-pink-600 bg-white"
           />
         </div>
@@ -176,7 +178,7 @@ export function Toolbar({
       <div className="flex-1 h-full flex justify-end items-center" data-tauri-drag-region>
         <TooltipButton
           onClick={onToggleRightPanel}
-          tooltip={isRightPanelOpen ? "Hide Info Panel" : "Show Info Panel"}
+          tooltip={isRightPanelOpen ? t("toolbar.infoPanel.hide") : t("toolbar.infoPanel.show")}
           className={`p-2 rounded-xl transition-all active:scale-90 relative z-10 ${
             isRightPanelOpen
               ? "text-indigo-600 bg-indigo-50 hover:bg-indigo-100"

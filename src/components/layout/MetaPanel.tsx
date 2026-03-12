@@ -4,15 +4,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CitationFormat } from "./ExportModal";
 import { useSettings } from "../../hooks/useSettings";
+import { useI18n } from "../../hooks/useI18n";
+import { useFeedback } from "../../hooks/useFeedback";
 
-const CITE_FORMATS: { id: CitationFormat; label: string }[] = [
-  { id: "apa",     label: "APA" },
-  { id: "mla",     label: "MLA" },
-  { id: "chicago", label: "Chicago" },
-  { id: "gbt",     label: "GB/T" },
-  { id: "bibtex",  label: "BibTeX" },
-  { id: "ris",     label: "RIS" },
-];
+const CITE_FORMATS: CitationFormat[] = ["apa", "mla", "chicago", "gbt", "bibtex", "ris"];
 
 interface MetaPanelProps {
   selectedItem: LibraryItem | null;
@@ -76,6 +71,8 @@ function normalizePdfAnnotations(document: RawSavedPdfAnnotationsDocument | null
 }
 
 export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagColors = {}, onPageJump, annotationsRefreshKey = 0 }: MetaPanelProps) {
+  const { t } = useI18n();
+  const feedback = useFeedback();
   const [isEditing, setIsEditing] = useState(false);
   const [editFormData, setEditFormData] = useState<Partial<LibraryItem>>({});
   const [isSaving, setIsSaving] = useState(false);
@@ -103,6 +100,13 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   const [pdfAnnotations, setPdfAnnotations] = useState<SavedPdfAnnotationsDocument | null>(null);
   const [isLoadingAnnotations, setIsLoadingAnnotations] = useState(false);
   const hasLoadedAnnotationsRef = useRef(false);
+  const citationFormatLabel = (format: CitationFormat) => {
+    if (format === "ris") {
+      return t("metaPanel.cite.formats.ris");
+    }
+
+    return t(`settings.citationFormats.${format}`);
+  };
 
   const generateCite = useCallback(async (itemId: string, fmt: CitationFormat) => {
     try {
@@ -246,9 +250,16 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
       if (onItemUpdated) {
         onItemUpdated();
       }
+      feedback.success({
+        title: t("feedback.meta.saveSuccess.title"),
+        description: t("feedback.meta.saveSuccess.description"),
+      });
     } catch (error) {
       console.error("Failed to update metadata", error);
-      alert("Failed to save changes.");
+      feedback.error({
+        title: t("feedback.meta.saveError.title"),
+        description: t("feedback.meta.saveError.description"),
+      });
     } finally {
       setIsSaving(false);
     }
@@ -266,9 +277,16 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
         itemId: selectedItem.id,
         content: noteText,
       });
+      feedback.success({
+        title: t("feedback.meta.noteSaveSuccess.title"),
+        description: t("feedback.meta.noteSaveSuccess.description"),
+      });
     } catch (error) {
       console.error("Failed to save note", error);
-      alert("Failed to save note.");
+      feedback.error({
+        title: t("feedback.meta.noteSaveError.title"),
+        description: t("feedback.meta.noteSaveError.description"),
+      });
     } finally {
       setIsSavingNote(false);
     }
@@ -303,7 +321,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
     <aside className="w-80 bg-white border-l border-zinc-200 flex flex-col h-full shrink-0 transition-all duration-300">
       {/* Header */}
       <div className="h-14 border-b border-zinc-200 flex items-center justify-between px-4 shrink-0 bg-zinc-50/50">
-        <h2 className="font-semibold text-zinc-800 tracking-tight">Info</h2>
+        <h2 className="font-semibold text-zinc-800 tracking-tight">{t("metaPanel.title")}</h2>
         <div className="flex items-center space-x-1">
           {selectedItem && (
             isEditing ? (
@@ -311,19 +329,19 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                  onClick={handleSave}
                  disabled={isSaving}
                  className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors flex items-center gap-1 text-xs font-medium"
-                 title="Save changes"
+                 title={t("metaPanel.actions.saveChanges")}
                >
                  <Check size={14} />
-                 {isSaving ? "Saving" : "Save"}
+                 {isSaving ? t("metaPanel.actions.saving") : t("metaPanel.actions.save")}
                </button>
             ) : (
                <button
                  onClick={() => setIsEditing(true)}
                  className="p-1.5 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 rounded-md transition-colors flex items-center gap-1 text-xs font-medium"
-                 title="Edit metadata"
+                 title={t("metaPanel.actions.editMetadata")}
                >
                  <Edit2 size={14} />
-                 Edit
+                 {t("metaPanel.actions.edit")}
                </button>
             )
           )}
@@ -336,7 +354,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
               }
             }}
             className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-md transition-colors ml-1"
-            title={isEditing ? "Cancel edit" : "Close panel"}
+            title={isEditing ? t("metaPanel.actions.cancelEdit") : t("metaPanel.actions.closePanel")}
           >
             <X size={15} />
           </button>
@@ -349,22 +367,22 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
           <div className="flex flex-col items-center justify-center h-full text-zinc-300 space-y-3 px-6">
             <FileText size={36} className="opacity-40" />
             <p className="text-sm text-center text-zinc-400 leading-snug">
-              Select a paper from the list to view its info
+              {t("metaPanel.empty")}
             </p>
           </div>
         ) : isEditing ? (
           <div className="p-5 space-y-4">
-            <EditField label="Title" value={editFormData.title || ""} onChange={v => handleStringChange('title', v)} isTextArea />
-            <EditField label="Authors" value={editFormData.authors || ""} onChange={v => handleStringChange('authors', v)} placeholder="Comma-separated authors" />
+            <EditField label={t("metaPanel.fields.title")} value={editFormData.title || ""} onChange={v => handleStringChange('title', v)} isTextArea />
+            <EditField label={t("metaPanel.fields.authors")} value={editFormData.authors || ""} onChange={v => handleStringChange('authors', v)} placeholder={t("metaPanel.placeholders.authors")} />
             
             <div className="grid grid-cols-2 gap-3">
-              <EditField label="Year" value={editFormData.year || ""} onChange={v => handleStringChange('year', v)} />
-              <EditField label="Language" value={editFormData.language || ""} onChange={v => handleStringChange('language', v)} />
+              <EditField label={t("metaPanel.fields.year")} value={editFormData.year || ""} onChange={v => handleStringChange('year', v)} />
+              <EditField label={t("metaPanel.fields.language")} value={editFormData.language || ""} onChange={v => handleStringChange('language', v)} />
             </div>
 
             {/* Pill tag editor */}
             <div className="flex flex-col space-y-1">
-              <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Tags</label>
+              <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t("metaPanel.fields.tags")}</label>
               <div
                 className="flex flex-wrap gap-1.5 p-2 border border-zinc-200 rounded-md bg-white min-h-[36px] cursor-text focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400 transition-shadow"
                 onClick={() => tagInputRef.current?.focus()}
@@ -393,35 +411,35 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                   onChange={e => setTagInput(e.target.value)}
                   onKeyDown={handleTagKeyDown}
                   onBlur={() => { if (tagInput.trim()) addTag(tagInput); }}
-                  placeholder={(editFormData.tags || []).length === 0 ? "Type a tag, press Enter or comma" : ""}
+                  placeholder={(editFormData.tags || []).length === 0 ? t("metaPanel.placeholders.tagInput") : ""}
                   className="flex-1 min-w-[120px] text-sm bg-transparent outline-none placeholder:text-zinc-300"
                 />
               </div>
-              <p className="text-[10px] text-zinc-400">Press Enter or comma to add · Backspace to remove last</p>
+              <p className="text-[10px] text-zinc-400">{t("metaPanel.tagsHelp")}</p>
             </div>
 
             <div className="border-t border-zinc-100 pt-4 mt-2 space-y-4">
-              <EditField label="Publication" value={editFormData.publication || ""} onChange={v => handleStringChange('publication', v)} />
+              <EditField label={t("metaPanel.fields.publication")} value={editFormData.publication || ""} onChange={v => handleStringChange('publication', v)} />
               
               <div className="grid grid-cols-3 gap-3">
-                <EditField label="Vol." value={editFormData.volume || ""} onChange={v => handleStringChange('volume', v)} />
-                <EditField label="Issue" value={editFormData.issue || ""} onChange={v => handleStringChange('issue', v)} />
-                <EditField label="Pages" value={editFormData.pages || ""} onChange={v => handleStringChange('pages', v)} />
+                <EditField label={t("metaPanel.fields.volume")} value={editFormData.volume || ""} onChange={v => handleStringChange('volume', v)} />
+                <EditField label={t("metaPanel.fields.issue")} value={editFormData.issue || ""} onChange={v => handleStringChange('issue', v)} />
+                <EditField label={t("metaPanel.fields.pages")} value={editFormData.pages || ""} onChange={v => handleStringChange('pages', v)} />
               </div>
 
-              <EditField label="Publisher" value={editFormData.publisher || ""} onChange={v => handleStringChange('publisher', v)} />
+              <EditField label={t("metaPanel.fields.publisher")} value={editFormData.publisher || ""} onChange={v => handleStringChange('publisher', v)} />
               
               <div className="grid grid-cols-2 gap-3">
-                <EditField label="DOI" value={editFormData.doi || ""} onChange={v => handleStringChange('doi', v)} />
-                <EditField label="arXiv" value={editFormData.arxiv_id || ""} onChange={v => handleStringChange('arxiv_id', v)} />
+                <EditField label={t("metaPanel.fields.doi")} value={editFormData.doi || ""} onChange={v => handleStringChange('doi', v)} />
+                <EditField label={t("metaPanel.fields.arxiv")} value={editFormData.arxiv_id || ""} onChange={v => handleStringChange('arxiv_id', v)} />
               </div>
               
-              <EditField label="ISBN" value={editFormData.isbn || ""} onChange={v => handleStringChange('isbn', v)} />
-              <EditField label="URL" value={editFormData.url || ""} onChange={v => handleStringChange('url', v)} />
+              <EditField label={t("metaPanel.fields.isbn")} value={editFormData.isbn || ""} onChange={v => handleStringChange('isbn', v)} />
+              <EditField label={t("metaPanel.fields.url")} value={editFormData.url || ""} onChange={v => handleStringChange('url', v)} />
             </div>
 
             <div className="border-t border-zinc-100 pt-4 mt-2">
-              <EditField label="Abstract" value={editFormData.abstract || ""} onChange={v => handleStringChange('abstract', v)} isTextArea rows={8} />
+              <EditField label={t("metaPanel.fields.abstract")} value={editFormData.abstract || ""} onChange={v => handleStringChange('abstract', v)} isTextArea rows={8} />
             </div>
 
             <div className="flex justify-end pt-4 pb-8 space-x-2">
@@ -430,14 +448,14 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                 className="px-3 py-1.5 text-xs font-medium text-zinc-600 bg-white border border-zinc-200 rounded hover:bg-zinc-50 transition-colors"
                 disabled={isSaving}
               >
-                Cancel
+                {t("metaPanel.actions.cancel")}
               </button>
               <button 
                 onClick={handleSave}
                 className="px-3 py-1.5 text-xs font-medium text-white bg-zinc-800 rounded hover:bg-zinc-900 transition-colors"
                 disabled={isSaving}
               >
-                {isSaving ? "Saving..." : "Save Changes"}
+                {isSaving ? t("metaPanel.actions.savingWithDots") : t("metaPanel.actions.saveChanges")}
               </button>
             </div>
           </div>
@@ -446,7 +464,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
             {/* Title & tags */}
             <div>
               <h3 className="text-base font-bold text-zinc-900 leading-tight">
-                {selectedItem.title || selectedItem.attachments?.[0]?.name || "Untitled"}
+                {selectedItem.title || selectedItem.attachments?.[0]?.name || t("metaPanel.untitled")}
               </h3>
               {selectedItem.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-3">
@@ -468,48 +486,48 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
 
             <div className="space-y-4">
               {/* Authors */}
-              <MetaRow icon={<User size={15} className="text-zinc-400" />} label="Authors">
+              <MetaRow icon={<User size={15} className="text-zinc-400" />} label={t("metaPanel.fields.authors")}>
                 {selectedItem.authors && selectedItem.authors !== "—" ? selectedItem.authors : (
-                  <span className="text-zinc-400 italic">Unknown</span>
+                  <span className="text-zinc-400 italic">{t("metaPanel.unknown")}</span>
                 )}
               </MetaRow>
 
               {/* Year */}
-              <MetaRow icon={<Calendar size={15} className="text-zinc-400" />} label="Year">
+              <MetaRow icon={<Calendar size={15} className="text-zinc-400" />} label={t("metaPanel.fields.year")}>
                 {selectedItem.year && selectedItem.year !== "—" ? selectedItem.year : (
-                  <span className="text-zinc-400 italic">Unknown</span>
+                  <span className="text-zinc-400 italic">{t("metaPanel.unknown")}</span>
                 )}
               </MetaRow>
 
               {/* Abstract */}
               {selectedItem.abstract ? (
-                <MetaRow icon={<AlignLeft size={15} className="text-zinc-400" />} label="Abstract">
+                <MetaRow icon={<AlignLeft size={15} className="text-zinc-400" />} label={t("metaPanel.fields.abstract")}>
                   <p className="text-sm text-zinc-600 leading-relaxed max-w-full overflow-hidden text-ellipsis">{selectedItem.abstract}</p>
                 </MetaRow>
               ) : null}
 
               {/* Publication Info */}
               {selectedItem.publication ? (
-                <MetaRow icon={<Book size={15} className="text-zinc-400" />} label="Publication">
+                <MetaRow icon={<Book size={15} className="text-zinc-400" />} label={t("metaPanel.fields.publication")}>
                   <span className="text-zinc-600">
                     <em className="font-serif">{selectedItem.publication}</em>
-                    {selectedItem.volume ? ` vol. ${selectedItem.volume}` : ''}
-                    {selectedItem.issue ? ` no. ${selectedItem.issue}` : ''}
-                    {selectedItem.pages ? ` pp. ${selectedItem.pages}` : ''}
+                    {selectedItem.volume ? ` ${t("metaPanel.publication.volume", { value: selectedItem.volume })}` : ''}
+                    {selectedItem.issue ? ` ${t("metaPanel.publication.issue", { value: selectedItem.issue })}` : ''}
+                    {selectedItem.pages ? ` ${t("metaPanel.publication.pages", { value: selectedItem.pages })}` : ''}
                   </span>
                 </MetaRow>
               ) : null}
 
               {/* Publisher */}
               {selectedItem.publisher ? (
-                <MetaRow icon={<Building size={15} className="text-zinc-400" />} label="Publisher">
+                <MetaRow icon={<Building size={15} className="text-zinc-400" />} label={t("metaPanel.fields.publisher")}>
                    <span className="text-zinc-600">{selectedItem.publisher}</span>
                 </MetaRow>
               ) : null}
 
               {/* DOI */}
               {selectedItem.doi ? (
-                <MetaRow icon={<Fingerprint size={15} className="text-zinc-400" />} label="DOI">
+                <MetaRow icon={<Fingerprint size={15} className="text-zinc-400" />} label={t("metaPanel.fields.doi")}>
                   <a href={`https://doi.org/${selectedItem.doi}`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline break-all">
                     {selectedItem.doi}
                   </a>
@@ -518,7 +536,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
 
               {/* arXiv */}
               {selectedItem.arxiv_id ? (
-                <MetaRow icon={<Orbit size={15} className="text-zinc-400" />} label="arXiv">
+                <MetaRow icon={<Orbit size={15} className="text-zinc-400" />} label={t("metaPanel.fields.arxiv")}>
                   <a href={`https://arxiv.org/abs/${selectedItem.arxiv_id}`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline break-all">
                     {selectedItem.arxiv_id}
                   </a>
@@ -527,7 +545,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
 
               {/* URL */}
               {selectedItem.url ? (
-                <MetaRow icon={<Link2 size={15} className="text-zinc-400" />} label="URL">
+                <MetaRow icon={<Link2 size={15} className="text-zinc-400" />} label={t("metaPanel.fields.url")}>
                   <a href={selectedItem.url} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline break-all line-clamp-2" title={selectedItem.url}>
                     {selectedItem.url}
                   </a>
@@ -535,8 +553,8 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
               ) : null}
 
               {/* Filename */}
-              <MetaRow icon={<Tag size={15} className="text-zinc-400" />} label="File">
-                <span className="text-zinc-500 text-xs font-mono break-all line-clamp-2" title={selectedItem.attachments?.[0]?.name}>{selectedItem.attachments?.[0]?.name || "None"}</span>
+              <MetaRow icon={<Tag size={15} className="text-zinc-400" />} label={t("metaPanel.fields.file")}>
+                <span className="text-zinc-500 text-xs font-mono break-all line-clamp-2" title={selectedItem.attachments?.[0]?.name}>{selectedItem.attachments?.[0]?.name || t("metaPanel.none")}</span>
               </MetaRow>
             </div>
 
@@ -545,7 +563,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
               <div className="flex items-center justify-between gap-1.5">
                 <div className="flex items-center gap-1.5">
                   <StickyNote size={14} className="text-zinc-400" />
-                  <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Notes</span>
+                  <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t("metaPanel.notes.title")}</span>
                 </div>
                 <button
                   onClick={async () => {
@@ -554,23 +572,31 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                       const updatedNote = await invoke<{content: string} | null>("append_annotations_to_note", { itemId: selectedItem.id });
                       if (updatedNote) {
                         setNoteText(updatedNote.content);
+                        feedback.success({
+                          title: t("feedback.meta.extractSuccess.title"),
+                          description: t("feedback.meta.extractSuccess.description"),
+                        });
                       }
                     } catch (e) {
                       console.error("Failed to extract annotations", e);
+                      feedback.error({
+                        title: t("feedback.meta.extractError.title"),
+                        description: t("feedback.meta.extractError.description"),
+                      });
                     }
                   }}
                   className="px-2 py-1 text-[10px] font-medium flex items-center gap-1 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
-                  title="Extract PDF text annotations to note"
+                  title={t("metaPanel.notes.extractTitle")}
                 >
                   <Wand2 size={12} />
-                  Extract
+                    {t("metaPanel.notes.extract")}
                 </button>
               </div>
               <textarea
                 value={noteText}
                 onChange={e => setNoteText(e.target.value)}
                 rows={8}
-                placeholder="Write your thoughts, summaries, or quotes in Markdown..."
+                  placeholder={t("metaPanel.notes.placeholder")}
                 className="w-full p-2.5 text-sm text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg resize-y leading-relaxed outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400"
                 spellCheck={false}
               />
@@ -580,7 +606,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                   disabled={isSavingNote || isLoadingNote || !selectedItem}
                   className="px-3 py-1.5 text-xs font-medium rounded-md border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
                 >
-                  {isSavingNote ? "Saving..." : "Save Note"}
+                  {isSavingNote ? t("metaPanel.actions.savingWithDots") : t("metaPanel.notes.save")}
                 </button>
               </div>
             </div>
@@ -589,14 +615,14 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
             <div className="border-t border-zinc-100 pt-5 space-y-3">
               <div className="flex items-center gap-1.5">
                 <Highlighter size={14} className="text-zinc-400" />
-                <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Pdf Annotations</span>
+                 <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t("metaPanel.annotations.title")}</span>
               </div>
               
                 {isLoadingAnnotations && !pdfAnnotations ? (
-                 <div className="py-4 text-center text-xs text-zinc-400 animate-pulse">Loading annotations...</div>
+                  <div className="py-4 text-center text-xs text-zinc-400 animate-pulse">{t("metaPanel.annotations.loading")}</div>
               ) : !pdfAnnotations || Object.keys(pdfAnnotations.pages).length === 0 ? (
                  <div className="py-4 text-center text-xs text-zinc-400 bg-zinc-50 rounded-lg border border-dashed border-zinc-200">
-                    No annotations in this PDF.
+                    {t("metaPanel.annotations.empty")}
                  </div>
               ) : (
                 <div className="space-y-3">
@@ -620,7 +646,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                             className="font-semibold text-xs text-indigo-600 mb-1 cursor-pointer hover:underline inline-block"
                             onClick={() => onPageJump && onPageJump(displayPage)}
                           >
-                            Page {displayPage}
+                            {t("metaPanel.annotations.page", { page: displayPage })}
                           </div>
                           <div className="space-y-2">
                             {/* Render Text Annotations */}
@@ -642,7 +668,9 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                                   <div className="w-4 h-4 rounded bg-yellow-200/50 flex items-center justify-center border border-yellow-300">
                                     <Highlighter size={10} className="text-yellow-600" />
                                   </div>
-                                  <span className="text-xs text-zinc-500">{paths.length} draw/highlight actions</span>
+                                  <span className="text-xs text-zinc-500">{paths.length === 1
+                                    ? t("metaPanel.annotations.actions.one", { count: paths.length })
+                                    : t("metaPanel.annotations.actions.other", { count: paths.length })}</span>
                                </div>
                             )}
                           </div>
@@ -657,22 +685,22 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
             <div className="border-t border-zinc-100 pt-5">
               <div className="flex items-center gap-1.5 mb-3">
                 <Quote size={14} className="text-zinc-400" />
-                <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Cite</span>
+                <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t("metaPanel.cite.title")}</span>
               </div>
               {/* Format tabs */}
               <div className="flex flex-wrap gap-1 mb-3">
                 {CITE_FORMATS.map(f => (
                   <button
-                    key={f.id}
-                    onClick={() => setCiteFormat(f.id)}
+                    key={f}
+                    onClick={() => setCiteFormat(f)}
                     className={[
                       "px-2.5 py-1 rounded-full text-[10px] font-semibold border transition-colors",
-                      citeFormat === f.id
+                      citeFormat === f
                         ? "bg-indigo-600 text-white border-indigo-600"
                         : "bg-white text-zinc-500 border-zinc-200 hover:border-indigo-300 hover:text-indigo-600",
                     ].join(" ")}
                   >
-                    {f.label}
+                    {citationFormatLabel(f)}
                   </button>
                 ))}
               </div>
@@ -693,7 +721,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                   }}
                   disabled={!citeText}
                   className="absolute top-2 right-2 p-1 rounded bg-white border border-zinc-200 text-zinc-400 hover:text-indigo-600 hover:border-indigo-300 transition-colors disabled:opacity-30"
-                  title="Copy citation"
+                  title={t("metaPanel.cite.copyTitle")}
                 >
                   {citeCopied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
                 </button>

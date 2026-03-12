@@ -1,4 +1,10 @@
 import React from "react";
+import { useI18n } from "../hooks/useI18n";
+
+interface ErrorBoundaryText {
+  title: string;
+  reload: string;
+}
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -6,10 +12,10 @@ interface ErrorBoundaryState {
 }
 
 export class ErrorBoundary extends React.Component<
-  { children: React.ReactNode },
+  { children: React.ReactNode; text: ErrorBoundaryText },
   ErrorBoundaryState
 > {
-  constructor(props: { children: React.ReactNode }) {
+  constructor(props: { children: React.ReactNode; text: ErrorBoundaryText }) {
     super(props);
     this.state = { hasError: false, error: null };
   }
@@ -43,7 +49,7 @@ export class ErrorBoundary extends React.Component<
         >
           <div style={{ paddingTop: 36 }} />
           <h1 style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>
-            Something went wrong
+            {this.props.text.title}
           </h1>
           <pre
             style={{
@@ -77,7 +83,7 @@ export class ErrorBoundary extends React.Component<
               cursor: "pointer",
             }}
           >
-            Reload
+            {this.props.text.reload}
           </button>
         </div>
       );
@@ -85,4 +91,19 @@ export class ErrorBoundary extends React.Component<
 
     return this.props.children;
   }
+}
+
+export function AppErrorBoundary({ children }: { children: React.ReactNode }) {
+  const { t } = useI18n();
+
+  return (
+    <ErrorBoundary
+      text={{
+        title: t("errorBoundary.title"),
+        reload: t("errorBoundary.reload"),
+      }}
+    >
+      {children}
+    </ErrorBoundary>
+  );
 }

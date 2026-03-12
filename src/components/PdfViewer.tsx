@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { PageDimension, ToolType } from "../types";
 import { AnnotationLayer } from "./AnnotationLayer";
 import { TextLayer } from "./TextLayer";
+import { useI18n } from "../hooks/useI18n";
 
 interface PdfViewerProps {
   pdfPath: string;
@@ -107,6 +108,7 @@ async function requestRenderedPage(pdfPath: string, pageIndex: number, scale: nu
 }
 
 export function PdfViewer({ pdfPath, totalPages, dimensions, scale, activeTool, currentPage, onAnnotationsSaved }: PdfViewerProps) {
+  const { t } = useI18n();
   const prefetchPages = useMemo(() => {
     if (dimensions.length === 0) return [];
     const indices: number[] = [];
@@ -143,7 +145,7 @@ export function PdfViewer({ pdfPath, totalPages, dimensions, scale, activeTool, 
             >
               <div className="absolute inset-0 bg-gradient-to-br from-zinc-50 to-zinc-100 animate-pulse" />
               <div className="absolute top-3 right-3 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-medium text-zinc-400 shadow-sm backdrop-blur-sm">
-                Page {i + 1}
+                {t("pdfViewer.pageLabel", { page: i + 1 })}
               </div>
             </div>
           </div>
@@ -183,6 +185,7 @@ interface PageRenderProps {
 }
 
 function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool, shouldPrefetch, shouldLoadText, onAnnotationsSaved }: PageRenderProps) {
+  const { t } = useI18n();
   const [imgSrc, setImgSrc] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
@@ -274,7 +277,7 @@ function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool, shouldPr
     <div id={`pdf-page-${pageIndex + 1}`} data-page-number={pageIndex + 1} className="flex flex-col items-center space-y-3 group">
       <div className="flex items-center justify-between w-full px-2">
          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
-           Page {pageIndex + 1}
+           {t("pdfViewer.pageLabel", { page: pageIndex + 1 })}
          </span>
       </div>
       
@@ -286,7 +289,7 @@ function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool, shouldPr
         {imgSrc ? (
           <img 
             src={imgSrc} 
-            alt={`Page ${pageIndex + 1}`} 
+            alt={t("pdfViewer.pageAlt", { page: pageIndex + 1 })}
             className="absolute inset-0 w-full h-full object-contain pointer-events-none transition-opacity duration-300 ease-in" 
             onLoad={(e) => (e.currentTarget.style.opacity = "1")}
             style={{ opacity: 0 }}
@@ -297,7 +300,7 @@ function PageRender({ pdfPath, pageIndex, dimension, scale, activeTool, shouldPr
 
         {!imgSrc && (
           <div className="absolute top-3 right-3 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-medium text-zinc-400 shadow-sm backdrop-blur-sm">
-            Page {pageIndex + 1}
+            {t("pdfViewer.pageLabel", { page: pageIndex + 1 })}
           </div>
         )}
         

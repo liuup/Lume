@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Search, X, ChevronUp, ChevronDown } from "lucide-react";
+import { useI18n } from "../hooks/useI18n";
 
 interface SearchBarProps {
   onSearch: (term: string, backwards: boolean) => void;
@@ -7,6 +8,7 @@ interface SearchBarProps {
 }
 
 export function SearchBar({ onSearch, onClose }: SearchBarProps) {
+  const { t } = useI18n();
   const [term, setTerm] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -34,7 +36,7 @@ export function SearchBar({ onSearch, onClose }: SearchBarProps) {
       <input
         ref={inputRef}
         type="text"
-        placeholder="Find in document..."
+        placeholder={t("searchBar.placeholder")}
         className="w-48 text-sm outline-none text-zinc-700 placeholder:text-zinc-400"
         value={term}
         onChange={(e) => setTerm(e.target.value)}
@@ -44,14 +46,14 @@ export function SearchBar({ onSearch, onClose }: SearchBarProps) {
         <button
           onClick={() => handleSearch(true)}
           className="p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 rounded"
-          title="Previous (Shift+Enter)"
+          title={t("searchBar.previous")}
         >
           <ChevronUp size={16} />
         </button>
         <button
           onClick={() => handleSearch(false)}
           className="p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 rounded"
-          title="Next (Enter)"
+          title={t("searchBar.next")}
         >
           <ChevronDown size={16} />
         </button>
@@ -59,7 +61,7 @@ export function SearchBar({ onSearch, onClose }: SearchBarProps) {
       <button
         onClick={onClose}
         className="p-1 ml-1 text-zinc-400 hover:bg-red-50 hover:text-red-500 rounded"
-        title="Close (Esc)"
+        title={t("searchBar.close")}
       >
         <X size={16} />
       </button>
