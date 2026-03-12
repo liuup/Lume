@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight, FilePenLine, Folder, FolderOpen, FolderPlus, Hash, Plus, Settings, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, FilePenLine, Folder, FolderOpen, FolderPlus, Hash, Plus, Settings, Trash2 } from "lucide-react";
 import { FolderNode, TagInfo } from "../../types";
 import { useI18n } from "../../hooks/useI18n";
 
@@ -19,6 +19,8 @@ const DEFAULT_TAG_COLOR = '#94a3b8'; // zinc-400 when no color assigned
 
 interface FolderSidebarProps {
   folderTree: FolderNode[];
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
   selectedFolderId: string;
   onSelectFolder: (id: string) => void;
   onAddFolder: (parentId: string, name: string) => Promise<void>;
@@ -38,6 +40,8 @@ interface FolderSidebarProps {
 
 export function FolderSidebar({
   folderTree,
+  isCollapsed,
+  onToggleCollapse,
   selectedFolderId,
   onSelectFolder,
   onAddFolder,
@@ -53,6 +57,7 @@ export function FolderSidebar({
   onOpenSettings
 }: FolderSidebarProps) {
   const { t } = useI18n();
+  const selectedFolder = findFolderNode(folderTree, selectedFolderId);
   const [contextMenu, setContextMenu] = useState<{
     folder: FolderNode;
     x: number;
@@ -181,8 +186,8 @@ export function FolderSidebar({
   };
 
   return (
-    <aside className="w-64 bg-zinc-50 border-r border-zinc-200 flex flex-col h-full shrink-0">
-      <div className="h-14 px-4 border-b border-zinc-200 shrink-0 flex items-center">
+    <aside className={`bg-zinc-50 border-r border-zinc-200 flex flex-col h-full shrink-0 overflow-hidden transition-[width] duration-300 ${isCollapsed ? "w-16" : "w-64"}`}>
+      <div className={`h-14 border-b border-zinc-200 shrink-0 flex items-center ${isCollapsed ? "px-2 justify-center gap-2" : "px-4 justify-between"}`}>
         <button
           onClick={() => { setNewFolderParentId(selectedFolderId); setNewFolderName(""); }}
           className="inline-flex items-center justify-center w-9 h-9 text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
@@ -190,96 +195,139 @@ export function FolderSidebar({
         >
           <FolderPlus size={15} />
         </button>
-      </div>
-
-      {/* Folder Tree */}
-      <div
-        className="flex-1 min-h-0 overflow-y-auto px-2 py-2"
-        onMouseLeave={() => {
-          if (draggedItemId) {
-            onFolderHover(null);
-          }
-        }}
-      >
-        {folderTree.map(node => (
-          <FolderTreeItem
-            key={node.id}
-            node={node}
-            depth={0}
-            selectedFolderId={selectedFolderId}
-            draggedItemId={draggedItemId}
-            dragOverFolderId={dragOverFolderId}
-            onFolderHover={onFolderHover}
-            onSelectFolder={onSelectFolder}
-            onDeleteFolder={onDeleteFolder}
-            onOpenNewFolderDialog={parentId => { setNewFolderParentId(parentId); setNewFolderName(""); }}
-            onOpenContextMenu={(folder, event) => {
-              onSelectFolder(folder.id);
-              setContextMenu({ folder, x: event.clientX, y: event.clientY });
-            }}
-          />
-        ))}
-      </div>
-
-      {/* ── Tags section ──────────────────────────────────────── */}
-      {allTags.length > 0 && (
-        <div className="border-t border-zinc-200 shrink-0">
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 pt-3 pb-1.5">
-            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
-              <Hash size={11} />
-              {t("folderSidebar.tags.title")}
-            </div>
-            <span className="text-[10px] text-zinc-400 font-medium">{allTags.length}</span>
-          </div>
-          {/* Tag list */}
-          <div className="max-h-52 overflow-y-auto px-2 pb-2 space-y-0.5">
-            {allTags.map(tagInfo => {
-              const isActive = selectedTagFilter === tagInfo.tag;
-              const dotColor = tagInfo.color || DEFAULT_TAG_COLOR;
-              return (
-                <div
-                  key={tagInfo.tag}
-                  className={[
-                    'group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer select-none transition-colors',
-                    isActive
-                      ? 'bg-indigo-50 text-indigo-700'
-                      : 'text-zinc-600 hover:bg-zinc-100',
-                  ].join(' ')}
-                  onClick={() => onSelectTag(tagInfo.tag)}
-                  onContextMenu={e => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setTagColorMenu({ tag: tagInfo.tag, currentColor: dotColor, x: e.clientX, y: e.clientY });
-                  }}
-                  title={tagInfo.count === 1
-                    ? t("folderSidebar.tags.tooltip.one", { tag: tagInfo.tag, count: tagInfo.count })
-                    : t("folderSidebar.tags.tooltip.other", { tag: tagInfo.tag, count: tagInfo.count })}
-                >
-                  {/* Colored dot */}
-                  <span
-                    className="w-2.5 h-2.5 rounded-full shrink-0 transition-transform group-hover:scale-110"
-                    style={{ backgroundColor: dotColor }}
-                  />
-                  <span className="text-[13px] font-medium flex-1 truncate">{tagInfo.tag}</span>
-                  <span className="text-[10px] font-medium text-zinc-400 shrink-0">{tagInfo.count}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── Settings Button (Footer) ─────────────────────────── */}
-      <div className="border-t border-zinc-200 shrink-0 p-3">
         <button
-          onClick={onOpenSettings}
-          className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium text-zinc-600 rounded-lg hover:bg-zinc-100 transition-colors"
+          onClick={onToggleCollapse}
+          className="inline-flex items-center justify-center w-9 h-9 text-zinc-500 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
+          title={isCollapsed ? t("folderSidebar.actions.expand") : t("folderSidebar.actions.collapse")}
         >
-          <Settings size={15} className="text-zinc-400" />
-          {t("folderSidebar.actions.settings")}
+          {isCollapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
         </button>
       </div>
+
+      {isCollapsed ? (
+        <>
+          <div className="flex-1 min-h-0 overflow-y-auto px-2 py-3 flex flex-col items-center gap-2">
+            <button
+              onClick={() => selectedFolder && onSelectFolder(selectedFolder.id)}
+              className={`inline-flex items-center justify-center w-10 h-10 rounded-xl border transition-colors ${selectedFolder ? "border-indigo-200 bg-indigo-50 text-indigo-600" : "border-zinc-200 bg-white text-zinc-400"}`}
+              title={selectedFolder?.name ?? t("folderSidebar.labels.currentFolder")}
+            >
+              <Folder size={16} />
+            </button>
+
+            {selectedTagFilter && (
+              <button
+                onClick={() => onSelectTag(selectedTagFilter)}
+                className="inline-flex items-center justify-center w-10 h-10 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-600 transition-colors"
+                title={t("folderSidebar.tags.activeFilter", { tag: selectedTagFilter })}
+              >
+                <Hash size={16} />
+              </button>
+            )}
+          </div>
+
+          <div className="border-t border-zinc-200 shrink-0 p-2 flex justify-center">
+            <button
+              onClick={onOpenSettings}
+              className="flex items-center justify-center w-10 h-10 text-zinc-600 rounded-xl hover:bg-zinc-100 transition-colors"
+              title={t("folderSidebar.actions.settings")}
+            >
+              <Settings size={16} className="text-zinc-400" />
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Folder Tree */}
+          <div
+            className="flex-1 min-h-0 overflow-y-auto px-2 py-2"
+            onMouseLeave={() => {
+              if (draggedItemId) {
+                onFolderHover(null);
+              }
+            }}
+          >
+            {folderTree.map(node => (
+              <FolderTreeItem
+                key={node.id}
+                node={node}
+                depth={0}
+                selectedFolderId={selectedFolderId}
+                draggedItemId={draggedItemId}
+                dragOverFolderId={dragOverFolderId}
+                onFolderHover={onFolderHover}
+                onSelectFolder={onSelectFolder}
+                onDeleteFolder={onDeleteFolder}
+                onOpenNewFolderDialog={parentId => { setNewFolderParentId(parentId); setNewFolderName(""); }}
+                onOpenContextMenu={(folder, event) => {
+                  onSelectFolder(folder.id);
+                  setContextMenu({ folder, x: event.clientX, y: event.clientY });
+                }}
+              />
+            ))}
+          </div>
+
+          {/* ── Tags section ──────────────────────────────────────── */}
+          {allTags.length > 0 && (
+            <div className="border-t border-zinc-200 shrink-0">
+              {/* Header */}
+              <div className="flex items-center justify-between px-4 pt-3 pb-1.5">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
+                  <Hash size={11} />
+                  {t("folderSidebar.tags.title")}
+                </div>
+                <span className="text-[10px] text-zinc-400 font-medium">{allTags.length}</span>
+              </div>
+              {/* Tag list */}
+              <div className="max-h-52 overflow-y-auto px-2 pb-2 space-y-0.5">
+                {allTags.map(tagInfo => {
+                  const isActive = selectedTagFilter === tagInfo.tag;
+                  const dotColor = tagInfo.color || DEFAULT_TAG_COLOR;
+                  return (
+                    <div
+                      key={tagInfo.tag}
+                      className={[
+                        'group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer select-none transition-colors',
+                        isActive
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'text-zinc-600 hover:bg-zinc-100',
+                      ].join(' ')}
+                      onClick={() => onSelectTag(tagInfo.tag)}
+                      onContextMenu={e => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setTagColorMenu({ tag: tagInfo.tag, currentColor: dotColor, x: e.clientX, y: e.clientY });
+                      }}
+                      title={tagInfo.count === 1
+                        ? t("folderSidebar.tags.tooltip.one", { tag: tagInfo.tag, count: tagInfo.count })
+                        : t("folderSidebar.tags.tooltip.other", { tag: tagInfo.tag, count: tagInfo.count })}
+                    >
+                      {/* Colored dot */}
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0 transition-transform group-hover:scale-110"
+                        style={{ backgroundColor: dotColor }}
+                      />
+                      <span className="text-[13px] font-medium flex-1 truncate">{tagInfo.tag}</span>
+                      <span className="text-[10px] font-medium text-zinc-400 shrink-0">{tagInfo.count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── Settings Button (Footer) ─────────────────────────── */}
+          <div className="border-t border-zinc-200 shrink-0 p-3">
+            <button
+              onClick={onOpenSettings}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium text-zinc-600 rounded-lg hover:bg-zinc-100 transition-colors"
+            >
+              <Settings size={15} className="text-zinc-400" />
+              {t("folderSidebar.actions.settings")}
+            </button>
+          </div>
+        </>
+      )}
 
       {contextMenu && (
         <div
@@ -476,6 +524,16 @@ export function FolderSidebar({
       )}
     </aside>
   );
+}
+
+function findFolderNode(nodes: FolderNode[], id: string): FolderNode | null {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    const child = findFolderNode(node.children, id);
+    if (child) return child;
+  }
+
+  return null;
 }
 
 /* ── Folder tree item (recursive) ── */

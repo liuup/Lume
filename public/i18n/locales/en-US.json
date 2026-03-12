@@ -290,13 +290,19 @@
       "rose": "Rose",
       "violet": "Violet"
     },
+    "labels": {
+      "currentFolder": "Current folder"
+    },
     "actions": {
       "newFolder": "New Folder",
       "newSubFolder": "New sub-folder",
+      "collapse": "Collapse sidebar",
+      "expand": "Expand sidebar",
       "settings": "Settings"
     },
     "tags": {
       "title": "Tags",
+      "activeFilter": "Active tag filter: #{tag}",
       "tooltip": {
         "one": "{tag} — {count} paper (right-click to change color)",
         "other": "{tag} — {count} papers (right-click to change color)"

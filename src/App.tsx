@@ -59,6 +59,7 @@ function App() {
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
   const [showSearch, setShowSearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [annotationsRefreshKey, setAnnotationsRefreshKey] = useState(0);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [dragState, setDragState] = useState<LibraryDragState | null>(null);
@@ -369,6 +370,8 @@ function App() {
           <>
             <FolderSidebar
               folderTree={folderTree}
+              isCollapsed={isSidebarCollapsed}
+              onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
               selectedFolderId={selectedFolderId}
               onSelectFolder={id => { setSelectedFolderId(id); setSelectedTagFilter(null); }}
               onAddFolder={handleAddFolder}

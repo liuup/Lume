@@ -290,13 +290,19 @@
       "rose": "玫瑰",
       "violet": "紫罗兰"
     },
+    "labels": {
+      "currentFolder": "当前文件夹"
+    },
     "actions": {
       "newFolder": "新建文件夹",
       "newSubFolder": "新建子文件夹",
+      "collapse": "收起侧边栏",
+      "expand": "展开侧边栏",
       "settings": "设置"
     },
     "tags": {
       "title": "标签",
+      "activeFilter": "当前标签筛选：#{tag}",
       "tooltip": {
         "one": "{tag} — {count} 篇文献（右键修改颜色）",
         "other": "{tag} — {count} 篇文献（右键修改颜色）"
