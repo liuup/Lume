@@ -218,7 +218,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
     // Use setTimeout or a background queue to not block the main note loading UI immediately
     const t = setTimeout(loadAnnotations, 100);
     return () => clearTimeout(t);
-  }, [selectedItem?.id, selectedItem?.attachments, isOpen, annotationsRefreshKey]);
+  }, [selectedItem?.id, selectedItem?.attachments?.[0]?.path, isOpen, annotationsRefreshKey]);
 
   if (!isOpen) return null;
 
@@ -620,7 +620,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
               
                 {isLoadingAnnotations && !pdfAnnotations ? (
                   <div className="py-4 text-center text-xs text-zinc-400 animate-pulse">{t("metaPanel.annotations.loading")}</div>
-              ) : !pdfAnnotations || Object.keys(pdfAnnotations.pages).length === 0 ? (
+              ) : !pdfAnnotations || Object.keys(pdfAnnotations.pages).length === 0 || !Object.values(pdfAnnotations.pages).some(p => (p.textAnnotations?.length ?? 0) > 0 || (p.paths?.length ?? 0) > 0) ? (
                  <div className="py-4 text-center text-xs text-zinc-400 bg-zinc-50 rounded-lg border border-dashed border-zinc-200">
                     {t("metaPanel.annotations.empty")}
                  </div>

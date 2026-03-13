@@ -19,6 +19,7 @@ import {
   PageDimension, 
   DEFAULT_FOLDER 
 } from "../types";
+import { clearCacheForPdf } from "../components/PdfViewer";
 
 export function useLibrary() {
   const feedback = useFeedback();
@@ -50,10 +51,14 @@ export function useLibrary() {
         if (!isMounted) return;
 
         // If the active tab has no dimensions (e.g. data was lost), re-fetch them now.
-        // Read current tabs to check, then kick off an async fetch OUTSIDE setState.
-        const currentTabs = openTabs;
-        const tab = currentTabs.find(t => t.item.attachments?.[0]?.path === pdfPath || t.item.id === pdfPath);
-        if (tab && tab.dimensions.length === 0) {
+        // Use functional setState to read latest tabs without needing openTabs in deps.
+        let needsDimRecovery = false;
+        setOpenTabs(tabs => {
+          const tab = tabs.find(t => t.item.attachments?.[0]?.path === pdfPath || t.item.id === pdfPath);
+          needsDimRecovery = !!tab && tab.dimensions.length === 0;
+          return tabs; // no mutation
+        });
+        if (needsDimRecovery) {
           try {
             const dims = await invoke<PageDimension[]>("get_pdf_dimensions", { path: pdfPath });
             if (!isMounted) return;
@@ -241,6 +246,10 @@ export function useLibrary() {
   const handleCloseTab = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setOpenTabs(prev => {
+      const closingTab = prev.find(t => t.id === id);
+      if (closingTab) {
+        clearCacheForPdf(closingTab.item.attachments?.[0]?.path || closingTab.id);
+      }
       const next = prev.filter(t => t.id !== id);
       if (activeTabId === id) {
         const nextActiveId = next.length > 0 ? next[next.length - 1].id : 'library';

@@ -275,6 +275,21 @@ async function ensurePdfLoaded(pdfPath: string) {
   return loadTask;
 }
 
+/** Evict all cached pages / inflight renders for a given PDF so memory is reclaimed on tab close. */
+export function clearCacheForPdf(pdfPath: string) {
+  const prefix = `${pdfPath}::`;
+  for (const key of pageImageCache.keys()) {
+    if (key.startsWith(prefix)) {
+      pageImageCache.delete(key);
+    }
+  }
+  for (const key of inflightRenders.keys()) {
+    if (key.startsWith(prefix)) {
+      inflightRenders.delete(key);
+    }
+  }
+}
+
 export function PdfViewer({
   pdfPath,
   totalPages,

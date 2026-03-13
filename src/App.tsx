@@ -223,9 +223,20 @@ function App() {
     }, 100);
     
     return () => clearTimeout(timer);
-  }, [activeTabId, isSettingsLoading, dimensions.length]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabId, isSettingsLoading, dimensions.length, settings?.defaultPdfZoom]);
 
   const scrollTimeout = useRef<number | null>(null);
+
+  // Cleanup scroll throttle timer on tab change or unmount
+  useEffect(() => {
+    return () => {
+      if (scrollTimeout.current) {
+        window.clearTimeout(scrollTimeout.current);
+        scrollTimeout.current = null;
+      }
+    };
+  }, [activeTabId]);
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     if (!activeTabId || activeTabId === 'library') return;
     if (scrollTimeout.current) return;

@@ -271,11 +271,11 @@ export function AnnotationLayer({ pdfPath, pageIndex, width, height, scale, acti
   };
 
   const handlePointerUp = () => {
-    if (isDrawing && currentPath) {
+    if (isDrawing && currentPath && currentPath.points.length > 0) {
       setPaths(prev => [...prev, currentPath]);
-      setCurrentPath(null);
-      setIsDrawing(false);
     }
+    setCurrentPath(null);
+    setIsDrawing(false);
   };
 
   const handlePointerLeave = handlePointerUp;
