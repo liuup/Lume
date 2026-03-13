@@ -27,47 +27,56 @@ function getTextLayerCacheKey(pdfPath: string, pageIndex: number) {
 
 export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible, shouldLoad }: TextLayerProps) {
   const [textNodes, setTextNodes] = useState<TextNode[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
   const cacheKey = getTextLayerCacheKey(pdfPath, pageIndex);
 
   useEffect(() => {
-    const cached = textLayerCache.get(cacheKey);
-    if (cached) {
+    if (textLayerCache.has(cacheKey)) {
+      const cached = textLayerCache.get(cacheKey) ?? [];
       setTextNodes(cached);
-      setIsLoaded(true);
       return;
     }
 
-    if (!shouldLoad || isLoaded) return;
-    let isMounted = true;
-    const scheduler = window.requestIdleCallback
-      ? window.requestIdleCallback
-      : (callback: IdleRequestCallback) => window.setTimeout(() => callback({
-          didTimeout: false,
-          timeRemaining: () => 0,
-        } as IdleDeadline), 120);
-    const cancelScheduler = window.cancelIdleCallback
-      ? window.cancelIdleCallback
-      : (handle: number) => window.clearTimeout(handle);
+    setTextNodes([]);
 
-    const taskId = scheduler(async () => {
+    if (!shouldLoad) return;
+    let isMounted = true;
+
+    const loadTextLayer = async () => {
       try {
         const nodes = await invoke<TextNode[]>("get_page_text", { path: pdfPath, pageIndex });
         if (isMounted) {
           textLayerCache.set(cacheKey, nodes);
           setTextNodes(nodes);
-          setIsLoaded(true);
         }
       } catch (err) {
         console.error(`Failed to load text for page ${pageIndex}`, err);
       }
-    });
+    };
+
+    if (isVisible) {
+      loadTextLayer();
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    const scheduler = window.requestIdleCallback
+      ? window.requestIdleCallback
+      : (callback: IdleRequestCallback) => window.setTimeout(() => callback({
+          didTimeout: false,
+          timeRemaining: () => 0,
+        } as IdleDeadline), 180);
+    const cancelScheduler = window.cancelIdleCallback
+      ? window.cancelIdleCallback
+      : (handle: number) => window.clearTimeout(handle);
+
+    const taskId = scheduler(loadTextLayer);
 
     return () => {
       isMounted = false;
       cancelScheduler(taskId);
     };
-  }, [cacheKey, isVisible, pageIndex, isLoaded, pdfPath, shouldLoad]);
+  }, [cacheKey, isVisible, pageIndex, pdfPath, shouldLoad]);
 
   // We render if we have data, regardless of visibility, so native Cmd+F works
   if (textNodes.length === 0) return null;

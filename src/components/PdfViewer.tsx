@@ -17,12 +17,62 @@ interface PdfViewerProps {
   onAnnotationsSaved?: (pdfPath: string) => void;
 }
 
+type RenderSource = "prefetch" | "visible" | "refine";
+
+interface PerfProfile {
+  prefetchBefore: number;
+  prefetchAfter: number;
+  textBefore: number;
+  textAfter: number;
+  prefetchBudget: number;
+}
+
+interface RenderMetricsSnapshot {
+  sampleCount: number;
+  avgQueueDepth: number;
+  avgQueueWaitMs: number;
+  avgRenderMs: number;
+  avgEndToEndMs: number;
+  sourceCount: Record<RenderSource, number>;
+}
+
 const pageImageCache = new Map<string, string>();
 const inflightRenders = new Map<string, Promise<string>>();
+const inflightPdfLoads = new Map<string, Promise<void>>();
 const renderQueue: Array<() => void> = [];
 const MAX_RENDER_CONCURRENCY = 2;
 const MAX_CACHE_ENTRIES = 120;
+const DEFAULT_PREFETCH_BUDGET = 3;
+const PERF_ALPHA = 0.18;
 let activeRenderCount = 0;
+
+const DEFAULT_PERF_PROFILE: PerfProfile = {
+  prefetchBefore: -1,
+  prefetchAfter: 1,
+  textBefore: -2,
+  textAfter: 2,
+  prefetchBudget: DEFAULT_PREFETCH_BUDGET,
+};
+
+const renderMetrics: RenderMetricsSnapshot = {
+  sampleCount: 0,
+  avgQueueDepth: 0,
+  avgQueueWaitMs: 0,
+  avgRenderMs: 0,
+  avgEndToEndMs: 0,
+  sourceCount: {
+    prefetch: 0,
+    visible: 0,
+    refine: 0,
+  },
+};
+
+function updateEwma(current: number, next: number) {
+  if (current === 0) {
+    return next;
+  }
+  return current * (1 - PERF_ALPHA) + next * PERF_ALPHA;
+}
 
 function runNextRender() {
   if (activeRenderCount >= MAX_RENDER_CONCURRENCY || renderQueue.length === 0) {
@@ -50,6 +100,83 @@ function enqueueRender<T>(job: () => Promise<T>) {
 
     runNextRender();
   });
+}
+
+function getPendingRenderJobs() {
+  return activeRenderCount + renderQueue.length;
+}
+
+function recordRenderMetrics(
+  source: RenderSource,
+  queueDepth: number,
+  queueWaitMs: number,
+  renderMs: number,
+  endToEndMs: number
+) {
+  renderMetrics.sampleCount += 1;
+  renderMetrics.sourceCount[source] += 1;
+  renderMetrics.avgQueueDepth = updateEwma(renderMetrics.avgQueueDepth, queueDepth);
+  renderMetrics.avgQueueWaitMs = updateEwma(renderMetrics.avgQueueWaitMs, queueWaitMs);
+  renderMetrics.avgRenderMs = updateEwma(renderMetrics.avgRenderMs, renderMs);
+  renderMetrics.avgEndToEndMs = updateEwma(renderMetrics.avgEndToEndMs, endToEndMs);
+}
+
+function getRenderMetricsSnapshot(): RenderMetricsSnapshot {
+  return {
+    sampleCount: renderMetrics.sampleCount,
+    avgQueueDepth: renderMetrics.avgQueueDepth,
+    avgQueueWaitMs: renderMetrics.avgQueueWaitMs,
+    avgRenderMs: renderMetrics.avgRenderMs,
+    avgEndToEndMs: renderMetrics.avgEndToEndMs,
+    sourceCount: { ...renderMetrics.sourceCount },
+  };
+}
+
+function getPerfProfile(snapshot: RenderMetricsSnapshot): PerfProfile {
+  if (snapshot.sampleCount < 8) {
+    return DEFAULT_PERF_PROFILE;
+  }
+
+  const highPressure = snapshot.avgQueueDepth >= 5 || snapshot.avgEndToEndMs >= 240;
+  const mediumPressure = snapshot.avgQueueDepth >= 3 || snapshot.avgEndToEndMs >= 160;
+
+  if (highPressure) {
+    return {
+      prefetchBefore: -1,
+      prefetchAfter: 0,
+      textBefore: -1,
+      textAfter: 1,
+      prefetchBudget: 2,
+    };
+  }
+
+  if (mediumPressure) {
+    return {
+      prefetchBefore: -1,
+      prefetchAfter: 1,
+      textBefore: -2,
+      textAfter: 2,
+      prefetchBudget: 3,
+    };
+  }
+
+  return {
+    prefetchBefore: -1,
+    prefetchAfter: 2,
+    textBefore: -2,
+    textAfter: 3,
+    prefetchBudget: 5,
+  };
+}
+
+function isSamePerfProfile(current: PerfProfile, next: PerfProfile) {
+  return (
+    current.prefetchBefore === next.prefetchBefore &&
+    current.prefetchAfter === next.prefetchAfter &&
+    current.textBefore === next.textBefore &&
+    current.textAfter === next.textAfter &&
+    current.prefetchBudget === next.prefetchBudget
+  );
 }
 
 function rememberRenderedPage(cacheKey: string, value: string) {
@@ -80,7 +207,12 @@ function getCacheKey(pdfPath: string, pageIndex: number, scale: number) {
   return `${pdfPath}::${pageIndex}::${scale.toFixed(2)}`;
 }
 
-async function requestRenderedPage(pdfPath: string, pageIndex: number, scale: number) {
+async function requestRenderedPage(
+  pdfPath: string,
+  pageIndex: number,
+  scale: number,
+  source: RenderSource = "visible"
+) {
   const cacheKey = getCacheKey(pdfPath, pageIndex, scale);
 
   if (pageImageCache.has(cacheKey)) {
@@ -92,11 +224,29 @@ async function requestRenderedPage(pdfPath: string, pageIndex: number, scale: nu
     return pending;
   }
 
-  const nextRequest = enqueueRender(() => invoke<string>("render_page", {
-    path: pdfPath,
-    pageIndex,
-    scale,
-  })).then((base64) => {
+  const enqueuedAt = performance.now();
+  const queueDepthAtEnqueue = getPendingRenderJobs();
+
+  const nextRequest = enqueueRender(async () => {
+    const startedAt = performance.now();
+
+    try {
+      return await invoke<string>("render_page", {
+        path: pdfPath,
+        pageIndex,
+        scale,
+      });
+    } finally {
+      const finishedAt = performance.now();
+      recordRenderMetrics(
+        source,
+        queueDepthAtEnqueue,
+        startedAt - enqueuedAt,
+        finishedAt - startedAt,
+        finishedAt - enqueuedAt
+      );
+    }
+  }).then((base64) => {
     rememberRenderedPage(cacheKey, base64);
     inflightRenders.delete(cacheKey);
     return base64;
@@ -107,6 +257,22 @@ async function requestRenderedPage(pdfPath: string, pageIndex: number, scale: nu
 
   inflightRenders.set(cacheKey, nextRequest);
   return nextRequest;
+}
+
+async function ensurePdfLoaded(pdfPath: string) {
+  const pending = inflightPdfLoads.get(pdfPath);
+  if (pending) {
+    return pending;
+  }
+
+  const loadTask = invoke("load_pdf", { path: pdfPath })
+    .then(() => undefined)
+    .finally(() => {
+      inflightPdfLoads.delete(pdfPath);
+    });
+
+  inflightPdfLoads.set(pdfPath, loadTask);
+  return loadTask;
 }
 
 export function PdfViewer({
@@ -121,6 +287,45 @@ export function PdfViewer({
   onAnnotationsSaved,
 }: PdfViewerProps) {
   const { t } = useI18n();
+  const [perfProfile, setPerfProfile] = useState<PerfProfile>(DEFAULT_PERF_PROFILE);
+  const lastPerfLogAtRef = useRef(0);
+
+  useEffect(() => {
+    const updatePerfProfile = () => {
+      const snapshot = getRenderMetricsSnapshot();
+      const nextProfile = getPerfProfile(snapshot);
+
+      setPerfProfile((current) => {
+        if (isSamePerfProfile(current, nextProfile)) {
+          return current;
+        }
+        return nextProfile;
+      });
+
+      if (import.meta.env.DEV) {
+        const now = Date.now();
+        if (now - lastPerfLogAtRef.current > 5000 && snapshot.sampleCount > 0) {
+          lastPerfLogAtRef.current = now;
+          console.debug("[PdfViewer perf]", {
+            sampleCount: snapshot.sampleCount,
+            avgQueueDepth: Number(snapshot.avgQueueDepth.toFixed(2)),
+            avgQueueWaitMs: Number(snapshot.avgQueueWaitMs.toFixed(2)),
+            avgRenderMs: Number(snapshot.avgRenderMs.toFixed(2)),
+            avgEndToEndMs: Number(snapshot.avgEndToEndMs.toFixed(2)),
+            sourceCount: snapshot.sourceCount,
+            profile: nextProfile,
+          });
+        }
+      }
+    };
+
+    const intervalId = window.setInterval(updatePerfProfile, 1500);
+    updatePerfProfile();
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, []);
   const searchMatchesByPage = useMemo(() => {
     const grouped = new Map<number, Array<{ match: PdfSearchMatch; globalIndex: number }>>();
 
@@ -134,28 +339,47 @@ export function PdfViewer({
   }, [searchMatches]);
 
   const prefetchPages = useMemo(() => {
-    if (dimensions.length === 0) return [];
-    const indices: number[] = [];
+    if (dimensions.length === 0) return new Set<number>();
+    const indices = new Set<number>();
     const centerIndex = Math.max(0, currentPage - 1);
 
-    for (let offset = -1; offset <= 2; offset += 1) {
+    for (let offset = perfProfile.prefetchBefore; offset <= perfProfile.prefetchAfter; offset += 1) {
       const nextIndex = centerIndex + offset;
       if (nextIndex >= 0 && nextIndex < totalPages) {
-        indices.push(nextIndex);
+        indices.add(nextIndex);
       }
     }
 
     return indices;
-  }, [currentPage, totalPages, dimensions.length]);
+  }, [currentPage, dimensions.length, perfProfile.prefetchAfter, perfProfile.prefetchBefore, totalPages]);
+
+  const textLoadPages = useMemo(() => {
+    if (dimensions.length === 0) return new Set<number>();
+    const indices = new Set<number>();
+    const centerIndex = Math.max(0, currentPage - 1);
+
+    for (let offset = perfProfile.textBefore; offset <= perfProfile.textAfter; offset += 1) {
+      const nextIndex = centerIndex + offset;
+      if (nextIndex >= 0 && nextIndex < totalPages) {
+        indices.add(nextIndex);
+      }
+    }
+
+    return indices;
+  }, [currentPage, dimensions.length, perfProfile.textAfter, perfProfile.textBefore, totalPages]);
 
   useEffect(() => {
     if (dimensions.length === 0) return;
-    prefetchPages.forEach((pageIndex) => {
-      requestRenderedPage(pdfPath, pageIndex, getPreviewRenderScale(scale)).catch((error) => {
+    for (const pageIndex of prefetchPages) {
+      if (getPendingRenderJobs() >= perfProfile.prefetchBudget) {
+        break;
+      }
+
+      requestRenderedPage(pdfPath, pageIndex, getPreviewRenderScale(scale), "prefetch").catch((error) => {
         console.error(`Failed to prefetch page ${pageIndex}`, error);
       });
-    });
-  }, [pdfPath, prefetchPages, scale, dimensions.length]);
+    }
+  }, [dimensions.length, pdfPath, perfProfile.prefetchBudget, prefetchPages, scale]);
 
   if (dimensions.length === 0) {
     // Show a loading skeleton instead of a blank white screen while dimensions are loading
@@ -182,14 +406,14 @@ export function PdfViewer({
     <div className="flex flex-col items-center py-6 space-y-4 min-w-full">
       {dimensions.map((dim, i) => (
         <MemoPageRender
-          key={`page-${i}`}
+          key={`${pdfPath}::page-${i}`}
           pdfPath={pdfPath}
           pageIndex={i}
           dimension={dim}
           scale={scale}
           activeTool={activeTool}
-          shouldPrefetch={prefetchPages.includes(i)}
-          shouldLoadText={true}
+          shouldPrefetch={prefetchPages.has(i)}
+          shouldLoadText={textLoadPages.has(i)}
           pageSearchMatches={searchMatchesByPage.get(i) ?? []}
           activeSearchIndex={activeSearchIndex}
           onAnnotationsSaved={onAnnotationsSaved}
@@ -259,20 +483,24 @@ function PageRender({
       return;
     }
 
+    setImgSrc(null);
+
     if (!isVisible && !shouldPrefetch) return;
     let isMounted = true;
 
     const loadPage = async () => {
+      const source: RenderSource = isVisible ? "visible" : "prefetch";
+
       try {
-        const base64 = await requestRenderedPage(pdfPath, pageIndex, previewScale);
+        const base64 = await requestRenderedPage(pdfPath, pageIndex, previewScale, source);
         if (isMounted) setImgSrc(base64);
       } catch (err: any) {
         const errMsg = String(err);
         if (errMsg.includes('No PDF loaded') || errMsg.includes('no pdf loaded')) {
           // Backend cache was cleared (e.g. app restart/tab switch race). Re-load the PDF then retry.
           try {
-            await invoke('load_pdf', { path: pdfPath });
-            const base64 = await requestRenderedPage(pdfPath, pageIndex, previewScale);
+            await ensurePdfLoaded(pdfPath);
+            const base64 = await requestRenderedPage(pdfPath, pageIndex, previewScale, source);
             if (isMounted) setImgSrc(base64);
           } catch (retryErr) {
             console.error(`Failed to recover page ${pageIndex} after reload`, retryErr);
@@ -297,7 +525,7 @@ function PageRender({
 
     let isMounted = true;
 
-    requestRenderedPage(pdfPath, pageIndex, fullScale)
+    requestRenderedPage(pdfPath, pageIndex, fullScale, "refine")
       .then((base64) => {
         if (isMounted) {
           setImgSrc(base64);
