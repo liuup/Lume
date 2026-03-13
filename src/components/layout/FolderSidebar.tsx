@@ -187,14 +187,18 @@ export function FolderSidebar({
 
   return (
     <aside className={`bg-zinc-50 border-r border-zinc-200 flex flex-col h-full shrink-0 overflow-hidden transition-[width] duration-300 ${isCollapsed ? "w-16" : "w-64"}`}>
-      <div className={`h-14 border-b border-zinc-200 shrink-0 flex items-center ${isCollapsed ? "px-2 justify-center gap-2" : "px-4 justify-between"}`}>
-        <button
-          onClick={() => { setNewFolderParentId(selectedFolderId); setNewFolderName(""); }}
-          className="inline-flex items-center justify-center w-9 h-9 text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
-          title={t("folderSidebar.actions.newFolder")}
-        >
-          <FolderPlus size={15} />
-        </button>
+      <div className={`h-14 border-b border-zinc-200 shrink-0 flex items-center ${isCollapsed ? "px-2 justify-center" : "px-3 justify-between"}`}>
+        {!isCollapsed && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onOpenSettings}
+              className="inline-flex items-center justify-center w-9 h-9 text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
+              title={t("folderSidebar.actions.settings")}
+            >
+              <Settings size={15} />
+            </button>
+          </div>
+        )}
         <button
           onClick={onToggleCollapse}
           className="inline-flex items-center justify-center w-9 h-9 text-zinc-500 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
@@ -226,15 +230,6 @@ export function FolderSidebar({
             )}
           </div>
 
-          <div className="border-t border-zinc-200 shrink-0 p-2 flex justify-center">
-            <button
-              onClick={onOpenSettings}
-              className="flex items-center justify-center w-10 h-10 text-zinc-600 rounded-xl hover:bg-zinc-100 transition-colors"
-              title={t("folderSidebar.actions.settings")}
-            >
-              <Settings size={16} className="text-zinc-400" />
-            </button>
-          </div>
         </>
       ) : (
         <>
@@ -278,19 +273,21 @@ export function FolderSidebar({
                 </div>
                 <span className="text-[10px] text-zinc-400 font-medium">{allTags.length}</span>
               </div>
-              {/* Tag list */}
-              <div className="max-h-52 overflow-y-auto px-2 pb-2 space-y-0.5">
+              {/* Tag pills */}
+              <div className="max-h-40 overflow-y-auto px-3 pb-3">
+                <div className="flex flex-wrap gap-1.5">
                 {allTags.map(tagInfo => {
                   const isActive = selectedTagFilter === tagInfo.tag;
                   const dotColor = tagInfo.color || DEFAULT_TAG_COLOR;
                   return (
-                    <div
+                    <button
+                      type="button"
                       key={tagInfo.tag}
                       className={[
-                        'group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer select-none transition-colors',
+                        'group inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
                         isActive
-                          ? 'bg-indigo-50 text-indigo-700'
-                          : 'text-zinc-600 hover:bg-zinc-100',
+                          ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                          : 'border-zinc-200 bg-white text-zinc-600 hover:border-indigo-200 hover:bg-zinc-100',
                       ].join(' ')}
                       onClick={() => onSelectTag(tagInfo.tag)}
                       onContextMenu={e => {
@@ -302,30 +299,18 @@ export function FolderSidebar({
                         ? t("folderSidebar.tags.tooltip.one", { tag: tagInfo.tag, count: tagInfo.count })
                         : t("folderSidebar.tags.tooltip.other", { tag: tagInfo.tag, count: tagInfo.count })}
                     >
-                      {/* Colored dot */}
                       <span
-                        className="w-2.5 h-2.5 rounded-full shrink-0 transition-transform group-hover:scale-110"
+                        className="h-2 w-2 shrink-0 rounded-full transition-transform group-hover:scale-110"
                         style={{ backgroundColor: dotColor }}
                       />
-                      <span className="text-[13px] font-medium flex-1 truncate">{tagInfo.tag}</span>
-                      <span className="text-[10px] font-medium text-zinc-400 shrink-0">{tagInfo.count}</span>
-                    </div>
+                      <span className="truncate">{tagInfo.tag}</span>
+                    </button>
                   );
                 })}
+                </div>
               </div>
             </div>
           )}
-
-          {/* ── Settings Button (Footer) ─────────────────────────── */}
-          <div className="border-t border-zinc-200 shrink-0 p-3">
-            <button
-              onClick={onOpenSettings}
-              className="flex items-center gap-2 w-full px-3 py-2 text-sm font-medium text-zinc-600 rounded-lg hover:bg-zinc-100 transition-colors"
-            >
-              <Settings size={15} className="text-zinc-400" />
-              {t("folderSidebar.actions.settings")}
-            </button>
-          </div>
         </>
       )}
 

@@ -9,7 +9,7 @@ import { SearchBar } from "./components/SearchBar";
 import { SettingsModal } from "./components/modals/SettingsModal";
 import { X } from "lucide-react";
 
-import { PdfSearchMatch, TagInfo, ToolType } from "./types";
+import { LibraryItem, PdfSearchMatch, TagInfo, ToolType } from "./types";
 import { useLibrary } from "./hooks/useLibrary";
 import { useSettings } from "./hooks/useSettings";
 import { useI18n } from "./hooks/useI18n";
@@ -111,16 +111,45 @@ function App() {
     try {
       const tags = await invoke<TagInfo[]>("get_all_tags");
       setAllTags(tags);
+      return tags;
     } catch (err) {
       console.error("Failed to load tags", err);
       feedback.error({
         title: t("feedback.library.tags.loadError.title"),
         description: t("feedback.library.tags.loadError.description"),
       });
+      return [] as TagInfo[];
     }
   }, [feedback, t]);
 
   useEffect(() => { refreshAllTags(); }, [refreshAllTags]);
+
+  const handleUpdateItemTags = useCallback(async (item: LibraryItem, tags: string[]) => {
+    const normalizedTags = Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean)));
+
+    try {
+      await invoke("update_item_tags", { itemId: item.id, tags: normalizedTags });
+      await handleItemUpdatedLocally();
+      const latestTags = await refreshAllTags();
+
+      if (selectedTagFilter && !latestTags.some((tagInfo) => tagInfo.tag === selectedTagFilter)) {
+        setSelectedTagFilter(null);
+      }
+
+      feedback.success({
+        title: t("feedback.library.tags.updateSuccess.title"),
+        description: t("feedback.library.tags.updateSuccess.description", {
+          title: item.title || item.attachments?.[0]?.name || item.id,
+        }),
+      });
+    } catch (error) {
+      console.error("Failed to update item tags", error);
+      feedback.error({
+        title: t("feedback.library.tags.updateError.title"),
+        description: t("feedback.library.tags.updateError.description"),
+      });
+    }
+  }, [feedback, handleItemUpdatedLocally, refreshAllTags, selectedTagFilter, t]);
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
@@ -595,6 +624,7 @@ function App() {
               onAddItem={handleAddItem}
               onDeleteItem={handleDeleteItem}
               onRenameItem={handleRenameItem}
+              onUpdateItemTags={handleUpdateItemTags}
               onItemPointerDown={handleItemPointerDown}
               tagFilter={selectedTagFilter}
               onClearTagFilter={() => setSelectedTagFilter(null)}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Download, FilePenLine, FileText, FileUp, Globe, Loader2, Search, Trash2 } from "lucide-react";
+import { Download, FilePenLine, FileText, FileUp, Globe, Hash, Loader2, Search, Trash2 } from "lucide-react";
 import { FolderNode, LibraryItem } from "../../types";
 import { ExportModal } from "./ExportModal";
 import { useI18n } from "../../hooks/useI18n";
@@ -37,6 +37,7 @@ interface LibraryViewProps {
   onAddItem: () => void;
   onDeleteItem: (item: LibraryItem) => void;
   onRenameItem: (item: LibraryItem, nextName: string) => Promise<void> | void;
+  onUpdateItemTags: (item: LibraryItem, tags: string[]) => Promise<void> | void;
   onItemPointerDown: (item: LibraryItem, event: React.MouseEvent<HTMLDivElement>) => void;
   /** Sidebar tag filter (null = no filter active). */
   tagFilter: string | null;
@@ -52,6 +53,7 @@ export function LibraryView({
   onAddItem,
   onDeleteItem,
   onRenameItem,
+  onUpdateItemTags,
   onItemPointerDown,
   tagFilter,
   onClearTagFilter,
@@ -68,6 +70,9 @@ export function LibraryView({
   const [contextMenu, setContextMenu] = useState<{ item: LibraryItem; x: number; y: number } | null>(null);
   const [renameTarget, setRenameTarget] = useState<LibraryItem | null>(null);
   const [renameValue, setRenameValue]   = useState("");  const [showExport, setShowExport] = useState(false);  const renameInputRef = useRef<HTMLInputElement>(null);
+  const [tagEditorTarget, setTagEditorTarget] = useState<LibraryItem | null>(null);
+  const [tagEditorValue, setTagEditorValue] = useState("");
+  const [tagEditorTags, setTagEditorTags] = useState<string[]>([]);
   const debounceRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Folder tree helpers ──────────────────────────────────────────────────
@@ -166,6 +171,21 @@ export function LibraryView({
     return () => { window.cancelAnimationFrame(frame); window.removeEventListener("keydown", onEsc); };
   }, [renameTarget]);
 
+  useEffect(() => {
+    if (!tagEditorTarget) return;
+
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setTagEditorTarget(null);
+        setTagEditorTags([]);
+        setTagEditorValue("");
+      }
+    };
+
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [tagEditorTarget]);
+
   const menuX = contextMenu ? Math.min(contextMenu.x, window.innerWidth  - 184) : 0;
   const menuY = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 56)  : 0;
 
@@ -176,6 +196,41 @@ export function LibraryView({
     await onRenameItem(renameTarget, trimmedName);
     setRenameTarget(null);
     setRenameValue("");
+  };
+
+  const addTag = (raw: string) => {
+    const tag = raw.trim();
+    if (!tag) return;
+
+    setTagEditorTags((prev) => {
+      if (prev.some((existing) => existing.toLowerCase() === tag.toLowerCase())) {
+        return prev;
+      }
+      return [...prev, tag];
+    });
+    setTagEditorValue("");
+  };
+
+  const removeTag = (tag: string) => {
+    setTagEditorTags((prev) => prev.filter((value) => value !== tag));
+  };
+
+  const submitTags = async () => {
+    if (!tagEditorTarget) return;
+    await onUpdateItemTags(tagEditorTarget, tagEditorTags);
+    setTagEditorTarget(null);
+    setTagEditorTags([]);
+    setTagEditorValue("");
+  };
+
+  const handleTagEditorKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      addTag(tagEditorValue);
+    } else if (e.key === "Backspace" && !tagEditorValue) {
+      const lastTag = tagEditorTags[tagEditorTags.length - 1];
+      if (lastTag) removeTag(lastTag);
+    }
   };
 
   const folderLabel = selectedFolder?.name ?? t("libraryView.myLibrary");
@@ -306,9 +361,9 @@ export function LibraryView({
       </div>
 
       {/* ── Item list ───────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto">
         {displayItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-zinc-400 space-y-4 mt-10">
+          <div className="flex flex-col items-center justify-center h-64 text-zinc-400 space-y-4 mt-10 px-6">
             <div className="w-16 h-16 bg-zinc-50 rounded-2xl flex items-center justify-center border border-zinc-200/60 shadow-sm">
               <FileText size={32} className="opacity-40" />
             </div>
@@ -322,14 +377,13 @@ export function LibraryView({
             )}
           </div>
         ) : (
-          <div className="divide-y divide-zinc-200 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+          <div className="divide-y divide-zinc-200 border-b border-zinc-200 bg-white">
             {displayItems.map(item => (
               <LibraryItemRow
                 key={item.id}
                 item={item}
                 isSelected={selectedItemId === item.id}
                 highlight={isGlobalSearch ? query : ""}
-                showFolderPath={isGlobalSearch}
                 onSelect={() => onSelectItem(item.id)}
                 onOpen={() => onOpenItem(item)}
                 onPointerDown={event => onItemPointerDown(item, event)}
@@ -360,6 +414,18 @@ export function LibraryView({
           >
             <FilePenLine size={15} />
             <span>{t("libraryView.context.rename")}</span>
+          </button>
+          <button
+            onClick={() => {
+              setTagEditorTarget(contextMenu.item);
+              setTagEditorTags(contextMenu.item.tags ?? []);
+              setTagEditorValue("");
+              setContextMenu(null);
+            }}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+          >
+            <Hash size={15} />
+            <span>{t("libraryView.context.editTags", undefined, "Edit Tags")}</span>
           </button>
           <button
             onClick={() => {
@@ -442,6 +508,90 @@ export function LibraryView({
         </div>
       )}
 
+      {tagEditorTarget && (
+        <div
+          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px]"
+          onClick={() => {
+            setTagEditorTarget(null);
+            setTagEditorTags([]);
+            setTagEditorValue("");
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-indigo-50 p-2 text-indigo-600">
+                <Hash size={18} />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-900">{t("libraryView.tagDialog.title", undefined, "Edit Item Tags")}</h3>
+                <p className="text-xs text-zinc-500">{t("libraryView.tagDialog.description", undefined, "Add custom tags for this PDF item.")}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <div
+                className="flex flex-wrap gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 min-h-[44px]"
+                onClick={() => {
+                  const input = document.getElementById("library-tag-editor-input") as HTMLInputElement | null;
+                  input?.focus();
+                }}
+              >
+                {tagEditorTags.map((tag) => (
+                  <span key={tag} className="inline-flex items-center gap-1 rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-600">
+                    {tag}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeTag(tag);
+                      }}
+                      className="leading-none text-indigo-400 hover:text-indigo-700"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <input
+                  id="library-tag-editor-input"
+                  type="text"
+                  value={tagEditorValue}
+                  onChange={(e) => setTagEditorValue(e.target.value)}
+                  onKeyDown={handleTagEditorKeyDown}
+                  onBlur={() => { if (tagEditorValue.trim()) addTag(tagEditorValue); }}
+                  placeholder={tagEditorTags.length === 0 ? t("libraryView.tagDialog.placeholder", undefined, "Type tag and press Enter") : ""}
+                  className="min-w-[140px] flex-1 bg-transparent text-sm text-zinc-700 outline-none placeholder:text-zinc-400"
+                />
+              </div>
+              <p className="text-[11px] text-zinc-400">{t("libraryView.tagDialog.help", undefined, "Press Enter or comma to add a tag.")}</p>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setTagEditorTarget(null);
+                  setTagEditorTags([]);
+                  setTagEditorValue("");
+                }}
+                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+              >
+                {t("libraryView.tagDialog.cancel", undefined, "Cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={submitTags}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+              >
+                {t("libraryView.tagDialog.save", undefined, "Save")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     {/* Export modal — uses fixed positioning, renders correctly inside any container */}
     <ExportModal
       items={displayItems}
@@ -453,33 +603,12 @@ export function LibraryView({
   );
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-function formatAuthorsForList(authors: string): string {
-  if (authors === "—") return authors;
-  const parts = authors.split(",").map(p => p.trim()).filter(Boolean);
-  if (parts.length <= 3) return authors;
-  return `${parts.slice(0, 3).join(", ")}, etc.`;
-}
-
-/** Derive a display-friendly folder label from a filesystem item id */
-function folderPathLabel(itemId: string, rootLabel: string): string {
-  const segments = itemId.split("/");
-  const libIdx   = segments.findIndex(s => s === "library");
-  if (libIdx !== -1) {
-    const relative = segments.slice(libIdx + 1, -1);
-    return relative.length > 0 ? relative.join(" / ") : rootLabel;
-  }
-  return segments.length > 2 ? segments[segments.length - 2] : rootLabel;
-}
-
 // ─── LibraryItemRow ──────────────────────────────────────────────────────────
 
 function LibraryItemRow({
   item,
   isSelected,
   highlight,
-  showFolderPath,
   onSelect,
   onOpen,
   onPointerDown,
@@ -488,19 +617,17 @@ function LibraryItemRow({
   item: LibraryItem;
   isSelected: boolean;
   highlight: string;
-  showFolderPath: boolean;
   onSelect: () => void;
   onOpen: () => void;
   onPointerDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   onContextMenu: (event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
   const { t } = useI18n();
-  const displayTitle   = item.title || item.attachments[0]?.name || t("libraryView.item.untitled");
-  const displayAuthors = formatAuthorsForList(item.authors);
+  const displayTitle = item.title || item.attachments[0]?.name || t("libraryView.item.untitled");
 
   return (
     <div
-      className={`library-item-row group flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors select-none ${
+      className={`library-item-row group flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors select-none ${
         isSelected ? "bg-indigo-50" : "bg-white hover:bg-zinc-50"
       }`}
       data-selected={isSelected ? "true" : "false"}
@@ -511,47 +638,16 @@ function LibraryItemRow({
       onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu(e); }}
       title={t("libraryView.item.openHint")}
     >
-      <div className={`p-2 rounded-lg shrink-0 ${
+      <div className={`p-1.5 rounded-lg shrink-0 ${
         isSelected ? "bg-indigo-100 text-indigo-600" : "bg-zinc-100 text-zinc-500 group-hover:text-indigo-500 transition-colors"
       }`}>
-        <FileText size={16} />
+        <FileText size={14} />
       </div>
 
       <div className="min-w-0 flex-1">
         <h3 className="library-item-title text-sm font-semibold text-zinc-800 truncate group-hover:text-indigo-900 transition-colors">
           {highlight ? highlightText(displayTitle, highlight) : displayTitle}
         </h3>
-        <div className="mt-0.5 flex items-center gap-2 text-xs text-zinc-500 min-w-0 flex-wrap">
-          <span className="truncate">
-            {highlight
-              ? highlightText(displayAuthors === "—" ? t("libraryView.item.unknownAuthor") : displayAuthors, highlight)
-              : (displayAuthors === "—" ? t("libraryView.item.unknownAuthor") : displayAuthors)}
-          </span>
-          <span className="text-zinc-300">•</span>
-          <span className="shrink-0 text-zinc-400">
-            {item.year !== "—" ? item.year : t("libraryView.item.noYear")}
-          </span>
-          {item.tags && item.tags.length > 0 && (
-            <>
-              <span className="text-zinc-300">•</span>
-              <div className="flex items-center gap-1 flex-wrap">
-                {item.tags.slice(0, 3).map(tag => (
-                  <span key={tag} className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-600 text-[10px] font-medium border border-indigo-100">
-                    {tag}
-                  </span>
-                ))}
-                {item.tags.length > 3 && (
-                  <span className="text-zinc-400 text-[10px]">+{item.tags.length - 3}</span>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-        {showFolderPath && (
-          <div className="mt-0.5 text-[10px] text-zinc-400 truncate">
-            📁 {folderPathLabel(item.id, t("libraryView.myLibrary"))}
-          </div>
-        )}
       </div>
     </div>
   );

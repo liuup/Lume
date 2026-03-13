@@ -134,13 +134,16 @@ async function fetchJson<T>(path: string): Promise<T> {
 
 async function loadMessages(locale: LocaleDefinition): Promise<TranslationDictionary> {
   const cacheKey = `${locale.code}:${locale.file}`;
+  const useRuntimeCache = !import.meta.env.DEV;
   const cached = translationCache.get(cacheKey);
-  if (cached) {
+  if (useRuntimeCache && cached) {
     return cached;
   }
 
   const messages = await fetchJson<TranslationDictionary>(locale.file);
-  translationCache.set(cacheKey, messages);
+  if (useRuntimeCache) {
+    translationCache.set(cacheKey, messages);
+  }
   return messages;
 }
 

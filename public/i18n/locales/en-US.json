@@ -69,6 +69,14 @@
           "title": "Failed to load tags",
           "description": "Tag information could not be refreshed."
         },
+        "updateSuccess": {
+          "title": "Tags updated",
+          "description": "Updated tags for {title}."
+        },
+        "updateError": {
+          "title": "Failed to update tags",
+          "description": "Could not update tags for this item."
+        },
         "colorUpdated": {
           "title": "Tag color updated",
           "description": "Updated the color for #{tag}."
@@ -255,7 +263,16 @@
     },
     "context": {
       "rename": "Rename Item",
+      "editTags": "Edit Tags",
       "delete": "Delete Item"
+    },
+    "tagDialog": {
+      "title": "Edit Item Tags",
+      "description": "Add custom tags for this PDF item.",
+      "placeholder": "Type tag and press Enter",
+      "help": "Press Enter or comma to add a tag.",
+      "cancel": "Cancel",
+      "save": "Save"
     },
     "renameDialog": {
       "title": "Rename PDF",

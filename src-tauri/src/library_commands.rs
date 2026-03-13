@@ -1413,6 +1413,49 @@ pub struct TagInfo {
     pub color: String,
 }
 
+const MODERN_TAG_COLORS: [&str; 20] = [
+    "#94a3b8", "#9ca3af", "#a1a1aa", "#818cf8", "#a78bfa",
+    "#c4b5fd", "#93c5fd", "#7dd3fc", "#67e8f9", "#5eead4",
+    "#6ee7b7", "#86efac", "#bef264", "#fde68a", "#fdba74",
+    "#fca5a5", "#f9a8d4", "#f0abfc", "#d8b4fe", "#cbd5e1",
+];
+
+fn pick_modern_tag_color(tag: &str) -> &'static str {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let mut hasher = DefaultHasher::new();
+    tag.to_lowercase().hash(&mut hasher);
+    let now_nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    now_nanos.hash(&mut hasher);
+
+    let idx = (hasher.finish() as usize) % MODERN_TAG_COLORS.len();
+    MODERN_TAG_COLORS[idx]
+}
+
+pub(crate) fn ensure_tag_color_for_tag(
+    conn: &rusqlite::Connection,
+    tag: &str,
+) -> Result<(), String> {
+    let trimmed = tag.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    let color = pick_modern_tag_color(trimmed);
+    conn.execute(
+        "INSERT OR IGNORE INTO tag_colors (tag, color) VALUES (?1, ?2)",
+        rusqlite::params![trimmed, color],
+    )
+    .map_err(|e| format!("Failed to ensure tag color: {}", e))?;
+
+    Ok(())
+}
+
 /// Return every tag in the library, with usage count and assigned color.
 #[tauri::command]
 pub fn get_all_tags(
@@ -1460,6 +1503,7 @@ pub fn add_item_tag(
         rusqlite::params![item_id, tag],
     )
     .map_err(|e| format!("Failed to add tag: {}", e))?;
+    ensure_tag_color_for_tag(&conn, &tag)?;
     Ok(())
 }
 
@@ -1500,6 +1544,7 @@ pub fn update_item_tags(
                 rusqlite::params![item_id, t],
             )
             .map_err(|e| format!("Failed to insert tag: {}", e))?;
+            ensure_tag_color_for_tag(&conn, t)?;
         }
     }
     Ok(())

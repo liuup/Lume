@@ -685,6 +685,7 @@ pub fn update_item_metadata(payload: crate::models::UpdateMetadataPayload, state
                 rusqlite::params![payload.id, t],
             )
             .map_err(|e| format!("Failed to insert tag: {}", e))?;
+            crate::library_commands::ensure_tag_color_for_tag(&conn, t)?;
         }
     }
 

@@ -69,6 +69,14 @@
           "title": "加载标签失败",
           "description": "无法刷新标签信息。"
         },
+        "updateSuccess": {
+          "title": "标签已更新",
+          "description": "已更新 {title} 的标签。"
+        },
+        "updateError": {
+          "title": "更新标签失败",
+          "description": "无法更新该条目的标签。"
+        },
         "colorUpdated": {
           "title": "标签颜色已更新",
           "description": "已更新 #{tag} 的颜色。"
@@ -255,7 +263,16 @@
     },
     "context": {
       "rename": "重命名条目",
+      "editTags": "编辑标签",
       "delete": "删除条目"
+    },
+    "tagDialog": {
+      "title": "编辑条目标签",
+      "description": "为该 PDF 条目添加自定义标签。",
+      "placeholder": "输入标签后按回车",
+      "help": "按回车或逗号可添加标签。",
+      "cancel": "取消",
+      "save": "保存"
     },
     "renameDialog": {
       "title": "重命名 PDF",
