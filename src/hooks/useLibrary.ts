@@ -261,7 +261,9 @@ export function useLibrary() {
   };
 
   const handlePageJump = (page: number) => {
-    const el = document.getElementById(`pdf-page-${page}`);
+    if (!activeTabId || activeTabId === "library") return;
+    const pageElementId = `pdf-page-${encodeURIComponent(activeTabId)}-${page}`;
+    const el = document.getElementById(pageElementId);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth' });
       setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, currentPage: page } : t));

@@ -6,6 +6,7 @@ import { TextLayer } from "./TextLayer";
 import { useI18n } from "../hooks/useI18n";
 
 interface PdfViewerProps {
+  tabId: string;
   pdfPath: string;
   totalPages: number;
   dimensions: PageDimension[];
@@ -291,6 +292,7 @@ export function clearCacheForPdf(pdfPath: string) {
 }
 
 export function PdfViewer({
+  tabId,
   pdfPath,
   totalPages,
   dimensions,
@@ -422,6 +424,7 @@ export function PdfViewer({
       {dimensions.map((dim, i) => (
         <MemoPageRender
           key={`${pdfPath}::page-${i}`}
+          tabId={tabId}
           pdfPath={pdfPath}
           pageIndex={i}
           dimension={dim}
@@ -439,6 +442,7 @@ export function PdfViewer({
 }
 
 interface PageRenderProps {
+  tabId: string;
   pdfPath: string;
   pageIndex: number;
   dimension: PageDimension;
@@ -452,6 +456,7 @@ interface PageRenderProps {
 }
 
 function PageRender({
+  tabId,
   pdfPath,
   pageIndex,
   dimension,
@@ -555,8 +560,10 @@ function PageRender({
     };
   }, [fullScale, isVisible, pageIndex, pdfPath, previewScale, shouldPrefetch]);
 
+  const pageElementId = `pdf-page-${encodeURIComponent(tabId)}-${pageIndex + 1}`;
+
   return (
-    <div id={`pdf-page-${pageIndex + 1}`} data-page-number={pageIndex + 1} className="flex flex-col items-center space-y-3 group">
+    <div id={pageElementId} data-page-number={pageIndex + 1} className="flex flex-col items-center space-y-3 group">
       <div className="flex items-center justify-between w-full px-2">
          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
            {t("pdfViewer.pageLabel", { page: pageIndex + 1 })}

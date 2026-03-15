@@ -508,7 +508,9 @@ function App() {
         return;
       }
 
-      const pageNode = container.querySelector(`#pdf-page-${activeMatch.pageIndex + 1}`) as HTMLElement | null;
+      const pageNode = container.querySelector(
+        `[data-page-number="${activeMatch.pageIndex + 1}"]`
+      ) as HTMLElement | null;
       pageNode?.scrollIntoView({ block: "center", behavior: "smooth" });
     });
 
@@ -691,6 +693,7 @@ function App() {
                   onScroll={handleScroll}
                 >
                   <PdfViewer 
+                    tabId={tab.id}
                     pdfPath={tab.item.attachments?.[0]?.path || ""}
                     totalPages={tab.totalPages} 
                     dimensions={tab.dimensions} 
