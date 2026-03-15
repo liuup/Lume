@@ -235,7 +235,7 @@ export function FolderSidebar({
         <>
           {/* Folder Tree */}
           <div
-            className="flex-1 min-h-0 overflow-y-auto px-2 py-2"
+            className="flex-1 min-h-0 overflow-y-auto px-2 py-2 sidebar-content-enter"
             onMouseLeave={() => {
               if (draggedItemId) {
                 onFolderHover(null);
@@ -316,7 +316,7 @@ export function FolderSidebar({
 
       {contextMenu && (
         <div
-          className="fixed z-50 min-w-44 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-[0_12px_40px_rgba(0,0,0,0.14)]"
+          className="fixed z-50 min-w-44 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-[0_12px_40px_rgba(0,0,0,0.14)] animate-popup"
           style={{ left: menuX, top: menuY }}
           onClick={e => e.stopPropagation()}
         >
@@ -347,11 +347,11 @@ export function FolderSidebar({
 
       {newFolderParentId && (
         <div
-          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px]"
+          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px] animate-backdrop"
           onClick={() => { setNewFolderParentId(null); setNewFolderName(""); }}
         >
           <div
-            className="w-[calc(100%-24px)] max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]"
+            className="w-[calc(100%-24px)] max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)] animate-modal"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center gap-3">
@@ -408,14 +408,14 @@ export function FolderSidebar({
 
       {renameTarget && (
         <div
-          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px]"
+          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px] animate-backdrop"
           onClick={() => {
             setRenameTarget(null);
             setRenameValue("");
           }}
         >
           <div
-            className="w-[calc(100%-24px)] max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]"
+            className="w-[calc(100%-24px)] max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)] animate-modal"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center gap-3">
@@ -476,7 +476,7 @@ export function FolderSidebar({
       {/* Tag color picker (right-click context menu) */}
       {tagColorMenu && (
         <div
-          className="fixed z-50 rounded-xl border border-zinc-200 bg-white p-3 shadow-[0_12px_40px_rgba(0,0,0,0.14)] min-w-[160px]"
+          className="fixed z-50 rounded-xl border border-zinc-200 bg-white p-3 shadow-[0_12px_40px_rgba(0,0,0,0.14)] min-w-[160px] animate-popup"
           style={{
             left: Math.min(tagColorMenu.x, window.innerWidth  - 172),
             top:  Math.min(tagColorMenu.y, window.innerHeight - 100),

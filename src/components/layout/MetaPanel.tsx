@@ -318,7 +318,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   };
 
   return (
-    <aside className="w-80 bg-white border-l border-zinc-200 flex flex-col h-full shrink-0 transition-all duration-300">
+    <aside className="w-80 bg-white border-l border-zinc-200 flex flex-col h-full shrink-0 animate-slide-left">
       {/* Header */}
       <div className="h-14 border-b border-zinc-200 flex items-center justify-between px-4 shrink-0 bg-zinc-50/50">
         <h2 className="font-semibold text-zinc-800 tracking-tight">{t("metaPanel.title")}</h2>

@@ -191,3 +191,124 @@ html.dark ::-webkit-scrollbar-thumb {
   -ms-overflow-style: none;  /* IE and Edge */
   scrollbar-width: none;  /* Firefox */
 }
+
+/* ─── Transition Animation System ──────────────────────────────────────────── */
+
+/* Keyframes */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideRight {
+  from { opacity: 0; transform: translateX(-12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideLeft {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes popIn {
+  0% { opacity: 0; transform: scale(0.92) translateY(4px); }
+  60% { transform: scale(1.01) translateY(0); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes shimmer {
+  from { opacity: 0.6; }
+  to { opacity: 1; }
+}
+
+/* ── Modal overlay + content ─────────────────────────────────────────────── */
+.animate-backdrop {
+  animation: fadeIn 0.2s ease-out both;
+}
+
+.animate-modal {
+  animation: scaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── Context menu / popup ────────────────────────────────────────────────── */
+.animate-popup {
+  animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── Content fade ────────────────────────────────────────────────────────── */
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out both;
+}
+
+/* ── Slide animations ────────────────────────────────────────────────────── */
+.animate-slide-down {
+  animation: slideDown 0.2s ease-out both;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.2s ease-out both;
+}
+
+.animate-slide-right {
+  animation: slideRight 0.25s ease-out both;
+}
+
+.animate-slide-left {
+  animation: slideLeft 0.25s ease-out both;
+}
+
+/* ── Sidebar content transition ──────────────────────────────────────────── */
+.sidebar-content-enter {
+  animation: fadeIn 0.25s ease-out 0.1s both;
+}
+
+/* ── View transition (library <-> pdf) ───────────────────────────────────── */
+.view-enter {
+  animation: fadeIn 0.18s ease-out both;
+}
+
+/* ── Library item row hover micro-interaction ────────────────────────────── */
+.library-item-row {
+  transition: background-color 0.15s ease, transform 0.1s ease;
+}
+.library-item-row:active {
+  transform: scale(0.995);
+}
+
+/* ── Respect user motion preferences ─────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .animate-backdrop,
+  .animate-modal,
+  .animate-popup,
+  .animate-fade-in,
+  .animate-slide-down,
+  .animate-slide-up,
+  .animate-slide-right,
+  .animate-slide-left,
+  .sidebar-content-enter,
+  .view-enter,
+  .library-item-row {
+    animation: none !important;
+    transition: none !important;
+  }
+}

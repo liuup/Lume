@@ -592,7 +592,7 @@ function App() {
       {/* 主工作区 - Main Workspace Split */}
       <div className="flex flex-1 min-h-0">
         {isLibrary ? (
-          <>
+          <div className="flex flex-1 min-h-0 view-enter" key="library-view">
             <FolderSidebar
               folderTree={folderTree}
               isCollapsed={isSidebarCollapsed}
@@ -640,9 +640,9 @@ function App() {
               tagFilter={selectedTagFilter}
               onClearTagFilter={() => setSelectedTagFilter(null)}
             />
-          </>
+          </div>
         ) : (
-          <div className="flex flex-col flex-1 min-w-0 relative">
+          <div className="flex flex-col flex-1 min-w-0 relative view-enter" key="pdf-view">
             <Toolbar
               onZoomIn={zoomIn}
               onZoomOut={zoomOut}
@@ -676,7 +676,7 @@ function App() {
               )}
               {/* Main Content Area */}
               {isLoading && (
-                <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-200/50 backdrop-blur-sm">
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-200/50 backdrop-blur-sm animate-fade-in">
                   <div className="flex flex-col items-center space-y-4">
                     <div className="w-8 h-8 border-2 border-zinc-400 border-t-zinc-600 rounded-full animate-spin" />
                     <div className="text-sm font-medium text-zinc-600">{t("app.loading.switchingDocument")}</div>
@@ -731,7 +731,7 @@ function App() {
 
       {dragState && (
         <div
-          className="fixed z-[100] pointer-events-none rounded-xl border border-indigo-200 bg-white/95 px-3 py-2 shadow-xl backdrop-blur-sm"
+          className="fixed z-[100] pointer-events-none rounded-xl border border-indigo-200 bg-white/95 px-3 py-2 shadow-xl backdrop-blur-sm animate-popup"
           style={{
             left: dragState.x + 14,
             top: dragState.y + 14,

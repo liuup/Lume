@@ -25,9 +25,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/20 backdrop-blur-sm" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/20 backdrop-blur-sm animate-backdrop" onClick={onClose}>
       <div 
-        className="w-[500px] max-h-[80vh] overflow-y-auto bg-white rounded-2xl shadow-xl flex flex-col pointer-events-auto"
+        className="w-[500px] max-h-[80vh] overflow-y-auto bg-white rounded-2xl shadow-xl flex flex-col pointer-events-auto animate-modal"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-100 sticky top-0 bg-white/95 backdrop-blur-sm z-10">

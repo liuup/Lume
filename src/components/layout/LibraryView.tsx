@@ -400,7 +400,7 @@ export function LibraryView({
       {/* ── Context menu ────────────────────────────────────── */}
       {contextMenu && (
         <div
-          className="fixed z-50 min-w-44 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-[0_12px_40px_rgba(0,0,0,0.14)]"
+          className="fixed z-50 min-w-44 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-[0_12px_40px_rgba(0,0,0,0.14)] animate-popup"
           style={{ left: menuX, top: menuY }}
           onClick={e => e.stopPropagation()}
         >
@@ -442,14 +442,14 @@ export function LibraryView({
 
       {renameTarget && (
         <div
-          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px]"
+          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px] animate-backdrop"
           onClick={() => {
             setRenameTarget(null);
             setRenameValue("");
           }}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]"
+            className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)] animate-modal"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center gap-3">
@@ -510,7 +510,7 @@ export function LibraryView({
 
       {tagEditorTarget && (
         <div
-          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px]"
+          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px] animate-backdrop"
           onClick={() => {
             setTagEditorTarget(null);
             setTagEditorTags([]);
@@ -518,7 +518,7 @@ export function LibraryView({
           }}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)]"
+            className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)] animate-modal"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-3">

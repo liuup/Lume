@@ -90,10 +90,10 @@ export function ExportModal({ items, isOpen, onClose, scopeLabel }: Props) {
   return (
     /* Backdrop */
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-backdrop"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-[720px] max-w-[95vw] max-h-[85vh] flex flex-col overflow-hidden border border-zinc-200">
+      <div className="bg-white rounded-2xl shadow-2xl w-[720px] max-w-[95vw] max-h-[85vh] flex flex-col overflow-hidden border border-zinc-200 animate-modal">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 shrink-0">
           <div>
