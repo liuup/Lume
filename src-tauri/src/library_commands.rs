@@ -1063,12 +1063,11 @@ pub struct SearchLibraryParams {
     pub tag_filters: Vec<String>,
 }
 
-#[tauri::command]
-pub fn search_library(
-    params: SearchLibraryParams,
-    state: tauri::State<'_, crate::models::AppState>,
+/// DB-only search – usable from CLI without tauri::State.
+pub fn search_library_db(
+    conn: &rusqlite::Connection,
+    params: &SearchLibraryParams,
 ) -> Result<Vec<crate::models::LibraryItem>, String> {
-    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
 
     let query_text = params.query.trim();
     let pattern = format!("%{}%", query_text.to_lowercase());
@@ -1220,6 +1219,15 @@ pub fn search_library(
     }
 
     Ok(items)
+}
+
+#[tauri::command]
+pub fn search_library(
+    params: SearchLibraryParams,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<Vec<crate::models::LibraryItem>, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    search_library_db(&conn, &params)
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1569,25 +1577,25 @@ pub fn set_tag_color(
 
 // ── Citation / Export ────────────────────────────────────────────────────────
 
-/// Internal citation data row (lighter than the full LibraryItem)
-struct CitationData {
-    id: String,
-    item_type: String,
-    title: String,
-    authors: String,
-    year: String,
-    publication: String,
-    volume: String,
-    issue: String,
-    pages: String,
-    publisher: String,
-    doi: String,
-    arxiv_id: String,
-    url: String,
-    isbn: String,
+/// Citation data row (lighter than the full LibraryItem)
+pub struct CitationData {
+    pub id: String,
+    pub item_type: String,
+    pub title: String,
+    pub authors: String,
+    pub year: String,
+    pub publication: String,
+    pub volume: String,
+    pub issue: String,
+    pub pages: String,
+    pub publisher: String,
+    pub doi: String,
+    pub arxiv_id: String,
+    pub url: String,
+    pub isbn: String,
 }
 
-fn fetch_citation_data(conn: &rusqlite::Connection, item_id: &str) -> Result<CitationData, String> {
+pub fn fetch_citation_data(conn: &rusqlite::Connection, item_id: &str) -> Result<CitationData, String> {
     conn.query_row(
         "SELECT id, item_type, title, authors, year, publication, volume, issue, pages,
                 publisher, doi, arxiv_id, url, isbn
@@ -1937,7 +1945,7 @@ fn format_csljson_one(item: &CitationData) -> String {
     format!("{{{}}}", fields.join(","))
 }
 
-fn apply_format(item: &CitationData, format: &str) -> String {
+pub fn apply_format(item: &CitationData, format: &str) -> String {
     match format {
         "apa"      => format_apa(item),
         "mla"      => format_mla(item),
@@ -1966,21 +1974,20 @@ pub fn generate_citation(
 /// For text formats (APA/MLA/Chicago/GBT) items are joined with newlines.
 /// For BibTeX/RIS entries are joined with blank lines.
 /// For CSL-JSON a JSON array is returned.
-#[tauri::command]
-pub fn export_items(
-    item_ids: Vec<String>,
-    format: String,
-    state: tauri::State<'_, crate::models::AppState>,
+/// DB-only export – usable from CLI without tauri::State.
+pub fn export_items_db(
+    conn: &rusqlite::Connection,
+    item_ids: &[String],
+    format: &str,
 ) -> Result<String, String> {
-    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
     let mut parts: Vec<String> = Vec::new();
-    for id in &item_ids {
-        match fetch_citation_data(&conn, id) {
-            Ok(item) => parts.push(apply_format(&item, &format)),
+    for id in item_ids {
+        match fetch_citation_data(conn, id) {
+            Ok(item) => parts.push(apply_format(&item, format)),
             Err(_) => {} // skip missing items silently
         }
     }
-    let sep = match format.as_str() {
+    let sep = match format {
         "bibtex" | "ris" => "\n\n",
         _ => "\n",
     };
@@ -1989,9 +1996,19 @@ pub fn export_items(
         let objects: Vec<String> = parts.iter()
             .map(|p| p.trim_start_matches('[').trim_end_matches(']').to_string())
             .collect();
-        return Ok(format!("[{}]", objects.join(",")));
+        return Ok(std::format!("[{}]", objects.join(",")));
     }
     Ok(parts.join(sep))
+}
+
+#[tauri::command]
+pub fn export_items(
+    item_ids: Vec<String>,
+    format: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<String, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    export_items_db(&conn, &item_ids, &format)
 }
 
 // ─────────────────────────────────────────────────────────────
