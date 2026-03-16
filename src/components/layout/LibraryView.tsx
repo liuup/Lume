@@ -4,43 +4,23 @@ import { ArrowDown, ArrowUp, Download, FilePenLine, FileText, FileUp, Globe, Has
 import { FolderNode, LibraryItem } from "../../types";
 import { ExportModal } from "./ExportModal";
 import { useI18n } from "../../hooks/useI18n";
-
-type SortColumn = "title" | "authors" | "year" | "publication" | "dateAdded";
-type SortDirection = "asc" | "desc";
-type ColumnWidthMap = Record<SortColumn, number>;
-type ColumnVisibilityMap = Record<SortColumn, boolean>;
-
-const COLUMN_WIDTH_STORAGE_KEY = "lume.library.column-widths";
-const COLUMN_VISIBILITY_STORAGE_KEY = "lume.library.column-visibility";
-const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
-  title: 260,
-  authors: 150,
-  year: 72,
-  publication: 170,
-  dateAdded: 116,
-};
-const MIN_COLUMN_WIDTHS: ColumnWidthMap = {
-  title: 180,
-  authors: 110,
-  year: 56,
-  publication: 120,
-  dateAdded: 96,
-};
-const MAX_COLUMN_WIDTHS: ColumnWidthMap = {
-  title: 560,
-  authors: 360,
-  year: 120,
-  publication: 420,
-  dateAdded: 180,
-};
-const COLUMN_ORDER: SortColumn[] = ["title", "authors", "year", "publication", "dateAdded"];
-const DEFAULT_COLUMN_VISIBILITY: ColumnVisibilityMap = {
-  title: true,
-  authors: true,
-  year: true,
-  publication: true,
-  dateAdded: true,
-};
+import {
+  clampColumnWidth,
+  COLUMN_ORDER,
+  COLUMN_VISIBILITY_STORAGE_KEY,
+  COLUMN_WIDTH_STORAGE_KEY,
+  DEFAULT_COLUMN_VISIBILITY,
+  DEFAULT_COLUMN_WIDTHS,
+  formatDateLabel,
+  getResponsiveColumns,
+  getVisibleColumns,
+  normalizeColumnVisibility,
+  normalizeColumnWidths,
+  type ColumnVisibilityMap,
+  type ColumnWidthMap,
+  type SortColumn,
+  type SortDirection,
+} from "./libraryViewUtils";
 
 // ─── Highlight utility ──────────────────────────────────────────────────────
 
@@ -57,66 +37,6 @@ function highlightText(text: string, query: string): React.ReactNode {
       {highlightText(text.slice(idx + query.length), query)}
     </>
   );
-}
-
-function formatDateLabel(value: string) {
-  const numeric = Number(value);
-  const asDate = !Number.isNaN(numeric) && numeric > 0
-    ? new Date(numeric * 1000)
-    : new Date(value);
-
-  if (Number.isNaN(asDate.getTime())) {
-    return value || "—";
-  }
-
-  return asDate.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function clampColumnWidth(column: SortColumn, width: number) {
-  return Math.max(MIN_COLUMN_WIDTHS[column], Math.min(MAX_COLUMN_WIDTHS[column], Math.round(width)));
-}
-
-function normalizeColumnWidths(value: unknown): ColumnWidthMap {
-  const fallback = { ...DEFAULT_COLUMN_WIDTHS };
-  if (!value || typeof value !== "object") {
-    return fallback;
-  }
-
-  const next = { ...fallback };
-  for (const column of COLUMN_ORDER) {
-    const raw = (value as Record<string, unknown>)[column];
-    if (typeof raw === "number" && Number.isFinite(raw)) {
-      next[column] = clampColumnWidth(column, raw);
-    }
-  }
-  return next;
-}
-
-function normalizeColumnVisibility(value: unknown): ColumnVisibilityMap {
-  const fallback = { ...DEFAULT_COLUMN_VISIBILITY };
-  if (!value || typeof value !== "object") {
-    return fallback;
-  }
-
-  const next = { ...fallback };
-  for (const column of COLUMN_ORDER) {
-    if (column === "title") {
-      next[column] = true;
-      continue;
-    }
-
-    const raw = (value as Record<string, unknown>)[column];
-    if (typeof raw === "boolean") {
-      next[column] = raw;
-    }
-  }
-
-  next.title = true;
-  return next;
 }
 
 interface LibraryViewProps {
@@ -342,27 +262,9 @@ export function LibraryView({
     return items;
   }, [folderItems, globalResults, isGlobalSearch, sortColumn, sortDirection]);
 
-  const responsiveColumns = useMemo(() => {
-    if (listViewportWidth <= 0) {
-      return COLUMN_ORDER;
-    }
-
-    if (listViewportWidth < 720) {
-      return ["title", "year"] as SortColumn[];
-    }
-
-    if (listViewportWidth < 900) {
-      return ["title", "authors", "year"] as SortColumn[];
-    }
-
-    if (listViewportWidth < 1080) {
-      return ["title", "authors", "year", "publication"] as SortColumn[];
-    }
-
-    return COLUMN_ORDER;
-  }, [listViewportWidth]);
+  const responsiveColumns = useMemo(() => getResponsiveColumns(listViewportWidth), [listViewportWidth]);
   const visibleColumns = useMemo(
-    () => responsiveColumns.filter((column) => column === "title" || columnVisibility[column]),
+    () => getVisibleColumns(responsiveColumns, columnVisibility),
     [columnVisibility, responsiveColumns]
   );
   const visibleGridTemplateColumns = useMemo(

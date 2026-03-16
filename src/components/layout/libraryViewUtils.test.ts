@@ -1,0 +1,36 @@
+import { describe, expect, it } from "vitest";
+import {
+  clampColumnWidth,
+  formatDateLabel,
+  getResponsiveColumns,
+  getVisibleColumns,
+  normalizeColumnVisibility,
+  normalizeColumnWidths,
+} from "./libraryViewUtils";
+
+describe("libraryViewUtils", () => {
+  it("keeps the title column always visible", () => {
+    expect(normalizeColumnVisibility({ title: false, authors: false }).title).toBe(true);
+    expect(getVisibleColumns(["title", "authors", "year"], normalizeColumnVisibility({ authors: false }))).toEqual(["title", "year"]);
+  });
+
+  it("clamps saved widths into allowed ranges", () => {
+    const widths = normalizeColumnWidths({ title: 999, year: 1 });
+    expect(widths.title).toBe(560);
+    expect(widths.year).toBe(56);
+    expect(clampColumnWidth("authors", 140)).toBe(140);
+  });
+
+  it("applies responsive column presets by viewport width", () => {
+    expect(getResponsiveColumns(680)).toEqual(["title", "year"]);
+    expect(getResponsiveColumns(880)).toEqual(["title", "authors", "year"]);
+    expect(getResponsiveColumns(1040)).toEqual(["title", "authors", "year", "publication"]);
+    expect(getResponsiveColumns(1280)).toEqual(["title", "authors", "year", "publication", "dateAdded"]);
+  });
+
+  it("formats numeric timestamps and keeps invalid values readable", () => {
+    expect(formatDateLabel("1710000000")).not.toBe("1710000000");
+    expect(formatDateLabel("not-a-date")).toBe("not-a-date");
+    expect(formatDateLabel("")).toBe("—");
+  });
+});

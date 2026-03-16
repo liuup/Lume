@@ -2965,12 +2965,18 @@ pub fn save_setting(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_ai_annotation_digest, render_annotations_markdown};
+    use super::{
+        build_ai_annotation_digest, build_library_item, render_annotations_markdown,
+        sync_item_to_db,
+    };
+    use crate::db::ensure_schema;
     use crate::models::{
         SavedAnnotationPath, SavedAnnotationPoint, SavedPdfAnnotationsDocument,
         SavedPdfPageAnnotations, SavedTextAnnotation,
     };
+    use rusqlite::Connection;
     use std::collections::HashMap;
+    use std::fs;
 
     fn text_annotation(y: f32, text: &str) -> SavedTextAnnotation {
         SavedTextAnnotation {
@@ -3159,5 +3165,48 @@ mod tests {
             .coverage_note
             .contains("No saved text annotations were found"));
         assert!(digest.overview.contains("no text annotations"));
+    }
+
+    #[test]
+    fn build_library_item_sets_import_timestamps() {
+        let temp_dir = std::env::temp_dir().join(format!("lume-test-{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let pdf_path = temp_dir.join("paper.pdf");
+        fs::write(&pdf_path, b"%PDF-1.4").unwrap();
+
+        let item = build_library_item(&pdf_path);
+
+        assert!(!item.date_added.trim().is_empty());
+        assert_eq!(item.date_modified, item.date_added);
+
+        let _ = fs::remove_file(pdf_path);
+    }
+
+    #[test]
+    fn sync_item_to_db_backfills_missing_import_timestamp() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+
+        let temp_dir = std::env::temp_dir().join(format!("lume-sync-test-{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let pdf_path = temp_dir.join("paper.pdf");
+        fs::write(&pdf_path, b"%PDF-1.4").unwrap();
+
+        let mut item = build_library_item(&pdf_path);
+        item.date_added.clear();
+        item.date_modified.clear();
+
+        sync_item_to_db(&conn, &item).unwrap();
+
+        let stored: (String, String) = conn.query_row(
+            "SELECT date_added, date_modified FROM items WHERE id = ?1",
+            rusqlite::params![item.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+
+        assert!(!stored.0.trim().is_empty());
+        assert_eq!(stored.0, stored.1);
+
+        let _ = fs::remove_file(pdf_path);
     }
 }
