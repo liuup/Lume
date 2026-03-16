@@ -159,6 +159,18 @@
       "extractError": {
         "title": "Failed to extract annotations",
         "description": "PDF annotations could not be appended to the note."
+      },
+      "annotationsExportSuccess": {
+        "title": "Annotations exported",
+        "description": "Saved a Markdown export for {title}."
+      },
+      "annotationsExportError": {
+        "title": "Failed to export annotations",
+        "description": "Could not generate the annotations Markdown export."
+      },
+      "annotationsEmpty": {
+        "title": "No annotations to export",
+        "description": "This paper does not have any saved annotations yet."
       }
     },
     "export": {
@@ -458,7 +470,29 @@
       "title": "Pdf Annotations",
       "loading": "Loading annotations...",
       "empty": "No annotations in this PDF.",
+      "emptyFiltered": "No annotations match the current filters.",
       "page": "Page {page}",
+      "filters": {
+        "all": "All",
+        "text": "Text",
+        "highlight": "Highlight",
+        "ink": "Ink"
+      },
+      "searchPlaceholder": "Search text annotations...",
+      "results": "{visible}/{total} shown",
+      "export": "Export Markdown",
+      "exportFallbackFileName": "annotations",
+      "items": {
+        "text": "Text note",
+        "highlight": "Highlight #{index}",
+        "ink": "Ink #{index}"
+      },
+      "previews": {
+        "highlight": "Freehand highlight stroke",
+        "ink": "Freehand ink stroke"
+      },
+      "jump": "Jump",
+      "jumpToPage": "Open page",
       "actions": {
         "one": "{count} draw/highlight action",
         "other": "{count} draw/highlight actions"

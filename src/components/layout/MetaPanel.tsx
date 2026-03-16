@@ -1,4 +1,4 @@
-import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit, Edit2, Check, Book, Building, Link2, Copy, Quote, StickyNote, Wand2, Highlighter } from "lucide-react";
+import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit, Edit2, Check, Book, Building, Link2, Copy, Quote, StickyNote, Wand2, Highlighter, Search, Download, Loader2 } from "lucide-react";
 import { LibraryItem, SavedPdfAnnotationsDocument } from "../../types";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -38,6 +38,25 @@ type RawSavedPdfAnnotationsDocument = {
   pages?: Record<string, RawSavedPdfPageAnnotations>;
 };
 
+type AnnotationEntryType = "text" | "highlight" | "ink";
+type AnnotationFilter = "all" | AnnotationEntryType;
+
+interface AnnotationEntry {
+  id: string;
+  page: number;
+  type: AnnotationEntryType;
+  preview: string;
+  searchText: string;
+  sequence: number | null;
+}
+
+const ANNOTATION_FILTERS: Array<{ id: AnnotationFilter; labelKey: string }> = [
+  { id: "all", labelKey: "metaPanel.annotations.filters.all" },
+  { id: "text", labelKey: "metaPanel.annotations.filters.text" },
+  { id: "highlight", labelKey: "metaPanel.annotations.filters.highlight" },
+  { id: "ink", labelKey: "metaPanel.annotations.filters.ink" },
+];
+
 function normalizePdfAnnotations(document: RawSavedPdfAnnotationsDocument | null | undefined): SavedPdfAnnotationsDocument | null {
   if (!document) return null;
 
@@ -70,6 +89,108 @@ function normalizePdfAnnotations(document: RawSavedPdfAnnotationsDocument | null
   };
 }
 
+function getPathMinY(path: { points: Array<{ y: number }> }): number {
+  if (!path.points || path.points.length === 0) return Number.MAX_SAFE_INTEGER;
+  return path.points.reduce((minY, point) => Math.min(minY, point.y), Number.MAX_SAFE_INTEGER);
+}
+
+function flattenPdfAnnotations(document: SavedPdfAnnotationsDocument | null): AnnotationEntry[] {
+  if (!document) return [];
+
+  const entries: AnnotationEntry[] = [];
+  const sortedPages = Object.entries(document.pages ?? {})
+    .map(([pageKey, pageData]) => ({
+      pageIndex: parseInt(pageKey, 10),
+      pageData,
+    }))
+    .filter(({ pageIndex }) => !Number.isNaN(pageIndex))
+    .sort((a, b) => a.pageIndex - b.pageIndex);
+
+  for (const { pageIndex, pageData } of sortedPages) {
+    const rawEntries: Array<{
+      type: AnnotationEntryType;
+      y: number;
+      preview: string;
+      searchText: string;
+    }> = [];
+
+    for (const annotation of pageData.textAnnotations ?? []) {
+      const trimmed = annotation.text.trim();
+      if (!trimmed) continue;
+
+      rawEntries.push({
+        type: "text",
+        y: annotation.y,
+        preview: trimmed.split(/\r?\n/, 1)[0] || trimmed,
+        searchText: trimmed.toLowerCase(),
+      });
+    }
+
+    for (const path of pageData.paths ?? []) {
+      rawEntries.push({
+        type: path.tool === "highlight" ? "highlight" : "ink",
+        y: getPathMinY(path),
+        preview: "",
+        searchText: "",
+      });
+    }
+
+    rawEntries.sort((a, b) => {
+      if (a.y !== b.y) return a.y - b.y;
+      const typeOrder: Record<AnnotationEntryType, number> = {
+        text: 0,
+        highlight: 1,
+        ink: 2,
+      };
+      return typeOrder[a.type] - typeOrder[b.type];
+    });
+
+    let highlightSequence = 0;
+    let inkSequence = 0;
+
+    rawEntries.forEach((entry, index) => {
+      let sequence: number | null = null;
+      if (entry.type === "highlight") {
+        highlightSequence += 1;
+        sequence = highlightSequence;
+      } else if (entry.type === "ink") {
+        inkSequence += 1;
+        sequence = inkSequence;
+      }
+
+      entries.push({
+        id: `${pageIndex}-${entry.type}-${index}`,
+        page: pageIndex + 1,
+        type: entry.type,
+        preview: entry.preview,
+        searchText: entry.searchText,
+        sequence,
+      });
+    });
+  }
+
+  return entries;
+}
+
+function sanitizeDownloadFileName(name: string): string {
+  return name
+    .replace(/\.pdf$/i, "")
+    .replace(/[\/\\:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^[.\s]+|[.\s]+$/g, "");
+}
+
+function downloadTextFile(content: string, fileName: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagColors = {}, onPageJump, annotationsRefreshKey = 0 }: MetaPanelProps) {
   const { t } = useI18n();
   const feedback = useFeedback();
@@ -99,6 +220,9 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   // ── Annotations list state ───────────────────────────────────────────────────
   const [pdfAnnotations, setPdfAnnotations] = useState<SavedPdfAnnotationsDocument | null>(null);
   const [isLoadingAnnotations, setIsLoadingAnnotations] = useState(false);
+  const [annotationFilter, setAnnotationFilter] = useState<AnnotationFilter>("all");
+  const [annotationSearchQuery, setAnnotationSearchQuery] = useState("");
+  const [isExportingAnnotations, setIsExportingAnnotations] = useState(false);
   const hasLoadedAnnotationsRef = useRef(false);
   const citationFormatLabel = (format: CitationFormat) => {
     if (format === "ris") {
@@ -160,6 +284,11 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
     setPdfAnnotations(null);
     hasLoadedAnnotationsRef.current = false;
   }, [selectedItem?.attachments?.[0]?.path]);
+
+  useEffect(() => {
+    setAnnotationFilter("all");
+    setAnnotationSearchQuery("");
+  }, [selectedItem?.id]);
 
   // Load note when selection changes
   useEffect(() => {
@@ -315,6 +444,82 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
       const tags = editFormData.tags || [];
       if (tags.length > 0) removeTag(tags[tags.length - 1]);
     }
+  };
+
+  const annotationEntries = flattenPdfAnnotations(pdfAnnotations);
+  const annotationSearchTerm = annotationSearchQuery.trim().toLowerCase();
+  const filteredAnnotationEntries = annotationEntries.filter((entry) => {
+    if (annotationFilter !== "all" && entry.type !== annotationFilter) {
+      return false;
+    }
+
+    if (annotationSearchTerm) {
+      return entry.type === "text" && entry.searchText.includes(annotationSearchTerm);
+    }
+
+    return true;
+  });
+  const hasAnnotations = annotationEntries.length > 0;
+  const hasActiveAnnotationFilters = annotationFilter !== "all" || annotationSearchTerm.length > 0;
+
+  const handleExportAnnotations = async () => {
+    if (!selectedItem) return;
+
+    setIsExportingAnnotations(true);
+    const itemLabel = selectedItem.title || selectedItem.attachments?.[0]?.name || t("metaPanel.untitled");
+
+    try {
+      const markdown = await invoke<string>("generate_item_annotations_markdown", {
+        itemId: selectedItem.id,
+      });
+
+      if (!markdown.trim()) {
+        feedback.info({
+          title: t("feedback.meta.annotationsEmpty.title"),
+          description: t("feedback.meta.annotationsEmpty.description"),
+        });
+        return;
+      }
+
+      const baseFileName = sanitizeDownloadFileName(
+        selectedItem.title
+          || selectedItem.attachments?.[0]?.name
+          || selectedItem.id.split("/").pop()
+          || t("metaPanel.annotations.exportFallbackFileName"),
+      ) || t("metaPanel.annotations.exportFallbackFileName");
+
+      downloadTextFile(markdown, `${baseFileName}.md`, "text/markdown;charset=utf-8");
+      feedback.success({
+        title: t("feedback.meta.annotationsExportSuccess.title"),
+        description: t("feedback.meta.annotationsExportSuccess.description", { title: itemLabel }),
+      });
+    } catch (error) {
+      console.error("Failed to export annotations markdown", error);
+      feedback.error({
+        title: t("feedback.meta.annotationsExportError.title"),
+        description: t("feedback.meta.annotationsExportError.description"),
+      });
+    } finally {
+      setIsExportingAnnotations(false);
+    }
+  };
+
+  const annotationEntryTitle = (entry: AnnotationEntry) => {
+    if (entry.type === "text") {
+      return t("metaPanel.annotations.items.text");
+    }
+
+    return t(`metaPanel.annotations.items.${entry.type}`, {
+      index: entry.sequence ?? 1,
+    });
+  };
+
+  const annotationEntryPreview = (entry: AnnotationEntry) => {
+    if (entry.type === "text") {
+      return entry.preview;
+    }
+
+    return t(`metaPanel.annotations.previews.${entry.type}`);
   };
 
   return (
@@ -613,70 +818,110 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
 
             {/* ── Annotations section ─────────────────────────────────────── */}
             <div className="border-t border-zinc-100 pt-5 space-y-3">
-              <div className="flex items-center gap-1.5">
-                <Highlighter size={14} className="text-zinc-400" />
-                 <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t("metaPanel.annotations.title")}</span>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <Highlighter size={14} className="text-zinc-400" />
+                  <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t("metaPanel.annotations.title")}</span>
+                </div>
+                <button
+                  onClick={handleExportAnnotations}
+                  disabled={!hasAnnotations || isExportingAnnotations}
+                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-40"
+                  title={t("metaPanel.annotations.export")}
+                >
+                  {isExportingAnnotations ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                  {t("metaPanel.annotations.export")}
+                </button>
               </div>
               
-                {isLoadingAnnotations && !pdfAnnotations ? (
-                  <div className="py-4 text-center text-xs text-zinc-400 animate-pulse">{t("metaPanel.annotations.loading")}</div>
-              ) : !pdfAnnotations || Object.keys(pdfAnnotations.pages).length === 0 || !Object.values(pdfAnnotations.pages).some(p => (p.textAnnotations?.length ?? 0) > 0 || (p.paths?.length ?? 0) > 0) ? (
-                 <div className="py-4 text-center text-xs text-zinc-400 bg-zinc-50 rounded-lg border border-dashed border-zinc-200">
-                    {t("metaPanel.annotations.empty")}
-                 </div>
+              {isLoadingAnnotations && !pdfAnnotations ? (
+                <div className="py-4 text-center text-xs text-zinc-400 animate-pulse">{t("metaPanel.annotations.loading")}</div>
+              ) : !hasAnnotations ? (
+                <div className="py-4 text-center text-xs text-zinc-400 bg-zinc-50 rounded-lg border border-dashed border-zinc-200">
+                  {t("metaPanel.annotations.empty")}
+                </div>
               ) : (
                 <div className="space-y-3">
-                  {Object.entries(pdfAnnotations.pages)
-                    .sort(([a], [b]) => parseInt(a, 10) - parseInt(b, 10))
-                    .map(([pageKey, pageData]) => {
-                      const pageIdx = parseInt(pageKey, 10);
-                      const displayPage = pageIdx + 1;
-                      const textAnnotations = pageData.textAnnotations ?? [];
-                      const paths = pageData.paths ?? [];
-                      
-                      const hasItems = textAnnotations.length > 0 || paths.length > 0;
-                      if (!hasItems) return null;
+                  <div className="space-y-2 rounded-xl border border-zinc-200 bg-zinc-50/60 p-3">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {ANNOTATION_FILTERS.map((filter) => (
+                        <button
+                          key={filter.id}
+                          onClick={() => setAnnotationFilter(filter.id)}
+                          className={[
+                            "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                            annotationFilter === filter.id
+                              ? "border-indigo-600 bg-indigo-600 text-white"
+                              : "border-zinc-200 bg-white text-zinc-500 hover:border-indigo-300 hover:text-indigo-600",
+                          ].join(" ")}
+                        >
+                          {t(filter.labelKey)}
+                        </button>
+                      ))}
+                    </div>
 
-                      // Sort text annotations top to bottom
-                      const sortedTextAnns = [...textAnnotations].sort((a, b) => a.y - b.y);
+                    <div className="flex items-center gap-2">
+                      <div className="relative min-w-0 flex-1">
+                        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                        <input
+                          type="text"
+                          value={annotationSearchQuery}
+                          onChange={(event) => setAnnotationSearchQuery(event.target.value)}
+                          placeholder={t("metaPanel.annotations.searchPlaceholder")}
+                          className="w-full rounded-lg border border-transparent bg-white py-2 pl-9 pr-3 text-sm text-zinc-700 outline-none transition-colors focus:border-indigo-300 focus:ring-2 focus:ring-indigo-400/15"
+                        />
+                      </div>
+                      <span className="shrink-0 text-[11px] font-medium text-zinc-400">
+                        {t("metaPanel.annotations.results", {
+                          visible: filteredAnnotationEntries.length,
+                          total: annotationEntries.length,
+                        })}
+                      </span>
+                    </div>
+                  </div>
 
-                      return (
-                        <div key={pageKey} className="text-sm">
-                          <div 
-                            className="font-semibold text-xs text-indigo-600 mb-1 cursor-pointer hover:underline inline-block"
-                            onClick={() => onPageJump && onPageJump(displayPage)}
-                          >
-                            {t("metaPanel.annotations.page", { page: displayPage })}
-                          </div>
-                          <div className="space-y-2">
-                            {/* Render Text Annotations */}
-                            {sortedTextAnns.map((ta, i) => (
-                              <div 
-                                key={`ta-${i}`} 
-                                className="pl-3 border-l-2 border-indigo-200 py-0.5 text-zinc-700 bg-zinc-50/50 rounded-r-md cursor-pointer hover:bg-zinc-100 transition-colors"
-                                onClick={() => onPageJump && onPageJump(displayPage)}
-                              >
-                                {ta.text}
+                  {filteredAnnotationEntries.length === 0 ? (
+                    <div className="py-4 text-center text-xs text-zinc-400 bg-zinc-50 rounded-lg border border-dashed border-zinc-200">
+                      {hasActiveAnnotationFilters
+                        ? t("metaPanel.annotations.emptyFiltered")
+                        : t("metaPanel.annotations.empty")}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {filteredAnnotationEntries.map((entry) => (
+                        <button
+                          key={entry.id}
+                          type="button"
+                          onClick={() => onPageJump && onPageJump(entry.page)}
+                          className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-3 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50/40"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 space-y-1">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600">
+                                  {t("metaPanel.annotations.page", { page: entry.page })}
+                                </span>
+                                <span className={[
+                                  "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                                  entry.type === "text"
+                                    ? "bg-indigo-50 text-indigo-600"
+                                    : entry.type === "highlight"
+                                      ? "bg-amber-50 text-amber-700"
+                                      : "bg-sky-50 text-sky-700",
+                                ].join(" ")}>
+                                  {annotationEntryTitle(entry)}
+                                </span>
                               </div>
-                            ))}
-                            {/* Render Draw/Highlight summaries (if any, keeping it compact) */}
-                            {paths.length > 0 && (
-                               <div 
-                                 className="pl-3 py-0.5 flex items-center gap-2 cursor-pointer hover:opacity-80"
-                                 onClick={() => onPageJump && onPageJump(displayPage)}
-                               >
-                                  <div className="w-4 h-4 rounded bg-yellow-200/50 flex items-center justify-center border border-yellow-300">
-                                    <Highlighter size={10} className="text-yellow-600" />
-                                  </div>
-                                  <span className="text-xs text-zinc-500">{paths.length === 1
-                                    ? t("metaPanel.annotations.actions.one", { count: paths.length })
-                                    : t("metaPanel.annotations.actions.other", { count: paths.length })}</span>
-                               </div>
-                            )}
+                              <p className="text-sm leading-relaxed text-zinc-700">
+                                {annotationEntryPreview(entry)}
+                              </p>
+                            </div>
+                            <span className="text-[10px] text-zinc-400">{entry.type === "text" ? t("metaPanel.annotations.jump") : t("metaPanel.annotations.jumpToPage")}</span>
                           </div>
-                        </div>
-                      );
-                  })}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

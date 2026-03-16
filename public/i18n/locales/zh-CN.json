@@ -159,6 +159,18 @@
       "extractError": {
         "title": "提取批注失败",
         "description": "无法将 PDF 批注追加到笔记中。"
+      },
+      "annotationsExportSuccess": {
+        "title": "批注已导出",
+        "description": "已为 {title} 生成 Markdown 导出文件。"
+      },
+      "annotationsExportError": {
+        "title": "导出批注失败",
+        "description": "无法生成批注 Markdown 导出内容。"
+      },
+      "annotationsEmpty": {
+        "title": "没有可导出的批注",
+        "description": "这篇论文目前还没有已保存的批注。"
       }
     },
     "export": {
@@ -458,7 +470,29 @@
       "title": "PDF 批注",
       "loading": "正在加载批注...",
       "empty": "此 PDF 中没有批注。",
+      "emptyFiltered": "当前筛选条件下没有匹配的批注。",
       "page": "第 {page} 页",
+      "filters": {
+        "all": "全部",
+        "text": "文字",
+        "highlight": "高亮",
+        "ink": "手写"
+      },
+      "searchPlaceholder": "搜索文字批注内容...",
+      "results": "显示 {visible}/{total}",
+      "export": "导出 Markdown",
+      "exportFallbackFileName": "批注",
+      "items": {
+        "text": "文字批注",
+        "highlight": "高亮 #{index}",
+        "ink": "手写 #{index}"
+      },
+      "previews": {
+        "highlight": "自由高亮笔迹",
+        "ink": "自由手写笔迹"
+      },
+      "jump": "跳转",
+      "jumpToPage": "打开页码",
       "actions": {
         "one": "{count} 个绘制/高亮操作",
         "other": "{count} 个绘制/高亮操作"

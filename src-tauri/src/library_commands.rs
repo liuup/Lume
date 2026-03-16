@@ -1243,6 +1243,94 @@ fn now_iso8601() -> String {
     now.as_secs().to_string()
 }
 
+fn find_pdf_attachment_path(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT path FROM attachments WHERE item_id = ?1 AND attachment_type = 'PDF' LIMIT 1",
+        rusqlite::params![item_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| format!("Query PDF attachment failed: {}", e))
+}
+
+fn quote_markdown_block(text: &str) -> String {
+    let mut quoted_lines = Vec::new();
+    for line in text.lines() {
+        if line.is_empty() {
+            quoted_lines.push(">".to_string());
+        } else {
+            quoted_lines.push(format!("> {}", line));
+        }
+    }
+    quoted_lines.join("\n")
+}
+
+fn render_annotations_markdown(document: &SavedPdfAnnotationsDocument) -> String {
+    let mut pages: Vec<(u16, &SavedPdfPageAnnotations)> = document
+        .pages
+        .iter()
+        .filter_map(|(key, value)| key.parse::<u16>().ok().map(|page_idx| (page_idx, value)))
+        .collect();
+    pages.sort_by_key(|(page_idx, _)| *page_idx);
+
+    let mut sections = Vec::new();
+
+    for (page_idx, page_annotations) in pages {
+        let mut blocks = Vec::new();
+
+        let mut text_annotations = page_annotations.text_annotations.clone();
+        text_annotations.sort_by(|a, b| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal));
+
+        for annotation in text_annotations {
+            let text = annotation.text.trim();
+            if text.is_empty() {
+                continue;
+            }
+            blocks.push(quote_markdown_block(text));
+        }
+
+        let highlight_count = page_annotations
+            .paths
+            .iter()
+            .filter(|path| path.tool == "highlight")
+            .count();
+        let ink_count = page_annotations
+            .paths
+            .iter()
+            .filter(|path| path.tool != "highlight")
+            .count();
+
+        if highlight_count > 0 {
+            blocks.push(format!(
+                "- {} highlight {}",
+                highlight_count,
+                if highlight_count == 1 { "stroke" } else { "strokes" }
+            ));
+        }
+
+        if ink_count > 0 {
+            blocks.push(format!(
+                "- {} ink {}",
+                ink_count,
+                if ink_count == 1 { "stroke" } else { "strokes" }
+            ));
+        }
+
+        if !blocks.is_empty() {
+            sections.push(format!(
+                "### Annotations on Page {}\n\n{}",
+                page_idx + 1,
+                blocks.join("\n\n")
+            ));
+        }
+    }
+
+    sections.join("\n\n")
+}
+
 #[tauri::command]
 pub fn get_item_note(
     item_id: String,
@@ -1329,52 +1417,16 @@ pub fn append_annotations_to_note(
 ) -> Result<Option<Note>, String> {
     let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
 
-    // First find the PDF attachment path for this item
-    let pdf_path: Option<String> = conn
-        .query_row(
-            "SELECT path FROM attachments WHERE item_id = ?1 AND attachment_type = 'PDF' LIMIT 1",
-            rusqlite::params![&item_id],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(|e| format!("Query PDF attachment failed: {}", e))?;
+    let pdf_path = find_pdf_attachment_path(&conn, &item_id)?;
 
     let Some(path_str) = pdf_path else {
         return Ok(None);
     };
 
     let pdf_path = PathBuf::from(&path_str);
-    let mut extracted_text = String::new();
-
-    if let Some(document) = read_annotation_sidecar(&pdf_path) {
-        // Collect pages sorted by their numeric page index
-        let mut pages: Vec<(u16, &SavedPdfPageAnnotations)> = document.pages.iter()
-            .filter_map(|(k, v)| k.parse::<u16>().ok().map(|idx| (idx, v)))
-            .collect();
-        pages.sort_by_key(|(idx, _)| *idx);
-
-        for (page_idx, page_anns) in pages {
-            let mut page_text = String::new();
-            
-            // Collect text annotations for the page, sorting top to bottom
-            let mut text_anns = page_anns.text_annotations.clone();
-            text_anns.sort_by(|a, b| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal));
-            
-            for ann in text_anns {
-                let txt = ann.text.trim();
-                if !txt.is_empty() {
-                    page_text.push_str("> ");
-                    page_text.push_str(&txt.replace("\n", "\n> "));
-                    page_text.push_str("\n\n");
-                }
-            }
-
-            if !page_text.is_empty() {
-                extracted_text.push_str(&format!("### Annotations on Page {}\n\n", page_idx + 1));
-                extracted_text.push_str(&page_text);
-            }
-        }
-    }
+    let extracted_text = read_annotation_sidecar(&pdf_path)
+        .map(|document| render_annotations_markdown(&document))
+        .unwrap_or_default();
 
     if extracted_text.is_empty() {
         return Ok(None);
@@ -1408,6 +1460,23 @@ pub fn append_annotations_to_note(
 
     let updated_note = upsert_item_note(item_id, new_content, state)?;
     Ok(Some(updated_note))
+}
+
+#[tauri::command]
+pub fn generate_item_annotations_markdown(
+    item_id: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<String, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    let pdf_path = find_pdf_attachment_path(&conn, &item_id)?;
+    drop(conn);
+
+    let Some(path_str) = pdf_path else {
+        return Err("No PDF attachment found for this item".to_string());
+    };
+
+    let document = read_annotation_sidecar(&PathBuf::from(&path_str)).unwrap_or_default();
+    Ok(render_annotations_markdown(&document))
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2052,4 +2121,112 @@ pub fn save_setting(
     .map_err(|e| format!("Failed to save setting: {}", e))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render_annotations_markdown;
+    use crate::models::{
+        SavedAnnotationPath, SavedAnnotationPoint, SavedPdfAnnotationsDocument, SavedPdfPageAnnotations,
+        SavedTextAnnotation,
+    };
+    use std::collections::HashMap;
+
+    fn text_annotation(y: f32, text: &str) -> SavedTextAnnotation {
+        SavedTextAnnotation {
+            x: 24.0,
+            y,
+            text: text.to_string(),
+            font_size: 13.0,
+        }
+    }
+
+    fn path_annotation(tool: &str, y: f64) -> SavedAnnotationPath {
+        SavedAnnotationPath {
+            tool: tool.to_string(),
+            points: vec![
+                SavedAnnotationPoint { x: 10.0, y },
+                SavedAnnotationPoint { x: 20.0, y: y + 3.0 },
+            ],
+        }
+    }
+
+    #[test]
+    fn render_annotations_markdown_returns_empty_for_empty_document() {
+        let document = SavedPdfAnnotationsDocument::default();
+        assert_eq!(render_annotations_markdown(&document), "");
+    }
+
+    #[test]
+    fn render_annotations_markdown_sorts_pages_and_text_annotations() {
+        let mut pages = HashMap::new();
+        pages.insert(
+            "1".to_string(),
+            SavedPdfPageAnnotations {
+                paths: vec![],
+                text_annotations: vec![
+                    text_annotation(80.0, "Later note"),
+                    text_annotation(20.0, "Earlier note\nSecond line"),
+                ],
+            },
+        );
+        pages.insert(
+            "0".to_string(),
+            SavedPdfPageAnnotations {
+                paths: vec![],
+                text_annotations: vec![text_annotation(12.0, "Intro quote")],
+            },
+        );
+
+        let output = render_annotations_markdown(&SavedPdfAnnotationsDocument { version: 1, pages });
+
+        let expected = "### Annotations on Page 1\n\n> Intro quote\n\n### Annotations on Page 2\n\n> Earlier note\n> Second line\n\n> Later note";
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn render_annotations_markdown_includes_highlight_and_ink_summaries() {
+        let mut pages = HashMap::new();
+        pages.insert(
+            "2".to_string(),
+            SavedPdfPageAnnotations {
+                paths: vec![
+                    path_annotation("highlight", 8.0),
+                    path_annotation("highlight", 30.0),
+                    path_annotation("draw", 42.0),
+                ],
+                text_annotations: vec![text_annotation(14.0, "Key takeaway")],
+            },
+        );
+
+        let output = render_annotations_markdown(&SavedPdfAnnotationsDocument { version: 1, pages });
+
+        let expected = "### Annotations on Page 3\n\n> Key takeaway\n\n- 2 highlight strokes\n\n- 1 ink stroke";
+        assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn render_annotations_markdown_skips_empty_pages_and_is_stable_across_pages() {
+        let mut pages = HashMap::new();
+        pages.insert("4".to_string(), SavedPdfPageAnnotations::default());
+        pages.insert(
+            "1".to_string(),
+            SavedPdfPageAnnotations {
+                paths: vec![path_annotation("draw", 12.0)],
+                text_annotations: vec![],
+            },
+        );
+        pages.insert(
+            "3".to_string(),
+            SavedPdfPageAnnotations {
+                paths: vec![],
+                text_annotations: vec![text_annotation(16.0, "Final page note")],
+            },
+        );
+
+        let output = render_annotations_markdown(&SavedPdfAnnotationsDocument { version: 1, pages });
+
+        let expected = "### Annotations on Page 2\n\n- 1 ink stroke\n\n### Annotations on Page 4\n\n> Final page note";
+        assert_eq!(output, expected);
+    }
 }
