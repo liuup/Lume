@@ -1,15 +1,37 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Download, FilePenLine, FileText, FileUp, Globe, Hash, Loader2, Search, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, FilePenLine, FileText, FileUp, Globe, Hash, Loader2, Search, Trash2 } from "lucide-react";
 import { FolderNode, LibraryItem } from "../../types";
 import { ExportModal } from "./ExportModal";
 import { useI18n } from "../../hooks/useI18n";
 
-// ─── Search field types ──────────────────────────────────────────────────────
+type SortColumn = "title" | "authors" | "year" | "publication" | "dateAdded";
+type SortDirection = "asc" | "desc";
+type ColumnWidthMap = Record<SortColumn, number>;
 
-type SearchField = "all" | "title" | "authors" | "year" | "doi" | "arxiv";
-
-const SEARCH_FIELDS: SearchField[] = ["all", "title", "authors", "year", "doi", "arxiv"];
+const COLUMN_WIDTH_STORAGE_KEY = "lume.library.column-widths";
+const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
+  title: 260,
+  authors: 150,
+  year: 72,
+  publication: 170,
+  dateAdded: 116,
+};
+const MIN_COLUMN_WIDTHS: ColumnWidthMap = {
+  title: 180,
+  authors: 110,
+  year: 56,
+  publication: 120,
+  dateAdded: 96,
+};
+const MAX_COLUMN_WIDTHS: ColumnWidthMap = {
+  title: 560,
+  authors: 360,
+  year: 120,
+  publication: 420,
+  dateAdded: 180,
+};
+const COLUMN_ORDER: SortColumn[] = ["title", "authors", "year", "publication", "dateAdded"];
 
 // ─── Highlight utility ──────────────────────────────────────────────────────
 
@@ -26,6 +48,43 @@ function highlightText(text: string, query: string): React.ReactNode {
       {highlightText(text.slice(idx + query.length), query)}
     </>
   );
+}
+
+function formatDateLabel(value: string) {
+  const numeric = Number(value);
+  const asDate = !Number.isNaN(numeric) && numeric > 0
+    ? new Date(numeric * 1000)
+    : new Date(value);
+
+  if (Number.isNaN(asDate.getTime())) {
+    return value || "—";
+  }
+
+  return asDate.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function clampColumnWidth(column: SortColumn, width: number) {
+  return Math.max(MIN_COLUMN_WIDTHS[column], Math.min(MAX_COLUMN_WIDTHS[column], Math.round(width)));
+}
+
+function normalizeColumnWidths(value: unknown): ColumnWidthMap {
+  const fallback = { ...DEFAULT_COLUMN_WIDTHS };
+  if (!value || typeof value !== "object") {
+    return fallback;
+  }
+
+  const next = { ...fallback };
+  for (const column of COLUMN_ORDER) {
+    const raw = (value as Record<string, unknown>)[column];
+    if (typeof raw === "number" && Number.isFinite(raw)) {
+      next[column] = clampColumnWidth(column, raw);
+    }
+  }
+  return next;
 }
 
 interface LibraryViewProps {
@@ -61,8 +120,21 @@ export function LibraryView({
   const { t } = useI18n();
   // Search state
   const [query, setQuery]             = useState("");
-  const [searchField, setSearchField] = useState<SearchField>("all");
   const [yearFilter, setYearFilter]   = useState("");
+  const [sortColumn, setSortColumn] = useState<SortColumn>("dateAdded");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => {
+    if (typeof window === "undefined") {
+      return DEFAULT_COLUMN_WIDTHS;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(COLUMN_WIDTH_STORAGE_KEY);
+      return raw ? normalizeColumnWidths(JSON.parse(raw)) : DEFAULT_COLUMN_WIDTHS;
+    } catch {
+      return DEFAULT_COLUMN_WIDTHS;
+    }
+  });
   const [globalResults, setGlobalResults] = useState<LibraryItem[]>([]);
   const [isSearching, setIsSearching]     = useState(false);
 
@@ -74,6 +146,7 @@ export function LibraryView({
   const [tagEditorValue, setTagEditorValue] = useState("");
   const [tagEditorTags, setTagEditorTags] = useState<string[]>([]);
   const debounceRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
 
   // ── Folder tree helpers ──────────────────────────────────────────────────
 
@@ -107,7 +180,7 @@ export function LibraryView({
   const isGlobalSearch = query.trim().length > 0 || yearFilter.trim().length > 0 || !!tagFilter;
 
   const runGlobalSearch = useCallback(
-    (q: string, field: SearchField, year: string, sidebarTag: string | null) => {
+    (q: string, year: string, sidebarTag: string | null) => {
       if (!q.trim() && !year.trim() && !sidebarTag) {
         setGlobalResults([]);
         setIsSearching(false);
@@ -116,7 +189,7 @@ export function LibraryView({
       setIsSearching(true);
       const tagFilters = sidebarTag ? [sidebarTag] : [];
       invoke<LibraryItem[]>("search_library", {
-        params: { query: q.trim(), field, year_filter: year.trim() || null, tag_filters: tagFilters },
+        params: { query: q.trim(), field: "all", year_filter: year.trim() || null, tag_filters: tagFilters },
       })
         .then(results => { setGlobalResults(results); setIsSearching(false); })
         .catch(err   => { console.error("search_library error:", err); setIsSearching(false); });
@@ -127,16 +200,85 @@ export function LibraryView({
   // Debounced search trigger — re-runs on any filter change, including sidebar tag
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => runGlobalSearch(query, searchField, yearFilter, tagFilter), 280);
+    debounceRef.current = setTimeout(() => runGlobalSearch(query, yearFilter, tagFilter), 280);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [query, searchField, yearFilter, tagFilter, runGlobalSearch]);
+  }, [query, yearFilter, tagFilter, runGlobalSearch]);
 
   // Clear results when all inputs are empty
   useEffect(() => {
     if (!query.trim() && !yearFilter.trim() && !tagFilter) setGlobalResults([]);
   }, [query, yearFilter, tagFilter]);
 
-  const displayItems = isGlobalSearch ? globalResults : folderItems;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(COLUMN_WIDTH_STORAGE_KEY, JSON.stringify(columnWidths));
+  }, [columnWidths]);
+
+  useEffect(() => {
+    return () => {
+      resizeCleanupRef.current?.();
+    };
+  }, []);
+
+  const displayItems = useMemo(() => {
+    const sourceItems = isGlobalSearch ? globalResults : folderItems;
+    const items = [...sourceItems];
+    const getTimestamp = (value: string) => {
+      const numeric = Number(value);
+      if (!Number.isNaN(numeric) && numeric > 0) {
+        return numeric;
+      }
+      const parsed = Date.parse(value);
+      return Number.isNaN(parsed) ? 0 : parsed;
+    };
+    const getYear = (item: LibraryItem) => {
+      const numeric = Number(item.year);
+      return Number.isNaN(numeric) ? -1 : numeric;
+    };
+
+    items.sort((left, right) => {
+      let comparison = 0;
+      switch (sortColumn) {
+        case "title":
+          comparison = left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
+          break;
+        case "authors":
+          comparison = left.authors.localeCompare(right.authors, undefined, { sensitivity: "base" });
+          break;
+        case "year":
+          comparison = getYear(left) - getYear(right);
+          break;
+        case "publication":
+          comparison = (left.publication || left.publisher || "").localeCompare(
+            right.publication || right.publisher || "",
+            undefined,
+            { sensitivity: "base" }
+          );
+          break;
+        case "dateAdded":
+        default:
+          comparison = getTimestamp(left.date_added) - getTimestamp(right.date_added);
+          break;
+      }
+
+      if (comparison === 0) {
+        comparison = left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
+      }
+
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+
+    return items;
+  }, [folderItems, globalResults, isGlobalSearch, sortColumn, sortDirection]);
+
+  const gridTemplateColumns = useMemo(
+    () => `${columnWidths.title}px ${columnWidths.authors}px ${columnWidths.year}px ${columnWidths.publication}px ${columnWidths.dateAdded}px`,
+    [columnWidths]
+  );
+  const tableMinWidth = useMemo(
+    () => COLUMN_ORDER.reduce((sum, column) => sum + columnWidths[column], 0) + 48,
+    [columnWidths]
+  );
 
   // ── Context menu listener ────────────────────────────────────────────────
 
@@ -248,13 +390,92 @@ export function LibraryView({
       ? t("libraryView.export.folderScope.one", { count: displayItems.length, folder: folderLabel })
       : t("libraryView.export.folderScope.other", { count: displayItems.length, folder: folderLabel }));
 
-  const searchPlaceholder =
-    searchField === "title"   ? t("libraryView.search.placeholder.title") :
-    searchField === "authors" ? t("libraryView.search.placeholder.authors") :
-    searchField === "year"    ? t("libraryView.search.placeholder.year") :
-    searchField === "doi"     ? t("libraryView.search.placeholder.doi") :
-    searchField === "arxiv"   ? t("libraryView.search.placeholder.arxiv") :
-                                  t("libraryView.search.placeholder.all");
+  const searchPlaceholder = t("libraryView.search.placeholder.all");
+
+  const toggleSort = (column: SortColumn) => {
+    if (sortColumn === column) {
+      setSortDirection((current) => current === "asc" ? "desc" : "asc");
+      return;
+    }
+
+    setSortColumn(column);
+    setSortDirection(column === "dateAdded" || column === "year" ? "desc" : "asc");
+  };
+
+  const startColumnResize = (column: SortColumn, event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startX = event.clientX;
+    const startWidth = columnWidths[column];
+
+    document.body.style.userSelect = "none";
+    document.body.style.webkitUserSelect = "none";
+    document.body.style.cursor = "col-resize";
+
+    const handlePointerMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      const nextWidth = clampColumnWidth(column, startWidth + delta);
+      setColumnWidths((current) => ({ ...current, [column]: nextWidth }));
+    };
+
+    const cleanup = () => {
+      window.removeEventListener("mousemove", handlePointerMove);
+      window.removeEventListener("mouseup", handlePointerUp);
+      document.body.style.userSelect = "";
+      document.body.style.webkitUserSelect = "";
+      document.body.style.cursor = "";
+      resizeCleanupRef.current = null;
+    };
+
+    const handlePointerUp = () => {
+      cleanup();
+    };
+
+    resizeCleanupRef.current?.();
+    resizeCleanupRef.current = cleanup;
+    window.addEventListener("mousemove", handlePointerMove);
+    window.addEventListener("mouseup", handlePointerUp);
+  };
+
+  const autoFitColumn = useCallback((column: SortColumn) => {
+    if (typeof document === "undefined") return;
+
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    context.font = column === "title" ? "600 14px sans-serif" : "400 14px sans-serif";
+    const labelWidths: Record<SortColumn, string> = {
+      title: t("libraryView.columns.title"),
+      authors: t("libraryView.columns.authors"),
+      year: t("libraryView.columns.year"),
+      publication: t("libraryView.columns.publication"),
+      dateAdded: t("libraryView.columns.dateAdded"),
+    };
+
+    const samples = displayItems.slice(0, 200);
+    let widest = context.measureText(labelWidths[column]).width + 40;
+
+    for (const item of samples) {
+      const cellText = column === "title"
+        ? (item.title || item.attachments[0]?.name || t("libraryView.item.untitled"))
+        : column === "authors"
+          ? (item.authors || "—")
+          : column === "year"
+            ? (item.year || "—")
+            : column === "publication"
+              ? (item.publication || item.publisher || "—")
+              : formatDateLabel(item.date_added);
+
+      widest = Math.max(widest, context.measureText(cellText).width + (column === "title" ? 48 : 28));
+    }
+
+    setColumnWidths((current) => ({
+      ...current,
+      [column]: clampColumnWidth(column, widest),
+    }));
+  }, [displayItems, t]);
 
   return (
     <div className="flex-1 min-w-0 flex flex-col h-full bg-white relative">
@@ -294,23 +515,8 @@ export function LibraryView({
           </button>
         </div>
 
-        {/* Row 2 – field filter pills + year input + scope indicator */}
+        {/* Row 2 – sort + year input + scope indicator */}
         <div className="flex items-center gap-2 px-6 pb-3 flex-wrap min-w-0">
-          {SEARCH_FIELDS.map(fieldId => (
-            <button
-              key={fieldId}
-              onClick={() => setSearchField(fieldId)}
-              className={[
-                "px-3 py-1 rounded-full text-xs font-medium transition-colors border whitespace-nowrap",
-                searchField === fieldId
-                  ? "bg-indigo-600 text-white border-indigo-600 shadow-sm"
-                  : "bg-white text-zinc-500 border-zinc-200 hover:border-indigo-300 hover:text-indigo-600",
-              ].join(" ")}
-            >
-              {t(`libraryView.search.fields.${fieldId}`)}
-            </button>
-          ))}
-
           {/* Year filter */}
           <div className="flex items-center gap-1.5 ml-1">
             <span className="text-xs text-zinc-400">{t("libraryView.search.yearLabel")}</span>
@@ -377,22 +583,32 @@ export function LibraryView({
             )}
           </div>
         ) : (
-          <div className="divide-y divide-zinc-200 border-b border-zinc-200 bg-white">
-            {displayItems.map(item => (
-              <LibraryItemRow
-                key={item.id}
-                item={item}
-                isSelected={selectedItemId === item.id}
-                highlight={isGlobalSearch ? query : ""}
-                onSelect={() => onSelectItem(item.id)}
-                onOpen={() => onOpenItem(item)}
-                onPointerDown={event => onItemPointerDown(item, event)}
-                onContextMenu={event => {
-                  onSelectItem(item.id);
-                  setContextMenu({ item, x: event.clientX, y: event.clientY });
-                }}
-              />
-            ))}
+          <div className="border-b border-zinc-200 bg-white overflow-x-auto">
+            <div style={{ minWidth: tableMinWidth }}>
+              <div className="grid gap-3 border-b border-zinc-200 bg-zinc-50/80 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500" style={{ gridTemplateColumns }}>
+                <SortableHeader label={t("libraryView.columns.title")} active={sortColumn === "title"} direction={sortDirection} onClick={() => toggleSort("title")} onResizeStart={(event) => startColumnResize("title", event)} onAutoFit={() => autoFitColumn("title")} />
+                <SortableHeader label={t("libraryView.columns.authors")} active={sortColumn === "authors"} direction={sortDirection} onClick={() => toggleSort("authors")} onResizeStart={(event) => startColumnResize("authors", event)} onAutoFit={() => autoFitColumn("authors")} />
+                <SortableHeader label={t("libraryView.columns.year")} active={sortColumn === "year"} direction={sortDirection} onClick={() => toggleSort("year")} onResizeStart={(event) => startColumnResize("year", event)} onAutoFit={() => autoFitColumn("year")} />
+                <SortableHeader label={t("libraryView.columns.publication")} active={sortColumn === "publication"} direction={sortDirection} onClick={() => toggleSort("publication")} onResizeStart={(event) => startColumnResize("publication", event)} onAutoFit={() => autoFitColumn("publication")} />
+                <SortableHeader label={t("libraryView.columns.dateAdded")} active={sortColumn === "dateAdded"} direction={sortDirection} onClick={() => toggleSort("dateAdded")} onResizeStart={(event) => startColumnResize("dateAdded", event)} onAutoFit={() => autoFitColumn("dateAdded")} />
+              </div>
+              {displayItems.map(item => (
+                <LibraryItemRow
+                  key={item.id}
+                  item={item}
+                  isSelected={selectedItemId === item.id}
+                  highlight={isGlobalSearch ? query : ""}
+                  gridTemplateColumns={gridTemplateColumns}
+                  onSelect={() => onSelectItem(item.id)}
+                  onOpen={() => onOpenItem(item)}
+                  onPointerDown={event => onItemPointerDown(item, event)}
+                  onContextMenu={event => {
+                    onSelectItem(item.id);
+                    setContextMenu({ item, x: event.clientX, y: event.clientY });
+                  }}
+                />
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -609,6 +825,7 @@ function LibraryItemRow({
   item,
   isSelected,
   highlight,
+  gridTemplateColumns,
   onSelect,
   onOpen,
   onPointerDown,
@@ -617,6 +834,7 @@ function LibraryItemRow({
   item: LibraryItem;
   isSelected: boolean;
   highlight: string;
+  gridTemplateColumns: string;
   onSelect: () => void;
   onOpen: () => void;
   onPointerDown: (event: React.MouseEvent<HTMLDivElement>) => void;
@@ -624,30 +842,80 @@ function LibraryItemRow({
 }) {
   const { t } = useI18n();
   const displayTitle = item.title || item.attachments[0]?.name || t("libraryView.item.untitled");
+  const displayAuthors = item.authors || "—";
+  const displayYear = item.year || "—";
+  const displayPublication = item.publication || item.publisher || "—";
+  const displayDateAdded = formatDateLabel(item.date_added);
 
   return (
     <div
-      className={`library-item-row group flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors select-none ${
+      className={`library-item-row group grid items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors select-none border-b border-zinc-100 ${
         isSelected ? "bg-indigo-50" : "bg-white hover:bg-zinc-50"
       }`}
       data-selected={isSelected ? "true" : "false"}
-      style={{ cursor: "grab" }}
+      style={{ cursor: "grab", gridTemplateColumns }}
       onClick={onSelect}
       onDoubleClick={onOpen}
       onMouseDown={onPointerDown}
       onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu(e); }}
       title={t("libraryView.item.openHint")}
     >
-      <div className={`p-1.5 rounded-lg shrink-0 ${
-        isSelected ? "bg-indigo-100 text-indigo-600" : "bg-zinc-100 text-zinc-500 group-hover:text-indigo-500 transition-colors"
-      }`}>
-        <FileText size={14} />
-      </div>
-
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex items-center gap-2">
+        <div className={`p-1.5 rounded-lg shrink-0 ${
+          isSelected ? "bg-indigo-100 text-indigo-600" : "bg-zinc-100 text-zinc-500 group-hover:text-indigo-500 transition-colors"
+        }`}>
+          <FileText size={14} />
+        </div>
         <h3 className="library-item-title text-sm font-semibold text-zinc-800 truncate group-hover:text-indigo-900 transition-colors">
           {highlight ? highlightText(displayTitle, highlight) : displayTitle}
         </h3>
+      </div>
+
+      <div className="truncate text-sm text-zinc-600">{highlight ? highlightText(displayAuthors, highlight) : displayAuthors}</div>
+      <div className="truncate text-sm text-zinc-500">{displayYear}</div>
+      <div className="truncate text-sm text-zinc-500">{highlight ? highlightText(displayPublication, highlight) : displayPublication}</div>
+      <div className="truncate text-sm text-zinc-500">{displayDateAdded}</div>
+    </div>
+  );
+}
+
+function SortableHeader({
+  label,
+  active,
+  direction,
+  onClick,
+  onResizeStart,
+  onAutoFit,
+}: {
+  label: string;
+  active: boolean;
+  direction: SortDirection;
+  onClick: () => void;
+  onResizeStart: (event: React.MouseEvent<HTMLDivElement>) => void;
+  onAutoFit: () => void;
+}) {
+  return (
+    <div className="relative min-w-0">
+      <button
+        type="button"
+        onClick={onClick}
+        className={`flex w-full min-w-0 items-center gap-1 pr-3 text-left transition-colors ${active ? "text-zinc-700" : "text-zinc-500 hover:text-zinc-700"}`}
+      >
+        <span className="truncate">{label}</span>
+        {active ? (
+          direction === "asc" ? <ArrowUp size={12} className="shrink-0" /> : <ArrowDown size={12} className="shrink-0" />
+        ) : null}
+      </button>
+      <div
+        className="absolute right-[-6px] top-1/2 h-6 w-3 -translate-y-1/2 cursor-col-resize"
+        onMouseDown={onResizeStart}
+        onDoubleClick={(event) => {
+          event.stopPropagation();
+          onAutoFit();
+        }}
+        title="Resize column"
+      >
+        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-zinc-200 hover:bg-indigo-400" />
       </div>
     </div>
   );

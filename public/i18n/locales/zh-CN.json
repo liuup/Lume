@@ -288,14 +288,6 @@
   "libraryView": {
     "myLibrary": "我的资料库",
     "search": {
-      "fields": {
-        "all": "全部字段",
-        "title": "标题",
-        "authors": "作者",
-        "year": "年份",
-        "doi": "DOI",
-        "arxiv": "arXiv"
-      },
       "placeholder": {
         "all": "搜索所有字段...",
         "title": "按标题搜索...",
@@ -306,6 +298,24 @@
       },
       "yearLabel": "年份：",
       "clearTag": "清除标签筛选"
+    },
+    "sort": {
+      "label": "排序",
+      "options": {
+        "dateAddedDesc": "最新添加",
+        "dateAddedAsc": "最早添加",
+        "titleAsc": "标题 A-Z",
+        "titleDesc": "标题 Z-A",
+        "yearDesc": "年份新到旧",
+        "yearAsc": "年份旧到新"
+      }
+    },
+    "columns": {
+      "title": "标题",
+      "authors": "作者",
+      "year": "年份",
+      "publication": "出版物",
+      "dateAdded": "添加时间"
     },
     "actions": {
       "export": "导出",

@@ -63,7 +63,7 @@ function App() {
 
   const [scale, setScale] = useState<number>(1.5);
   const [activeTool, setActiveTool] = useState<ToolType>('none');
-  const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
   const [isAiPanelOpen, setIsAiPanelOpen] = useState(true);
   const [rightPanelWidth, setRightPanelWidth] = useState(320);
   const [aiPanelWidth, setAiPanelWidth] = useState(340);

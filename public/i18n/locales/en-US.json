@@ -288,14 +288,6 @@
   "libraryView": {
     "myLibrary": "My Library",
     "search": {
-      "fields": {
-        "all": "All Fields",
-        "title": "Title",
-        "authors": "Authors",
-        "year": "Year",
-        "doi": "DOI",
-        "arxiv": "arXiv"
-      },
       "placeholder": {
         "all": "Search across all fields...",
         "title": "Search by title...",
@@ -306,6 +298,24 @@
       },
       "yearLabel": "Year:",
       "clearTag": "Clear tag filter"
+    },
+    "sort": {
+      "label": "Sort",
+      "options": {
+        "dateAddedDesc": "Newest added",
+        "dateAddedAsc": "Oldest added",
+        "titleAsc": "Title A-Z",
+        "titleDesc": "Title Z-A",
+        "yearDesc": "Year new-old",
+        "yearAsc": "Year old-new"
+      }
+    },
+    "columns": {
+      "title": "Title",
+      "authors": "Authors",
+      "year": "Year",
+      "publication": "Publication",
+      "dateAdded": "Date Added"
     },
     "actions": {
       "export": "Export",
