@@ -105,14 +105,33 @@ export function useLibrary() {
 
   function replacePathPrefix(path: string, oldPrefix: string, newPrefix: string) {
     if (path === oldPrefix) return newPrefix;
-    if (path.startsWith(`${oldPrefix}/`)) {
+    if (pathHasPrefix(path, oldPrefix)) {
       return `${newPrefix}${path.slice(oldPrefix.length)}`;
     }
     return path;
   }
 
+  function pathHasPrefix(path: string, prefix: string) {
+    return (
+      path === prefix ||
+      path.startsWith(`${prefix}/`) ||
+      path.startsWith(`${prefix}\\`)
+    );
+  }
+
+  function pathBaseName(path: string) {
+    return path.split(/[/\\]/).pop() ?? path;
+  }
+
+  function pathDirName(path: string) {
+    const segments = path.split(/[/\\]/);
+    if (segments.length <= 1) return "";
+    const separator = path.includes("\\") ? "\\" : "/";
+    return segments.slice(0, -1).join(separator);
+  }
+
   function createLibraryItem(path: string): LibraryItem {
-    const fileName = path.split("/").pop() ?? path;
+    const fileName = pathBaseName(path);
     const baseName = fileName.replace(/\.pdf$/i, "");
     return {
       id: path,
@@ -380,7 +399,7 @@ export function useLibrary() {
       setSelectedItemId(prev => prev === item.id ? null : prev);
       feedback.success({
         title: t("feedback.library.item.deleteSuccess.title"),
-        description: t("feedback.library.item.deleteSuccess.description", { title: item.title || item.attachments[0]?.name || item.id.split("/").pop() || item.id }),
+        description: t("feedback.library.item.deleteSuccess.description", { title: item.title || item.attachments[0]?.name || pathBaseName(item.id) || item.id }),
       });
     } catch (err) {
       console.error("Failed to delete Item", err);
@@ -441,7 +460,7 @@ export function useLibrary() {
       const refreshedTree = await refreshLibrary(nextSelectedFolderId);
 
       setOpenTabs(prev => prev.map(tab => {
-        if (tab.id !== folder.path && !tab.id.startsWith(`${folder.path}/`)) {
+        if (!pathHasPrefix(tab.id, folder.path)) {
           return tab;
         }
         const renamedItemPath = replacePathPrefix(tab.item.attachments[0]?.path || tab.item.id, folder.path, renamedPath);
@@ -472,12 +491,12 @@ export function useLibrary() {
       setIsLoading(true);
       await invoke("delete_library_folder", { path: folder.path });
 
-      const parentFolderId = folder.path.split("/").slice(0, -1).join("/") || DEFAULT_FOLDER.id;
+      const parentFolderId = pathDirName(folder.path) || DEFAULT_FOLDER.id;
       await refreshLibrary(parentFolderId);
 
       setOpenTabs(prev => {
-        const next = prev.filter(tab => !(tab.id === folder.path || tab.id.startsWith(`${folder.path}/`)));
-        if (activeTabId && (activeTabId === folder.path || activeTabId.startsWith(`${folder.path}/`))) {
+        const next = prev.filter(tab => !pathHasPrefix(tab.id, folder.path));
+        if (activeTabId && pathHasPrefix(activeTabId, folder.path)) {
           const nextActiveId = next.length > 0 ? next[next.length - 1].id : "library";
           setActiveTabId(nextActiveId);
           setSelectedItemId(nextActiveId !== "library" ? nextActiveId : null);
@@ -486,7 +505,7 @@ export function useLibrary() {
       });
 
       setSelectedFolderId(parentFolderId);
-      setSelectedItemId(prev => prev && (prev === folder.path || prev.startsWith(`${folder.path}/`)) ? null : prev);
+      setSelectedItemId(prev => (prev && pathHasPrefix(prev, folder.path)) ? null : prev);
       feedback.success({
         title: t("feedback.library.folder.deleteSuccess.title"),
         description: t("feedback.library.folder.deleteSuccess.description", { name: folder.name }),
@@ -584,5 +603,5 @@ export function useLibrary() {
 }
 
 function trimmedFileName(path: string) {
-  return path.split("/").pop()?.replace(/\.pdf$/i, "") || path;
+  return path.split(/[/\\]/).pop()?.replace(/\.pdf$/i, "") || path;
 }
