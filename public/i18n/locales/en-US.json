@@ -317,6 +317,10 @@
       "publication": "Publication",
       "dateAdded": "Date Added"
     },
+    "columnMenu": {
+      "title": "Visible Columns",
+      "alwaysVisible": "Required"
+    },
     "actions": {
       "export": "Export",
       "exportTitle": "Export references",

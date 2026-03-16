@@ -8,8 +8,10 @@ import { useI18n } from "../../hooks/useI18n";
 type SortColumn = "title" | "authors" | "year" | "publication" | "dateAdded";
 type SortDirection = "asc" | "desc";
 type ColumnWidthMap = Record<SortColumn, number>;
+type ColumnVisibilityMap = Record<SortColumn, boolean>;
 
 const COLUMN_WIDTH_STORAGE_KEY = "lume.library.column-widths";
+const COLUMN_VISIBILITY_STORAGE_KEY = "lume.library.column-visibility";
 const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   title: 260,
   authors: 150,
@@ -32,6 +34,13 @@ const MAX_COLUMN_WIDTHS: ColumnWidthMap = {
   dateAdded: 180,
 };
 const COLUMN_ORDER: SortColumn[] = ["title", "authors", "year", "publication", "dateAdded"];
+const DEFAULT_COLUMN_VISIBILITY: ColumnVisibilityMap = {
+  title: true,
+  authors: true,
+  year: true,
+  publication: true,
+  dateAdded: true,
+};
 
 // ─── Highlight utility ──────────────────────────────────────────────────────
 
@@ -87,6 +96,29 @@ function normalizeColumnWidths(value: unknown): ColumnWidthMap {
   return next;
 }
 
+function normalizeColumnVisibility(value: unknown): ColumnVisibilityMap {
+  const fallback = { ...DEFAULT_COLUMN_VISIBILITY };
+  if (!value || typeof value !== "object") {
+    return fallback;
+  }
+
+  const next = { ...fallback };
+  for (const column of COLUMN_ORDER) {
+    if (column === "title") {
+      next[column] = true;
+      continue;
+    }
+
+    const raw = (value as Record<string, unknown>)[column];
+    if (typeof raw === "boolean") {
+      next[column] = raw;
+    }
+  }
+
+  next.title = true;
+  return next;
+}
+
 interface LibraryViewProps {
   folderTree: FolderNode[];
   selectedFolderId: string;
@@ -135,11 +167,24 @@ export function LibraryView({
       return DEFAULT_COLUMN_WIDTHS;
     }
   });
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityMap>(() => {
+    if (typeof window === "undefined") {
+      return DEFAULT_COLUMN_VISIBILITY;
+    }
+
+    try {
+      const raw = window.localStorage.getItem(COLUMN_VISIBILITY_STORAGE_KEY);
+      return raw ? normalizeColumnVisibility(JSON.parse(raw)) : DEFAULT_COLUMN_VISIBILITY;
+    } catch {
+      return DEFAULT_COLUMN_VISIBILITY;
+    }
+  });
   const [globalResults, setGlobalResults] = useState<LibraryItem[]>([]);
   const [isSearching, setIsSearching]     = useState(false);
 
   // UI state
   const [contextMenu, setContextMenu] = useState<{ item: LibraryItem; x: number; y: number } | null>(null);
+  const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null);
   const [renameTarget, setRenameTarget] = useState<LibraryItem | null>(null);
   const [renameValue, setRenameValue]   = useState("");  const [showExport, setShowExport] = useState(false);  const renameInputRef = useRef<HTMLInputElement>(null);
   const [tagEditorTarget, setTagEditorTarget] = useState<LibraryItem | null>(null);
@@ -147,6 +192,8 @@ export function LibraryView({
   const [tagEditorTags, setTagEditorTags] = useState<string[]>([]);
   const debounceRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
+  const listViewportRef = useRef<HTMLDivElement>(null);
+  const [listViewportWidth, setListViewportWidth] = useState(0);
 
   // ── Folder tree helpers ──────────────────────────────────────────────────
 
@@ -215,9 +262,33 @@ export function LibraryView({
   }, [columnWidths]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      COLUMN_VISIBILITY_STORAGE_KEY,
+      JSON.stringify({ ...columnVisibility, title: true })
+    );
+  }, [columnVisibility]);
+
+  useEffect(() => {
     return () => {
       resizeCleanupRef.current?.();
     };
+  }, []);
+
+  useEffect(() => {
+    const element = listViewportRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      setListViewportWidth(entry.contentRect.width);
+    });
+
+    observer.observe(element);
+    setListViewportWidth(element.getBoundingClientRect().width);
+
+    return () => observer.disconnect();
   }, []);
 
   const displayItems = useMemo(() => {
@@ -271,13 +342,36 @@ export function LibraryView({
     return items;
   }, [folderItems, globalResults, isGlobalSearch, sortColumn, sortDirection]);
 
-  const gridTemplateColumns = useMemo(
-    () => `${columnWidths.title}px ${columnWidths.authors}px ${columnWidths.year}px ${columnWidths.publication}px ${columnWidths.dateAdded}px`,
-    [columnWidths]
+  const responsiveColumns = useMemo(() => {
+    if (listViewportWidth <= 0) {
+      return COLUMN_ORDER;
+    }
+
+    if (listViewportWidth < 720) {
+      return ["title", "year"] as SortColumn[];
+    }
+
+    if (listViewportWidth < 900) {
+      return ["title", "authors", "year"] as SortColumn[];
+    }
+
+    if (listViewportWidth < 1080) {
+      return ["title", "authors", "year", "publication"] as SortColumn[];
+    }
+
+    return COLUMN_ORDER;
+  }, [listViewportWidth]);
+  const visibleColumns = useMemo(
+    () => responsiveColumns.filter((column) => column === "title" || columnVisibility[column]),
+    [columnVisibility, responsiveColumns]
   );
-  const tableMinWidth = useMemo(
-    () => COLUMN_ORDER.reduce((sum, column) => sum + columnWidths[column], 0) + 48,
-    [columnWidths]
+  const visibleGridTemplateColumns = useMemo(
+    () => visibleColumns.map((column) => `${columnWidths[column]}px`).join(" "),
+    [columnWidths, visibleColumns]
+  );
+  const visibleTableMinWidth = useMemo(
+    () => visibleColumns.reduce((sum, column) => sum + columnWidths[column], 0) + 32,
+    [columnWidths, visibleColumns]
   );
 
   // ── Context menu listener ────────────────────────────────────────────────
@@ -297,6 +391,22 @@ export function LibraryView({
       window.removeEventListener("keydown", onEsc);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!headerMenu) return;
+    const closeMenu = () => setHeaderMenu(null);
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape") setHeaderMenu(null); };
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("keydown", onEsc);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("keydown", onEsc);
+    };
+  }, [headerMenu]);
 
   // ── Rename dialog handler ────────────────────────────────────────────────
 
@@ -330,6 +440,8 @@ export function LibraryView({
 
   const menuX = contextMenu ? Math.min(contextMenu.x, window.innerWidth  - 184) : 0;
   const menuY = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 56)  : 0;
+  const headerMenuX = headerMenu ? Math.min(headerMenu.x, window.innerWidth - 220) : 0;
+  const headerMenuY = headerMenu ? Math.min(headerMenu.y, window.innerHeight - 240) : 0;
 
   const submitRename = async () => {
     if (!renameTarget) return;
@@ -400,6 +512,11 @@ export function LibraryView({
 
     setSortColumn(column);
     setSortDirection(column === "dateAdded" || column === "year" ? "desc" : "asc");
+  };
+
+  const toggleColumnVisibility = (column: SortColumn) => {
+    if (column === "title") return;
+    setColumnVisibility((current) => ({ ...current, [column]: !current[column] }));
   };
 
   const startColumnResize = (column: SortColumn, event: React.MouseEvent<HTMLDivElement>) => {
@@ -484,8 +601,8 @@ export function LibraryView({
       <div className="border-b border-zinc-200 flex flex-col shrink-0 bg-white/80 backdrop-blur-md sticky top-0 z-10 min-w-0">
 
         {/* Row 1 – search input + add button */}
-        <div className="h-14 flex items-center gap-3 px-6">
-          <div className="relative min-w-0 flex-1 max-w-2xl">
+        <div className="flex flex-wrap items-center gap-3 px-4 md:px-6 py-3">
+          <div className="relative min-w-0 flex-[1_1_320px] max-w-2xl">
             {isSearching
               ? <Loader2 className="absolute left-3 top-1/2 -translate-y-1/2 text-indigo-400 animate-spin" size={16} />
               : <Search  className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
@@ -500,23 +617,23 @@ export function LibraryView({
           </div>
           <button
             onClick={() => setShowExport(true)}
-            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
+            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
             title={t("libraryView.actions.exportTitle")}
           >
             <Download size={15} />
-            <span>{t("libraryView.actions.export")}</span>
+            <span className="hidden min-[900px]:inline">{t("libraryView.actions.export")}</span>
           </button>
           <button
             onClick={onAddItem}
-            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
+            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
           >
             <FileUp size={15} />
-            <span>{t("libraryView.actions.addItem")}</span>
+            <span className="hidden min-[900px]:inline">{t("libraryView.actions.addItem")}</span>
           </button>
         </div>
 
         {/* Row 2 – sort + year input + scope indicator */}
-        <div className="flex items-center gap-2 px-6 pb-3 flex-wrap min-w-0">
+        <div className="flex items-center gap-2 px-4 md:px-6 pb-3 flex-wrap min-w-0">
           {/* Year filter */}
           <div className="flex items-center gap-1.5 ml-1">
             <span className="text-xs text-zinc-400">{t("libraryView.search.yearLabel")}</span>
@@ -546,7 +663,7 @@ export function LibraryView({
           )}
 
           {/* Right-aligned scope indicator */}
-          <div className="ml-auto flex items-center gap-1.5 text-xs text-zinc-400 shrink-0">
+          <div className="w-full min-[980px]:w-auto min-[980px]:ml-auto flex items-center gap-1.5 text-xs text-zinc-400 shrink-0">
             {isGlobalSearch ? (
               <>
                 <Globe size={13} className="text-indigo-400 shrink-0" />
@@ -567,7 +684,7 @@ export function LibraryView({
       </div>
 
       {/* ── Item list ───────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto">
+      <div ref={listViewportRef} className="flex-1 overflow-y-auto">
         {displayItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-zinc-400 space-y-4 mt-10 px-6">
             <div className="w-16 h-16 bg-zinc-50 rounded-2xl flex items-center justify-center border border-zinc-200/60 shadow-sm">
@@ -584,13 +701,32 @@ export function LibraryView({
           </div>
         ) : (
           <div className="border-b border-zinc-200 bg-white overflow-x-auto">
-            <div style={{ minWidth: tableMinWidth }}>
-              <div className="grid gap-3 border-b border-zinc-200 bg-zinc-50/80 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500" style={{ gridTemplateColumns }}>
-                <SortableHeader label={t("libraryView.columns.title")} active={sortColumn === "title"} direction={sortDirection} onClick={() => toggleSort("title")} onResizeStart={(event) => startColumnResize("title", event)} onAutoFit={() => autoFitColumn("title")} />
-                <SortableHeader label={t("libraryView.columns.authors")} active={sortColumn === "authors"} direction={sortDirection} onClick={() => toggleSort("authors")} onResizeStart={(event) => startColumnResize("authors", event)} onAutoFit={() => autoFitColumn("authors")} />
-                <SortableHeader label={t("libraryView.columns.year")} active={sortColumn === "year"} direction={sortDirection} onClick={() => toggleSort("year")} onResizeStart={(event) => startColumnResize("year", event)} onAutoFit={() => autoFitColumn("year")} />
-                <SortableHeader label={t("libraryView.columns.publication")} active={sortColumn === "publication"} direction={sortDirection} onClick={() => toggleSort("publication")} onResizeStart={(event) => startColumnResize("publication", event)} onAutoFit={() => autoFitColumn("publication")} />
-                <SortableHeader label={t("libraryView.columns.dateAdded")} active={sortColumn === "dateAdded"} direction={sortDirection} onClick={() => toggleSort("dateAdded")} onResizeStart={(event) => startColumnResize("dateAdded", event)} onAutoFit={() => autoFitColumn("dateAdded")} />
+            <div style={{ minWidth: visibleTableMinWidth }}>
+              <div
+                className="grid gap-3 border-b border-zinc-200 bg-zinc-50/80 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500"
+                style={{ gridTemplateColumns: visibleGridTemplateColumns }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setHeaderMenu({ x: event.clientX, y: event.clientY });
+                  setContextMenu(null);
+                }}
+              >
+                {visibleColumns.includes("title") && (
+                  <SortableHeader label={t("libraryView.columns.title")} active={sortColumn === "title"} direction={sortDirection} onClick={() => toggleSort("title")} onResizeStart={(event) => startColumnResize("title", event)} onAutoFit={() => autoFitColumn("title")} />
+                )}
+                {visibleColumns.includes("authors") && (
+                  <SortableHeader label={t("libraryView.columns.authors")} active={sortColumn === "authors"} direction={sortDirection} onClick={() => toggleSort("authors")} onResizeStart={(event) => startColumnResize("authors", event)} onAutoFit={() => autoFitColumn("authors")} />
+                )}
+                {visibleColumns.includes("year") && (
+                  <SortableHeader label={t("libraryView.columns.year")} active={sortColumn === "year"} direction={sortDirection} onClick={() => toggleSort("year")} onResizeStart={(event) => startColumnResize("year", event)} onAutoFit={() => autoFitColumn("year")} />
+                )}
+                {visibleColumns.includes("publication") && (
+                  <SortableHeader label={t("libraryView.columns.publication")} active={sortColumn === "publication"} direction={sortDirection} onClick={() => toggleSort("publication")} onResizeStart={(event) => startColumnResize("publication", event)} onAutoFit={() => autoFitColumn("publication")} />
+                )}
+                {visibleColumns.includes("dateAdded") && (
+                  <SortableHeader label={t("libraryView.columns.dateAdded")} active={sortColumn === "dateAdded"} direction={sortDirection} onClick={() => toggleSort("dateAdded")} onResizeStart={(event) => startColumnResize("dateAdded", event)} onAutoFit={() => autoFitColumn("dateAdded")} />
+                )}
               </div>
               {displayItems.map(item => (
                 <LibraryItemRow
@@ -598,7 +734,8 @@ export function LibraryView({
                   item={item}
                   isSelected={selectedItemId === item.id}
                   highlight={isGlobalSearch ? query : ""}
-                  gridTemplateColumns={gridTemplateColumns}
+                  visibleColumns={visibleColumns}
+                  gridTemplateColumns={visibleGridTemplateColumns}
                   onSelect={() => onSelectItem(item.id)}
                   onOpen={() => onOpenItem(item)}
                   onPointerDown={event => onItemPointerDown(item, event)}
@@ -653,6 +790,49 @@ export function LibraryView({
             <Trash2 size={15} />
             <span>{t("libraryView.context.delete")}</span>
           </button>
+        </div>
+      )}
+
+      {headerMenu && (
+        <div
+          className="fixed z-50 min-w-52 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.14)] animate-popup"
+          style={{ left: headerMenuX, top: headerMenuY }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+            {t("libraryView.columnMenu.title", undefined, "Visible Columns")}
+          </div>
+          {COLUMN_ORDER.map((column) => {
+            const isForced = column === "title";
+            const isChecked = isForced || columnVisibility[column];
+            return (
+              <button
+                key={column}
+                type="button"
+                disabled={isForced}
+                onClick={() => toggleColumnVisibility(column)}
+                className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-left ${
+                  isForced
+                    ? "cursor-not-allowed text-zinc-400"
+                    : "text-zinc-700 hover:bg-zinc-100"
+                }`}
+              >
+                <span className={`flex h-4 w-4 items-center justify-center rounded border text-[11px] ${
+                  isChecked
+                    ? "border-indigo-500 bg-indigo-500 text-white"
+                    : "border-zinc-300 bg-white text-transparent"
+                }`}>
+                  ✓
+                </span>
+                <span className="flex-1 truncate">{t(`libraryView.columns.${column}`)}</span>
+                {isForced ? (
+                  <span className="shrink-0 text-[11px] text-zinc-400">
+                    {t("libraryView.columnMenu.alwaysVisible", undefined, "Required")}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -825,6 +1005,7 @@ function LibraryItemRow({
   item,
   isSelected,
   highlight,
+  visibleColumns,
   gridTemplateColumns,
   onSelect,
   onOpen,
@@ -834,6 +1015,7 @@ function LibraryItemRow({
   item: LibraryItem;
   isSelected: boolean;
   highlight: string;
+  visibleColumns: SortColumn[];
   gridTemplateColumns: string;
   onSelect: () => void;
   onOpen: () => void;
@@ -860,21 +1042,30 @@ function LibraryItemRow({
       onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu(e); }}
       title={t("libraryView.item.openHint")}
     >
-      <div className="min-w-0 flex items-center gap-2">
-        <div className={`p-1.5 rounded-lg shrink-0 ${
-          isSelected ? "bg-indigo-100 text-indigo-600" : "bg-zinc-100 text-zinc-500 group-hover:text-indigo-500 transition-colors"
-        }`}>
-          <FileText size={14} />
+      {visibleColumns.includes("title") && (
+        <div className="min-w-0 flex items-center gap-2">
+          <div className={`p-1.5 rounded-lg shrink-0 ${
+            isSelected ? "bg-indigo-100 text-indigo-600" : "bg-zinc-100 text-zinc-500 group-hover:text-indigo-500 transition-colors"
+          }`}>
+            <FileText size={14} />
+          </div>
+          <h3 className="library-item-title text-sm font-semibold text-zinc-800 truncate group-hover:text-indigo-900 transition-colors">
+            {highlight ? highlightText(displayTitle, highlight) : displayTitle}
+          </h3>
         </div>
-        <h3 className="library-item-title text-sm font-semibold text-zinc-800 truncate group-hover:text-indigo-900 transition-colors">
-          {highlight ? highlightText(displayTitle, highlight) : displayTitle}
-        </h3>
-      </div>
-
-      <div className="truncate text-sm text-zinc-600">{highlight ? highlightText(displayAuthors, highlight) : displayAuthors}</div>
-      <div className="truncate text-sm text-zinc-500">{displayYear}</div>
-      <div className="truncate text-sm text-zinc-500">{highlight ? highlightText(displayPublication, highlight) : displayPublication}</div>
-      <div className="truncate text-sm text-zinc-500">{displayDateAdded}</div>
+      )}
+      {visibleColumns.includes("authors") && (
+        <div className="truncate text-sm text-zinc-600">{highlight ? highlightText(displayAuthors, highlight) : displayAuthors}</div>
+      )}
+      {visibleColumns.includes("year") && (
+        <div className="truncate text-sm text-zinc-500">{displayYear}</div>
+      )}
+      {visibleColumns.includes("publication") && (
+        <div className="truncate text-sm text-zinc-500">{highlight ? highlightText(displayPublication, highlight) : displayPublication}</div>
+      )}
+      {visibleColumns.includes("dateAdded") && (
+        <div className="truncate text-sm text-zinc-500">{displayDateAdded}</div>
+      )}
     </div>
   );
 }

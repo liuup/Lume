@@ -16,6 +16,7 @@ use rusqlite::OptionalExtension;
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 use tauri::Manager;
 
 #[derive(Clone)]
@@ -115,6 +116,25 @@ pub fn sanitize_file_name(name: &str) -> String {
         .join(" ")
         .trim_matches([' ', '.'])
         .to_string()
+}
+
+fn now_unix_timestamp_string() -> String {
+    std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string()
+}
+
+fn file_timestamp_string(path: &Path) -> Option<String> {
+    let metadata = fs::metadata(path).ok()?;
+    let system_time = metadata.created().ok().or_else(|| metadata.modified().ok())?;
+    let timestamp = system_time.duration_since(UNIX_EPOCH).ok()?.as_secs();
+    Some(timestamp.to_string())
+}
+
+fn fallback_item_timestamp(path: &Path) -> String {
+    file_timestamp_string(path).unwrap_or_else(now_unix_timestamp_string)
 }
 
 pub fn is_path_within(base: &Path, candidate: &Path) -> bool {
@@ -325,6 +345,8 @@ pub fn build_library_item(path: &Path) -> LibraryItem {
         attachment_type: "PDF".to_string(),
     };
 
+    let timestamp = fallback_item_timestamp(path);
+
     LibraryItem {
         id: path_str.clone(),
         item_type: "Journal Article".to_string(),
@@ -342,8 +364,8 @@ pub fn build_library_item(path: &Path) -> LibraryItem {
         isbn: String::new(),
         url: String::new(),
         language: String::new(),
-        date_added: String::new(),
-        date_modified: String::new(),
+        date_added: timestamp.clone(),
+        date_modified: timestamp,
         folder_path: String::new(),
         tags: Vec::new(),
         attachments: vec![attachment],
@@ -466,6 +488,17 @@ pub fn fetch_all_items_from_db(conn: &rusqlite::Connection) -> rusqlite::Result<
 }
 
 pub fn sync_item_to_db(conn: &rusqlite::Connection, item: &LibraryItem) -> rusqlite::Result<()> {
+    let date_added = if item.date_added.trim().is_empty() {
+        fallback_item_timestamp(Path::new(&item.id))
+    } else {
+        item.date_added.clone()
+    };
+    let date_modified = if item.date_modified.trim().is_empty() {
+        date_added.clone()
+    } else {
+        item.date_modified.clone()
+    };
+
     conn.execute(
         "INSERT OR IGNORE INTO items (id, item_type, title, authors, year, abstract, doi, arxiv_id, publication, volume, issue, pages, publisher, isbn, url, language, date_added, date_modified, folder_path)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
@@ -486,8 +519,8 @@ pub fn sync_item_to_db(conn: &rusqlite::Connection, item: &LibraryItem) -> rusql
             item.isbn,
             item.url,
             item.language,
-            item.date_added,
-            item.date_modified,
+            date_added,
+            date_modified,
             item.folder_path,
         ],
     )?;
@@ -572,6 +605,18 @@ pub fn build_library_tree(
         .map(|pdf| {
             let id = pdf.to_string_lossy().to_string();
             match fetch_item_from_db(conn, &id).unwrap_or(None) {
+                Some(mut item) if item.date_added.trim().is_empty() => {
+                    let fallback_date = fallback_item_timestamp(&pdf);
+                    item.date_added = fallback_date.clone();
+                    if item.date_modified.trim().is_empty() {
+                        item.date_modified = fallback_date.clone();
+                    }
+                    let _ = conn.execute(
+                        "UPDATE items SET date_added = ?1, date_modified = CASE WHEN TRIM(COALESCE(date_modified, '')) = '' THEN ?2 ELSE date_modified END WHERE id = ?3",
+                        rusqlite::params![&fallback_date, &fallback_date, &item.id],
+                    );
+                    item
+                }
                 Some(item) => item,
                 None => {
                     let new_item = build_library_item(&pdf);

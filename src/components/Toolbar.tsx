@@ -69,9 +69,9 @@ export function Toolbar({
   };
 
   return (
-    <header className="h-14 bg-white/80 backdrop-blur-md border-b border-zinc-200 flex items-center justify-between px-4 z-20 shrink-0 sticky top-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
+    <header className="h-14 bg-white/80 backdrop-blur-md border-b border-zinc-200 flex items-center justify-between gap-2 px-3 z-20 shrink-0 sticky top-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)] min-w-0">
       {/* Left controls / draggable space */}
-      <div className="flex-1 h-full flex items-center cursor-default" data-tauri-drag-region>
+      <div className="flex-1 min-w-0 h-full flex items-center cursor-default" data-tauri-drag-region>
         <TooltipButton
           onClick={onToggleAiPanel}
           tooltip={isAiPanelOpen ? t("toolbar.aiPanel.hide") : t("toolbar.aiPanel.show")}
@@ -86,10 +86,11 @@ export function Toolbar({
       </div>
 
       {/* Center — zoom + tools + pages */}
-      <div className="flex items-center bg-zinc-100/80 p-1 rounded-2xl border border-zinc-200/50 shrink-0">
+      <div className="min-w-0 max-w-full overflow-x-auto no-scrollbar">
+      <div className="flex items-center bg-zinc-100/80 p-1 rounded-2xl border border-zinc-200/50 shrink-0 min-w-max">
         
         {/* Page navigation */}
-        <div className="flex items-center space-x-1.5 px-2">
+        <div className="hidden min-[880px]:flex items-center space-x-1.5 px-2">
           <input 
             type="text" 
             className="w-10 h-7 text-center text-[11px] font-semibold text-zinc-700 bg-white border border-zinc-200/80 rounded-lg focus:outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-400 shadow-sm transition-shadow"
@@ -120,10 +121,10 @@ export function Toolbar({
           <div className="relative" ref={zoomMenuRef}>
             <button 
               onClick={() => setShowZoomMenu(!showZoomMenu)}
-              className="w-16 h-8 flex items-center justify-center space-x-1 hover:bg-white rounded-md transition-colors"
+              className="w-12 min-[640px]:w-16 h-8 flex items-center justify-center space-x-1 hover:bg-white rounded-md transition-colors"
               title={t("toolbar.zoomOptions")}
             >
-              <span className="text-[11px] font-semibold text-zinc-600 select-none">
+              <span className="hidden min-[640px]:inline text-[11px] font-semibold text-zinc-600 select-none">
                 {Math.round(scale * 100)}%
               </span>
               <ChevronDown size={11} className="text-zinc-400" />
@@ -189,9 +190,10 @@ export function Toolbar({
           />
         </div>
       </div>
+      </div>
 
       {/* Right flexible spacer for dragging */}
-      <div className="flex-1 h-full flex justify-end items-center" data-tauri-drag-region>
+      <div className="flex-1 min-w-0 h-full flex justify-end items-center" data-tauri-drag-region>
         <TooltipButton
           onClick={onToggleRightPanel}
           tooltip={isRightPanelOpen ? t("toolbar.infoPanel.hide") : t("toolbar.infoPanel.show")}

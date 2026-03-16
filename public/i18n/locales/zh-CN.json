@@ -317,6 +317,10 @@
       "publication": "出版物",
       "dateAdded": "添加时间"
     },
+    "columnMenu": {
+      "title": "显示列",
+      "alwaysVisible": "固定"
+    },
     "actions": {
       "export": "导出",
       "exportTitle": "导出参考文献",
