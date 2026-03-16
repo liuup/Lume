@@ -24,7 +24,9 @@ const IPC_PORT_SPAN: u16 = 1000;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum CliRequest {
-    Open { target: String },
+    Open {
+        target: String,
+    },
     Import {
         path: String,
         folder: String,
@@ -36,8 +38,12 @@ pub enum CliRequest {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum CliResponse {
-    Ok { message: String },
-    OpenScheduled { message: String },
+    Ok {
+        message: String,
+    },
+    OpenScheduled {
+        message: String,
+    },
     ImportResult {
         imported: usize,
         paths: Vec<String>,
@@ -47,7 +53,9 @@ pub enum CliResponse {
         item_count: i64,
         message: String,
     },
-    Error { message: String },
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -77,7 +85,10 @@ impl CliRuntimeState {
     }
 
     pub fn take_pending_open(&self) -> Option<CliOpenRequest> {
-        self.pending_open.lock().ok().and_then(|mut pending| pending.take())
+        self.pending_open
+            .lock()
+            .ok()
+            .and_then(|mut pending| pending.take())
     }
 }
 
@@ -196,7 +207,10 @@ pub fn try_send_request(request: &CliRequest) -> Result<Option<CliResponse>, Str
         match UnixStream::connect(ipc_socket_path()) {
             Ok(mut stream) => send_request_over_stream(&mut stream, request).map(Some),
             Err(err) if is_server_unavailable(&err) => Ok(None),
-            Err(err) => Err(format!("Failed to connect to running Lume instance: {}", err)),
+            Err(err) => Err(format!(
+                "Failed to connect to running Lume instance: {}",
+                err
+            )),
         }
     }
 
@@ -205,7 +219,10 @@ pub fn try_send_request(request: &CliRequest) -> Result<Option<CliResponse>, Str
         match TcpStream::connect(("127.0.0.1", ipc_tcp_port())) {
             Ok(mut stream) => send_request_over_stream(&mut stream, request).map(Some),
             Err(err) if is_server_unavailable(&err) => Ok(None),
-            Err(err) => Err(format!("Failed to connect to running Lume instance: {}", err)),
+            Err(err) => Err(format!(
+                "Failed to connect to running Lume instance: {}",
+                err
+            )),
         }
     }
 }
@@ -226,8 +243,8 @@ fn send_request_over_stream<T>(stream: &mut T, request: &CliRequest) -> Result<C
 where
     T: Read + Write,
 {
-    let mut payload = serde_json::to_vec(request)
-        .map_err(|err| format!("Failed to encode request: {}", err))?;
+    let mut payload =
+        serde_json::to_vec(request).map_err(|err| format!("Failed to encode request: {}", err))?;
     payload.push(b'\n');
     stream
         .write_all(&payload)
@@ -240,8 +257,7 @@ where
     stream
         .read_to_end(&mut response)
         .map_err(|err| format!("Failed to read response: {}", err))?;
-    serde_json::from_slice(&response)
-        .map_err(|err| format!("Failed to decode response: {}", err))
+    serde_json::from_slice(&response).map_err(|err| format!("Failed to decode response: {}", err))
 }
 
 fn handle_stream<T>(stream: &mut T, app: &tauri::AppHandle) -> Result<(), String>
@@ -281,8 +297,13 @@ fn start_unix_server(app: tauri::AppHandle) -> Result<(), String> {
         let _ = std::fs::remove_file(&socket_path);
     }
 
-    let listener = UnixListener::bind(&socket_path)
-        .map_err(|err| format!("Failed to bind CLI IPC socket {}: {}", socket_path.display(), err))?;
+    let listener = UnixListener::bind(&socket_path).map_err(|err| {
+        format!(
+            "Failed to bind CLI IPC socket {}: {}",
+            socket_path.display(),
+            err
+        )
+    })?;
 
     thread::spawn(move || {
         for stream in listener.incoming() {
@@ -400,7 +421,10 @@ mod tests {
         let encoded = serde_json::to_string(&response).expect("response encodes");
         let decoded: CliResponse = serde_json::from_str(&encoded).expect("response decodes");
         match decoded {
-            CliResponse::SyncResult { item_count, message } => {
+            CliResponse::SyncResult {
+                item_count,
+                message,
+            } => {
                 assert_eq!(item_count, 42);
                 assert_eq!(message, "done");
             }

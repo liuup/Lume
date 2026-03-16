@@ -2,7 +2,6 @@
 /// Purpose: Native CLI interface for Lume using clap.
 /// Capabilities: Provides subcommands for listing, searching, importing, exporting,
 ///               inspecting, syncing, opening, and getting status of the paper library.
-
 use std::env;
 use std::fs;
 use std::io;
@@ -136,7 +135,10 @@ pub struct LumeCli {
 pub enum Commands {
     #[command(visible_alias = "ls")]
     List {
-        #[arg(long, help = "以 JSON 格式输出 (便于管道处理: lume list --json | jq '.[]')")]
+        #[arg(
+            long,
+            help = "以 JSON 格式输出 (便于管道处理: lume list --json | jq '.[]')"
+        )]
         json: bool,
     },
 
@@ -176,7 +178,10 @@ pub enum Commands {
             help = "引用格式: bibtex, ris, apa, mla, chicago, gbt, csljson"
         )]
         format: ExportFormat,
-        #[arg(long = "id", help = "仅导出指定条目 (可重复: --id <path1> --id <path2>)")]
+        #[arg(
+            long = "id",
+            help = "仅导出指定条目 (可重复: --id <path1> --id <path2>)"
+        )]
         ids: Vec<String>,
         #[arg(long, short, help = "写入文件 (例如: -o references.bib)")]
         output: Option<String>,
@@ -263,8 +268,7 @@ fn resolve_app_data_dir() -> Result<PathBuf, String> {
 
 fn resolve_library_root_dir() -> Result<PathBuf, String> {
     let root = resolve_app_data_dir()?.join("library");
-    fs::create_dir_all(&root)
-        .map_err(|err| format!("Failed to create library root: {}", err))?;
+    fs::create_dir_all(&root).map_err(|err| format!("Failed to create library root: {}", err))?;
     Ok(root)
 }
 
@@ -326,9 +330,20 @@ fn print_item_detail(item: &LibraryItem) {
     println!("Title:       {}", item.title);
     println!(
         "Authors:     {}",
-        if item.authors.is_empty() { "—" } else { &item.authors }
+        if item.authors.is_empty() {
+            "—"
+        } else {
+            &item.authors
+        }
     );
-    println!("Year:        {}", if item.year.is_empty() { "—" } else { &item.year });
+    println!(
+        "Year:        {}",
+        if item.year.is_empty() {
+            "—"
+        } else {
+            &item.year
+        }
+    );
     println!(
         "Type:        {}",
         if item.item_type.is_empty() {
@@ -337,7 +352,14 @@ fn print_item_detail(item: &LibraryItem) {
             &item.item_type
         }
     );
-    println!("DOI:         {}", if item.doi.is_empty() { "—" } else { &item.doi });
+    println!(
+        "DOI:         {}",
+        if item.doi.is_empty() {
+            "—"
+        } else {
+            &item.doi
+        }
+    );
     println!(
         "arXiv ID:    {}",
         if item.arxiv_id.is_empty() {
@@ -356,15 +378,27 @@ fn print_item_detail(item: &LibraryItem) {
     );
     println!(
         "Volume:      {}",
-        if item.volume.is_empty() { "—" } else { &item.volume }
+        if item.volume.is_empty() {
+            "—"
+        } else {
+            &item.volume
+        }
     );
     println!(
         "Issue:       {}",
-        if item.issue.is_empty() { "—" } else { &item.issue }
+        if item.issue.is_empty() {
+            "—"
+        } else {
+            &item.issue
+        }
     );
     println!(
         "Pages:       {}",
-        if item.pages.is_empty() { "—" } else { &item.pages }
+        if item.pages.is_empty() {
+            "—"
+        } else {
+            &item.pages
+        }
     );
     println!(
         "Publisher:   {}",
@@ -374,8 +408,22 @@ fn print_item_detail(item: &LibraryItem) {
             &item.publisher
         }
     );
-    println!("ISBN:        {}", if item.isbn.is_empty() { "—" } else { &item.isbn });
-    println!("URL:         {}", if item.url.is_empty() { "—" } else { &item.url });
+    println!(
+        "ISBN:        {}",
+        if item.isbn.is_empty() {
+            "—"
+        } else {
+            &item.isbn
+        }
+    );
+    println!(
+        "URL:         {}",
+        if item.url.is_empty() {
+            "—"
+        } else {
+            &item.url
+        }
+    );
     println!(
         "Language:    {}",
         if item.language.is_empty() {
@@ -408,12 +456,12 @@ fn cmd_list(json: bool) -> Result<(), String> {
     build_library_tree(&library_root, true, &conn)
         .map_err(|err| format!("Failed to sync library: {}", err))?;
 
-    let items = fetch_all_items_from_db(&conn)
-        .map_err(|err| format!("Failed to load papers: {}", err))?;
+    let items =
+        fetch_all_items_from_db(&conn).map_err(|err| format!("Failed to load papers: {}", err))?;
 
     if json {
-        let output =
-            serde_json::to_string_pretty(&items).map_err(|err| format!("JSON serialization failed: {}", err))?;
+        let output = serde_json::to_string_pretty(&items)
+            .map_err(|err| format!("JSON serialization failed: {}", err))?;
         println!("{}", output);
     } else {
         print_item_table(&items);
@@ -422,7 +470,12 @@ fn cmd_list(json: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn cmd_search(query: String, field: SearchField, tags: Vec<String>, json: bool) -> Result<(), String> {
+fn cmd_search(
+    query: String,
+    field: SearchField,
+    tags: Vec<String>,
+    json: bool,
+) -> Result<(), String> {
     let conn = open_db()?;
 
     let params = SearchLibraryParams {
@@ -435,8 +488,8 @@ fn cmd_search(query: String, field: SearchField, tags: Vec<String>, json: bool) 
     let items = search_library_db(&conn, &params)?;
 
     if json {
-        let output =
-            serde_json::to_string_pretty(&items).map_err(|err| format!("JSON serialization failed: {}", err))?;
+        let output = serde_json::to_string_pretty(&items)
+            .map_err(|err| format!("JSON serialization failed: {}", err))?;
         println!("{}", output);
     } else if items.is_empty() {
         println!("No results found for query: \"{}\"", params.query);
@@ -447,7 +500,11 @@ fn cmd_search(query: String, field: SearchField, tags: Vec<String>, json: bool) 
     Ok(())
 }
 
-fn cmd_export(format: ExportFormat, ids: Vec<String>, output: Option<String>) -> Result<(), String> {
+fn cmd_export(
+    format: ExportFormat,
+    ids: Vec<String>,
+    output: Option<String>,
+) -> Result<(), String> {
     let conn = open_db()?;
     let fmt = format.as_str();
 
@@ -468,9 +525,13 @@ fn cmd_export(format: ExportFormat, ids: Vec<String>, output: Option<String>) ->
 
     match output {
         Some(path) => {
-            fs::write(&path, &result)
-                .map_err(|e| format!("Failed to write to {}: {}", path, e))?;
-            println!("Exported {} items to {} (format: {})", item_ids.len(), path, fmt);
+            fs::write(&path, &result).map_err(|e| format!("Failed to write to {}: {}", path, e))?;
+            println!(
+                "Exported {} items to {} (format: {})",
+                item_ids.len(),
+                path,
+                fmt
+            );
         }
         None => {
             println!("{}", result);
@@ -578,8 +639,8 @@ fn cmd_info(id: String, json: bool) -> Result<(), String> {
     }
 
     if json {
-        let output =
-            serde_json::to_string_pretty(&item).map_err(|err| format!("JSON serialization failed: {}", err))?;
+        let output = serde_json::to_string_pretty(&item)
+            .map_err(|err| format!("JSON serialization failed: {}", err))?;
         println!("{}", output);
     } else {
         print_item_detail(&item);
@@ -600,14 +661,20 @@ fn cmd_status() -> Result<(), String> {
 
     let conn = open_db()?;
 
-    let item_count: i64 = conn.query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0)).unwrap_or(0);
+    let item_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0))
+        .unwrap_or(0);
     let attachment_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))
         .unwrap_or(0);
     let tag_count: i64 = conn
-        .query_row("SELECT COUNT(DISTINCT tag) FROM item_tags", [], |r| r.get(0))
+        .query_row("SELECT COUNT(DISTINCT tag) FROM item_tags", [], |r| {
+            r.get(0)
+        })
         .unwrap_or(0);
-    let note_count: i64 = conn.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0)).unwrap_or(0);
+    let note_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0))
+        .unwrap_or(0);
     let folder_count = count_directories(&library_root);
     let db_size = fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
@@ -691,7 +758,10 @@ fn normalize_open_target(target: String) -> Result<String, String> {
 
 fn normalize_legacy_args(raw_args: Vec<String>) -> Vec<String> {
     if raw_args.iter().any(|arg| arg == "--list-papers") {
-        let mut normalized = vec![raw_args.first().cloned().unwrap_or_else(|| "lume".to_string())];
+        let mut normalized = vec![raw_args
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "lume".to_string())];
         normalized.push("list".to_string());
         if raw_args.iter().any(|arg| arg == "--json") {
             normalized.push("--json".to_string());
@@ -763,7 +833,11 @@ fn dispatch(cli: LumeCli, mode: InvocationMode) -> Result<DispatchDecision, Stri
             Ok(DispatchDecision::Handled)
         }
         Commands::Import { path, folder, tags } => dispatch_import(path, folder, tags),
-        Commands::Export { format, ids, output } => {
+        Commands::Export {
+            format,
+            ids,
+            output,
+        } => {
             cmd_export(format, ids, output)?;
             Ok(DispatchDecision::Handled)
         }
@@ -784,7 +858,11 @@ fn dispatch(cli: LumeCli, mode: InvocationMode) -> Result<DispatchDecision, Stri
     }
 }
 
-fn dispatch_import(path: String, folder: String, tags: Vec<String>) -> Result<DispatchDecision, String> {
+fn dispatch_import(
+    path: String,
+    folder: String,
+    tags: Vec<String>,
+) -> Result<DispatchDecision, String> {
     let normalized_path = normalize_import_source_path(path)?;
     let request = CliRequest::Import {
         path: normalized_path.clone(),
@@ -854,7 +932,8 @@ fn launch_gui_with_open_request(target: &str) -> Result<(), String> {
 }
 
 fn resolve_gui_binary_path() -> Result<PathBuf, String> {
-    let current = env::current_exe().map_err(|err| format!("Failed to resolve current executable: {}", err))?;
+    let current = env::current_exe()
+        .map_err(|err| format!("Failed to resolve current executable: {}", err))?;
     let current_name = current
         .file_name()
         .and_then(|value| value.to_str())
@@ -865,8 +944,14 @@ fn resolve_gui_binary_path() -> Result<PathBuf, String> {
         return Ok(current);
     }
 
-    let parent = current.parent().ok_or("Failed to resolve executable directory")?;
-    let gui_name = if cfg!(target_os = "windows") { "Lume.exe" } else { "Lume" };
+    let parent = current
+        .parent()
+        .ok_or("Failed to resolve executable directory")?;
+    let gui_name = if cfg!(target_os = "windows") {
+        "Lume.exe"
+    } else {
+        "Lume"
+    };
     let candidate = parent.join(gui_name);
 
     if candidate.exists() {
@@ -941,7 +1026,10 @@ fn import_single_pdf(
         return Err(format!("Path does not exist: {}", source.display()));
     }
 
-    let extension = source.extension().and_then(|value| value.to_str()).unwrap_or("");
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
     if !extension.eq_ignore_ascii_case("pdf") {
         return Err(format!("Not a PDF file: {}", source.display()));
     }
@@ -1053,14 +1141,20 @@ pub fn run_import_with_app(
 ) -> Result<ImportCommandResult, String> {
     let library_root = crate::library_commands::library_root_dir(app)?;
     let state = app.state::<crate::models::AppState>();
-    let conn = state.db.lock().map_err(|_| "Failed to lock database".to_string())?;
+    let conn = state
+        .db
+        .lock()
+        .map_err(|_| "Failed to lock database".to_string())?;
     run_import_with_conn(&conn, &library_root, path, folder, tags)
 }
 
 pub fn run_sync_with_app(app: &tauri::AppHandle) -> Result<SyncCommandResult, String> {
     let library_root = crate::library_commands::library_root_dir(app)?;
     let state = app.state::<crate::models::AppState>();
-    let conn = state.db.lock().map_err(|_| "Failed to lock database".to_string())?;
+    let conn = state
+        .db
+        .lock()
+        .map_err(|_| "Failed to lock database".to_string())?;
     run_sync_with_conn(&conn, &library_root)
 }
 
@@ -1092,7 +1186,9 @@ pub fn run_standalone_from_env() -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_legacy_args, route_for_command, CliRequest, CommandRoute, Commands, LumeCli};
+    use super::{
+        normalize_legacy_args, route_for_command, CliRequest, CommandRoute, Commands, LumeCli,
+    };
 
     #[test]
     fn normalizes_legacy_list_command() {

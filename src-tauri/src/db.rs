@@ -1,7 +1,6 @@
 /// Module: src-tauri/src/db.rs
 /// Purpose: Encapsulates database initialization and shared operations.
 /// Capabilities: Creates missing tables upon application startup. Returns a SQLite connection.
-
 use std::path::Path;
 
 use rusqlite::{Connection, Result as SqlResult};

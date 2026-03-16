@@ -1,15 +1,15 @@
+use regex::Regex;
 /// Module: src-tauri/src/metadata_fetch.rs
 /// Purpose: Encapsulates all fetching logic for Crossref and arXiv metadata APIs.
 /// Capabilities: Defines internal regex engines to extract DOIs and arXiv IDs and exposes methods to query external literature APIs.
-
 use reqwest::blocking::Client;
-use regex::Regex;
-use std::sync::OnceLock;
 use std::collections::HashSet;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use crate::models::{
-    CrossrefAuthor, CrossrefSearchResponse, CrossrefWorkMessage, CrossrefWorkResponse, ParsedPdfMetadata
+    CrossrefAuthor, CrossrefSearchResponse, CrossrefWorkMessage, CrossrefWorkResponse,
+    ParsedPdfMetadata,
 };
 
 static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
@@ -272,7 +272,10 @@ pub fn extract_abstract_from_lines(lines: &[String]) -> Option<String> {
         let inline = line
             .split_once(':')
             .map(|(_, rest)| rest.trim().to_string())
-            .or_else(|| line.split_once('.').map(|(_, rest)| rest.trim().to_string()))
+            .or_else(|| {
+                line.split_once('.')
+                    .map(|(_, rest)| rest.trim().to_string())
+            })
             .or_else(|| {
                 line.strip_prefix("Abstract")
                     .or_else(|| line.strip_prefix("ABSTRACT"))
@@ -363,7 +366,10 @@ pub fn overwrite_if_present(target: &mut Option<String>, incoming: Option<String
 }
 
 pub fn fill_if_missing(target: &mut Option<String>, incoming: Option<String>) {
-    let is_missing = target.as_deref().map(|value| value.trim().is_empty()).unwrap_or(true);
+    let is_missing = target
+        .as_deref()
+        .map(|value| value.trim().is_empty())
+        .unwrap_or(true);
     if is_missing {
         overwrite_if_present(target, incoming);
     }
@@ -440,11 +446,19 @@ pub fn titles_confidently_match(left: &str, right: &str) -> bool {
 }
 
 pub fn extract_xml_tag_values(block: &str, tag_name: &str) -> Vec<String> {
-    let pattern = format!(r"(?is)<(?:[a-z0-9_\-]+:)?{}\b[^>]*>(.*?)</(?:[a-z0-9_\-]+:)?{}>", regex::escape(tag_name), regex::escape(tag_name));
+    let pattern = format!(
+        r"(?is)<(?:[a-z0-9_\-]+:)?{}\b[^>]*>(.*?)</(?:[a-z0-9_\-]+:)?{}>",
+        regex::escape(tag_name),
+        regex::escape(tag_name)
+    );
     let regex = Regex::new(&pattern).expect("invalid XML tag regex");
     regex
         .captures_iter(block)
-        .filter_map(|captures| captures.get(1).map(|matched| clean_abstract_text(matched.as_str())))
+        .filter_map(|captures| {
+            captures
+                .get(1)
+                .map(|matched| clean_abstract_text(matched.as_str()))
+        })
         .filter(|value| !value.is_empty())
         .collect()
 }
@@ -471,8 +485,7 @@ pub fn parse_arxiv_entry(block: &str) -> ParsedPdfMetadata {
     let summary = extract_xml_tag_value(block, "summary")
         .filter(|value| is_plausible_abstract(value))
         .map(|value| clean_abstract_text(&value));
-    let year = extract_xml_tag_value(block, "published")
-        .and_then(|value| parse_arxiv_year(&value));
+    let year = extract_xml_tag_value(block, "published").and_then(|value| parse_arxiv_year(&value));
     let doi = extract_xml_tag_value(block, "doi").and_then(|value| normalize_doi(&value));
     let arxiv_id = extract_xml_tag_value(block, "id").and_then(|value| normalize_arxiv_id(&value));
 
@@ -489,7 +502,11 @@ pub fn parse_arxiv_entry(block: &str) -> ParsedPdfMetadata {
 pub fn parse_arxiv_feed_entries(xml: &str) -> Vec<ParsedPdfMetadata> {
     xml_entry_regex()
         .captures_iter(xml)
-        .filter_map(|captures| captures.get(1).map(|matched| parse_arxiv_entry(matched.as_str())))
+        .filter_map(|captures| {
+            captures
+                .get(1)
+                .map(|matched| parse_arxiv_entry(matched.as_str()))
+        })
         .collect()
 }
 
@@ -497,7 +514,12 @@ pub fn crossref_authors(authors: &[CrossrefAuthor]) -> Option<String> {
     let names = authors
         .iter()
         .filter_map(|author| {
-            if let Some(name) = author.name.as_ref().map(|value| clean_author_text(value)).filter(|value| !value.is_empty()) {
+            if let Some(name) = author
+                .name
+                .as_ref()
+                .map(|value| clean_author_text(value))
+                .filter(|value| !value.is_empty())
+            {
                 return Some(name);
             }
 
@@ -632,7 +654,11 @@ pub fn fetch_arxiv_metadata_by_title(title: &str) -> Result<Option<ParsedPdfMeta
     let search_query = format!("ti:\"{}\"", title);
     let xml = http_client()
         .get("https://export.arxiv.org/api/query")
-        .query(&[("search_query", search_query.as_str()), ("start", "0"), ("max_results", "5")])
+        .query(&[
+            ("search_query", search_query.as_str()),
+            ("start", "0"),
+            ("max_results", "5"),
+        ])
         .send()
         .map_err(|e| format!("arXiv title search failed: {}", e))?
         .error_for_status()
@@ -668,15 +694,40 @@ pub fn fetch_arxiv_metadata_by_title(title: &str) -> Result<Option<ParsedPdfMeta
 }
 
 #[tauri::command]
-pub fn update_item_metadata(payload: crate::models::UpdateMetadataPayload, state: tauri::State<'_, crate::models::AppState>) -> Result<(), String> {
+pub fn update_item_metadata(
+    payload: crate::models::UpdateMetadataPayload,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<(), String> {
     let conn_mutex = state.db.clone();
-    let conn = conn_mutex.lock().map_err(|e| format!("Database lock error: {}", e))?;
+    let conn = conn_mutex
+        .lock()
+        .map_err(|e| format!("Database lock error: {}", e))?;
     let mut stmt = conn.prepare("UPDATE items SET title = ?1, authors = ?2, year = ?3, abstract = ?4, doi = ?5, arxiv_id = ?6, publication = ?7, volume = ?8, issue = ?9, pages = ?10, publisher = ?11, isbn = ?12, url = ?13, language = ?14, date_modified = datetime('now') WHERE id = ?15").map_err(|e| format!("Prepare error: {}", e))?;
-    stmt.execute(rusqlite::params![payload.title, payload.authors, payload.year, payload.r#abstract, payload.doi, payload.arxiv_id, payload.publication, payload.volume, payload.issue, payload.pages, payload.publisher, payload.isbn, payload.url, payload.language, payload.id]).map_err(|e| format!("Execute error: {}", e))?;
+    stmt.execute(rusqlite::params![
+        payload.title,
+        payload.authors,
+        payload.year,
+        payload.r#abstract,
+        payload.doi,
+        payload.arxiv_id,
+        payload.publication,
+        payload.volume,
+        payload.issue,
+        payload.pages,
+        payload.publisher,
+        payload.isbn,
+        payload.url,
+        payload.language,
+        payload.id
+    ])
+    .map_err(|e| format!("Execute error: {}", e))?;
 
     // Sync tags – replace all existing tags for this item
-    conn.execute("DELETE FROM item_tags WHERE item_id = ?1", rusqlite::params![payload.id])
-        .map_err(|e| format!("Failed to clear tags: {}", e))?;
+    conn.execute(
+        "DELETE FROM item_tags WHERE item_id = ?1",
+        rusqlite::params![payload.id],
+    )
+    .map_err(|e| format!("Failed to clear tags: {}", e))?;
     for tag in &payload.tags {
         let t = tag.trim();
         if !t.is_empty() {
