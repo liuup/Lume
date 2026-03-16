@@ -54,7 +54,14 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             build-essential \
-            pkg-config
+            pkg-config \
+            curl
+
+      - name: Inject PDFium (Linux)
+        run: |
+          curl -L -o pdfium.tgz https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz
+          tar -xzf pdfium.tgz lib/libpdfium.so
+          mv lib/libpdfium.so src-tauri/libpdfium.so
 
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
