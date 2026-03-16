@@ -15,6 +15,12 @@ export interface AppSettings {
   autoRenamePdf: boolean;
   renamePattern: string;
   defaultCitationFormat: string;
+  aiApiKey: string;
+  aiCompletionUrl: string;
+  aiModel: string;
+  aiAutoSummarize: boolean;
+  aiSummaryLanguage: string;
+  aiTranslateTargetLanguage: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -24,6 +30,12 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoRenamePdf: true,
   renamePattern: '[Year] - [Author] - [Title]',
   defaultCitationFormat: 'apa',
+  aiApiKey: '',
+  aiCompletionUrl: '',
+  aiModel: 'gpt-4o-mini',
+  aiAutoSummarize: true,
+  aiSummaryLanguage: 'zh-CN',
+  aiTranslateTargetLanguage: 'zh-CN',
 };
 
 function normalizeTheme(value: string | undefined): AppTheme {
@@ -70,7 +82,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         const loaded: Partial<AppSettings> = {};
         
         for (const s of storedSettings) {
-           if (s.key === 'autoRenamePdf') {
+           if (s.key === 'autoRenamePdf' || s.key === 'aiAutoSummarize') {
              loaded[s.key] = s.value === 'true';
            } else if (s.key === 'theme') {
              loaded.theme = normalizeTheme(s.value);

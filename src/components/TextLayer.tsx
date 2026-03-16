@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { AiTranslationResult } from "../types";
+import { useSettings } from "../hooks/useSettings";
+import { useI18n } from "../hooks/useI18n";
 
 export interface TextNode {
   text: string;
@@ -19,6 +22,15 @@ interface TextLayerProps {
   shouldLoad: boolean;
 }
 
+interface TranslationPopupState {
+  text: string;
+  x: number;
+  y: number;
+  result: AiTranslationResult | null;
+  isLoading: boolean;
+  error: string | null;
+}
+
 const textLayerCache = new Map<string, TextNode[]>();
 
 function getTextLayerCacheKey(pdfPath: string, pageIndex: number) {
@@ -26,8 +38,13 @@ function getTextLayerCacheKey(pdfPath: string, pageIndex: number) {
 }
 
 export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible, shouldLoad }: TextLayerProps) {
+  const { settings } = useSettings();
+  const { t } = useI18n();
   const [textNodes, setTextNodes] = useState<TextNode[]>([]);
+  const [translationPopup, setTranslationPopup] = useState<TranslationPopupState | null>(null);
   const cacheKey = getTextLayerCacheKey(pdfPath, pageIndex);
+  const requestIdRef = useRef(0);
+  const layerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (textLayerCache.has(cacheKey)) {
@@ -78,16 +95,111 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
     };
   }, [cacheKey, isVisible, pageIndex, pdfPath, shouldLoad]);
 
+  useEffect(() => {
+    const hidePopup = () => {
+      setTranslationPopup(null);
+    };
+
+    const handleSelectionChange = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+        setTranslationPopup((current) => (current?.isLoading ? current : null));
+      }
+    };
+
+    document.addEventListener("mousedown", hidePopup);
+    document.addEventListener("selectionchange", handleSelectionChange);
+
+    return () => {
+      document.removeEventListener("mousedown", hidePopup);
+      document.removeEventListener("selectionchange", handleSelectionChange);
+    };
+  }, []);
+
+  const handleMouseUp = async () => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
+
+    const selectedText = selection.toString().trim();
+    if (!selectedText) return;
+
+    const anchorNode = selection.anchorNode;
+    const focusNode = selection.focusNode;
+    const layerElement = layerRef.current;
+    if (!layerElement || !(anchorNode && layerElement.contains(anchorNode)) || !(focusNode && layerElement.contains(focusNode))) {
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    const aiIsConfigured = Boolean(settings.aiApiKey.trim() && settings.aiCompletionUrl.trim() && settings.aiModel.trim());
+
+    if (!aiIsConfigured) {
+      setTranslationPopup({
+        text: selectedText,
+        x: rect.left + rect.width / 2,
+        y: rect.bottom + 10,
+        result: null,
+        isLoading: false,
+        error: t("textLayer.translation.notConfigured"),
+      });
+      return;
+    }
+
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+
+    setTranslationPopup({
+      text: selectedText,
+      x: rect.left + rect.width / 2,
+      y: rect.bottom + 10,
+      result: null,
+      isLoading: true,
+      error: null,
+    });
+
+    try {
+      const result = await invoke<AiTranslationResult>("translate_selection", {
+        text: selectedText,
+        targetLanguage: settings.aiTranslateTargetLanguage,
+      });
+
+      if (requestIdRef.current !== requestId) return;
+
+      setTranslationPopup({
+        text: selectedText,
+        x: rect.left + rect.width / 2,
+        y: rect.bottom + 10,
+        result,
+        isLoading: false,
+        error: null,
+      });
+    } catch (error) {
+      if (requestIdRef.current !== requestId) return;
+      console.error("Failed to translate selection", error);
+      setTranslationPopup({
+        text: selectedText,
+        x: rect.left + rect.width / 2,
+        y: rect.bottom + 10,
+        result: null,
+        isLoading: false,
+        error: t("textLayer.translation.error"),
+      });
+    }
+  };
+
   // We render if we have data, regardless of visibility, so native Cmd+F works
   if (textNodes.length === 0) return null;
 
   return (
     <div
+      ref={layerRef}
       className="absolute inset-0 z-0 origin-top-left"
       style={{
         width,
         height,
       }}
+      onMouseUp={() => { void handleMouseUp(); }}
     >
       {textNodes.map((node, i) => {
         // We scale the raw PDF coordinates by the current display scale
@@ -122,6 +234,30 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
           </span>
         );
       })}
+      {translationPopup && (
+        <div
+          className="fixed z-[70] w-[min(360px,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-[0_18px_45px_-18px_rgba(0,0,0,0.28)] backdrop-blur-sm"
+          style={{
+            left: translationPopup.x,
+            top: translationPopup.y,
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600">
+            {t("textLayer.translation.title", { language: settings.aiTranslateTargetLanguage || "zh-CN" })}
+          </div>
+          <div className="mt-1 text-xs leading-relaxed text-zinc-500 line-clamp-3">
+            {translationPopup.text}
+          </div>
+          <div className="mt-2 text-sm leading-relaxed text-zinc-700">
+            {translationPopup.isLoading
+              ? t("textLayer.translation.loading")
+              : translationPopup.error
+                ? translationPopup.error
+                : translationPopup.result?.translation}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

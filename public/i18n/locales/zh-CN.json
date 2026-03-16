@@ -171,6 +171,26 @@
       "annotationsEmpty": {
         "title": "没有可导出的批注",
         "description": "这篇论文目前还没有已保存的批注。"
+      },
+      "digestSuccess": {
+        "title": "AI 整理已生成",
+        "description": "已基于当前批注生成结构化草稿。"
+      },
+      "digestError": {
+        "title": "生成 AI 整理失败",
+        "description": "无法为这篇论文生成批注整理结果。"
+      },
+      "digestApplySuccess": {
+        "title": "整理草稿已写入笔记",
+        "description": "AI 整理草稿已写入当前笔记。"
+      },
+      "digestApplyError": {
+        "title": "写入 AI 整理失败",
+        "description": "无法将 AI 整理草稿写入当前笔记。"
+      },
+      "paperSummaryError": {
+        "title": "论文总结失败",
+        "description": "无法为当前论文生成 AI 总结。"
       }
     },
     "export": {
@@ -187,7 +207,8 @@
       "appearance": "外观",
       "language": "语言与地区",
       "library": "资料库与文件管理",
-      "export": "导出与集成"
+      "export": "导出与集成",
+      "ai": "AI"
     },
     "theme": {
       "label": "主题",
@@ -220,6 +241,37 @@
     "defaultCitationFormat": {
       "label": "默认引用格式",
       "description": "快速复制时使用的引用格式"
+    },
+    "ai": {
+      "apiKey": {
+        "label": "API Key",
+        "description": "仅保存在本地，用于论文总结和划词翻译请求",
+        "placeholder": "sk-..."
+      },
+      "completionUrl": {
+        "label": "Completion 地址",
+        "description": "填写兼容 OpenAI Chat Completions 的接口地址",
+        "placeholder": "https://api.openai.com/v1/chat/completions"
+      },
+      "model": {
+        "label": "模型名称",
+        "description": "每次请求时携带的模型名",
+        "placeholder": "gpt-4o-mini"
+      },
+      "autoSummarize": {
+        "label": "自动总结论文",
+        "description": "打开论文时自动生成 AI 总结"
+      },
+      "summaryLanguage": {
+        "label": "总结语言",
+        "description": "生成论文总结时使用的语言",
+        "placeholder": "zh-CN"
+      },
+      "translateLanguage": {
+        "label": "翻译目标语言",
+        "description": "划词自动翻译的目标语言",
+        "placeholder": "zh-CN"
+      }
     },
     "citationFormats": {
       "apa": "APA",
@@ -461,10 +513,25 @@
     },
     "notes": {
       "title": "笔记",
+      "digest": "AI 整理",
+      "digestTitle": "基于已保存批注生成结构化草稿",
+      "digestPreview": "AI 草稿预览",
+      "digestStats": "{text} 条文字 · {highlight} 个高亮 · {ink} 个手写",
+      "digestAppend": "追加到笔记",
+      "digestReplace": "替换笔记",
       "extract": "提取",
       "extractTitle": "将 PDF 文字批注提取到笔记中",
       "placeholder": "以 Markdown 记录你的想法、总结或摘录...",
       "save": "保存笔记"
+    },
+    "aiSummary": {
+      "title": "AI 总结",
+      "refresh": "刷新",
+      "loading": "正在生成论文总结...",
+      "empty": "还没有 AI 总结，可点击刷新生成。",
+      "notConfigured": "请先在设置中配置 AI API Key、Completion 地址和模型名称，才能启用自动论文总结。",
+      "keyPoints": "关键要点",
+      "limitations": "局限性"
     },
     "annotations": {
       "title": "PDF 批注",
@@ -508,6 +575,14 @@
     "errors": {
       "saveChanges": "保存更改失败。",
       "saveNote": "保存笔记失败。"
+    }
+  },
+  "textLayer": {
+    "translation": {
+      "title": "翻译 · {language}",
+      "loading": "正在翻译选中文本...",
+      "error": "翻译失败，请检查 AI 设置或 completion 接口。",
+      "notConfigured": "请先配置 AI 设置，再使用划词自动翻译。"
     }
   },
   "errorBoundary": {

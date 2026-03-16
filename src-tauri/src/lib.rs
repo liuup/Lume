@@ -1,14 +1,13 @@
-/// Module: src-tauri/src/lib.rs
-/// Purpose: Entry point for the Tauri backend.
-/// Capabilities: Defines AppState, declares the `tauri::mobile_entry_point`, and registers all commands.
-
-pub mod models;
 pub mod cli;
 pub mod cli_ipc;
 pub mod db;
-pub mod metadata_fetch;
-pub mod pdf_handlers;
 pub mod library_commands;
+pub mod metadata_fetch;
+/// Module: src-tauri/src/lib.rs
+/// Purpose: Entry point for the Tauri backend.
+/// Capabilities: Defines AppState, declares the `tauri::mobile_entry_point`, and registers all commands.
+pub mod models;
+pub mod pdf_handlers;
 
 use pdfium_render::prelude::*;
 use std::collections::HashMap;
@@ -50,7 +49,9 @@ pub fn run() {
 
                 for dir in candidate_pdfium_dirs(app) {
                     if let Some(dir_str) = dir.to_str() {
-                        if let Ok(found) = Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path(dir_str)) {
+                        if let Ok(found) = Pdfium::bind_to_library(
+                            Pdfium::pdfium_platform_library_name_at_path(dir_str),
+                        ) {
                             bindings = Some(found);
                             break;
                         }
@@ -64,7 +65,7 @@ pub fn run() {
                 let pdfium = Box::leak(Box::new(Pdfium::new(bindings)));
                 let _ = pdf_handlers::GLOBAL_PDFIUM.set(GlobalPdfium(pdfium));
             }
-            
+
             let app_handle = app.handle();
             let db_conn = init_db(&app_handle).expect("Failed to initialize database");
             let cli_runtime = crate::cli_ipc::CliRuntimeState::default();
@@ -72,14 +73,14 @@ pub fn run() {
             if let Some(request) = crate::cli_ipc::startup_open_request_from_env()? {
                 cli_runtime.set_pending_open(request);
             }
-            
+
             app.manage(crate::models::AppState {
                 documents: Arc::new(Mutex::new(HashMap::new())),
                 db: Arc::new(Mutex::new(db_conn)),
             });
             app.manage(cli_runtime);
             crate::cli_ipc::start_ipc_server(app_handle.clone())?;
-            
+
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
@@ -108,6 +109,9 @@ pub fn run() {
             library_commands::export_items,
             library_commands::append_annotations_to_note,
             library_commands::generate_item_annotations_markdown,
+            library_commands::generate_annotation_digest,
+            library_commands::summarize_document,
+            library_commands::translate_selection,
             library_commands::get_settings,
             library_commands::save_setting,
             metadata_fetch::update_item_metadata,

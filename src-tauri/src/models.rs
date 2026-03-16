@@ -1,13 +1,12 @@
 /// Module: src-tauri/src/models.rs
 /// Purpose: Defines core data structures and serialization payload definitions
 /// Capabilities: Contains representation of items, folders, attachments, internal caches and API shapes.
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use std::sync::{Arc, Mutex};
-use rusqlite::Connection;
 use crate::pdf_handlers::ThreadSafeDoc;
+use rusqlite::Connection;
+use std::sync::{Arc, Mutex};
 
 pub struct AppState {
     pub documents: Arc<Mutex<HashMap<String, Arc<Mutex<ThreadSafeDoc>>>>>,
@@ -27,6 +26,62 @@ pub struct Note {
 pub struct Setting {
     pub key: String,
     pub value: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDigestEntry {
+    pub page: u16,
+    pub text: String,
+    pub reason: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiDigestSection {
+    pub id: String,
+    pub title: String,
+    pub summary: String,
+    pub entries: Vec<AiDigestEntry>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiAnnotationDigestStats {
+    pub text_annotations: usize,
+    pub highlight_strokes: usize,
+    pub ink_strokes: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiAnnotationDigest {
+    pub overview: String,
+    pub coverage_note: String,
+    pub limitations: String,
+    pub stats: AiAnnotationDigestStats,
+    pub sections: Vec<AiDigestSection>,
+    pub markdown: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiPaperSummary {
+    pub title: String,
+    pub summary: String,
+    pub key_points: Vec<String>,
+    pub limitations: Vec<String>,
+    pub language: String,
+    pub source_excerpt: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTranslationResult {
+    pub translation: String,
+    pub source_language_hint: String,
+    pub target_language: String,
+    pub original_text: String,
 }
 
 #[derive(Serialize)]

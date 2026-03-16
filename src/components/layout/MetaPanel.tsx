@@ -1,5 +1,5 @@
 import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit, Edit2, Check, Book, Building, Link2, Copy, Quote, StickyNote, Wand2, Highlighter, Search, Download, Loader2 } from "lucide-react";
-import { LibraryItem, SavedPdfAnnotationsDocument } from "../../types";
+import { AiAnnotationDigest, AiPaperSummary, LibraryItem, SavedPdfAnnotationsDocument } from "../../types";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CitationFormat } from "./ExportModal";
@@ -216,6 +216,11 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   const [noteText, setNoteText] = useState("");
   const [isLoadingNote, setIsLoadingNote] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
+  const [paperSummary, setPaperSummary] = useState<AiPaperSummary | null>(null);
+  const [isLoadingPaperSummary, setIsLoadingPaperSummary] = useState(false);
+  const [annotationDigest, setAnnotationDigest] = useState<AiAnnotationDigest | null>(null);
+  const [isGeneratingAnnotationDigest, setIsGeneratingAnnotationDigest] = useState(false);
+  const [isApplyingAnnotationDigest, setIsApplyingAnnotationDigest] = useState(false);
 
   // ── Annotations list state ───────────────────────────────────────────────────
   const [pdfAnnotations, setPdfAnnotations] = useState<SavedPdfAnnotationsDocument | null>(null);
@@ -289,6 +294,45 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
     setAnnotationFilter("all");
     setAnnotationSearchQuery("");
   }, [selectedItem?.id]);
+
+  useEffect(() => {
+    setPaperSummary(null);
+    setIsLoadingPaperSummary(false);
+    setAnnotationDigest(null);
+    setIsGeneratingAnnotationDigest(false);
+    setIsApplyingAnnotationDigest(false);
+  }, [selectedItem?.id]);
+
+  const aiIsConfigured = Boolean(settings.aiApiKey.trim() && settings.aiCompletionUrl.trim() && settings.aiModel.trim());
+
+  const handleGeneratePaperSummary = useCallback(async () => {
+    if (!selectedItem || !aiIsConfigured) return;
+
+    setIsLoadingPaperSummary(true);
+    try {
+      const summary = await invoke<AiPaperSummary>("summarize_document", {
+        itemId: selectedItem.id,
+        language: settings.aiSummaryLanguage,
+      });
+      setPaperSummary(summary);
+    } catch (error) {
+      console.error("Failed to generate paper summary", error);
+      feedback.error({
+        title: t("feedback.meta.paperSummaryError.title"),
+        description: t("feedback.meta.paperSummaryError.description"),
+      });
+    } finally {
+      setIsLoadingPaperSummary(false);
+    }
+  }, [aiIsConfigured, feedback, selectedItem, settings.aiSummaryLanguage, t]);
+
+  useEffect(() => {
+    if (!selectedItem || !isOpen || !settings.aiAutoSummarize || !aiIsConfigured || paperSummary || isLoadingPaperSummary) {
+      return;
+    }
+
+    void handleGeneratePaperSummary();
+  }, [aiIsConfigured, handleGeneratePaperSummary, isLoadingPaperSummary, isOpen, paperSummary, selectedItem, settings.aiAutoSummarize]);
 
   // Load note when selection changes
   useEffect(() => {
@@ -520,6 +564,59 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
     }
 
     return t(`metaPanel.annotations.previews.${entry.type}`);
+  };
+
+  const handleGenerateAnnotationDigest = async () => {
+    if (!selectedItem) return;
+
+    setIsGeneratingAnnotationDigest(true);
+    try {
+      const digest = await invoke<AiAnnotationDigest>("generate_annotation_digest", {
+        itemId: selectedItem.id,
+      });
+      setAnnotationDigest(digest);
+      feedback.success({
+        title: t("feedback.meta.digestSuccess.title"),
+        description: t("feedback.meta.digestSuccess.description"),
+      });
+    } catch (error) {
+      console.error("Failed to generate annotation digest", error);
+      feedback.error({
+        title: t("feedback.meta.digestError.title"),
+        description: t("feedback.meta.digestError.description"),
+      });
+    } finally {
+      setIsGeneratingAnnotationDigest(false);
+    }
+  };
+
+  const handleApplyAnnotationDigest = async (mode: "append" | "replace") => {
+    if (!selectedItem || !annotationDigest) return;
+
+    setIsApplyingAnnotationDigest(true);
+    try {
+      const nextContent = mode === "replace"
+        ? annotationDigest.markdown
+        : [noteText.trim(), annotationDigest.markdown].filter(Boolean).join("\n\n---\n\n");
+
+      await invoke("upsert_item_note", {
+        itemId: selectedItem.id,
+        content: nextContent,
+      });
+      setNoteText(nextContent);
+      feedback.success({
+        title: t("feedback.meta.digestApplySuccess.title"),
+        description: t("feedback.meta.digestApplySuccess.description"),
+      });
+    } catch (error) {
+      console.error("Failed to apply annotation digest", error);
+      feedback.error({
+        title: t("feedback.meta.digestApplyError.title"),
+        description: t("feedback.meta.digestApplyError.description"),
+      });
+    } finally {
+      setIsApplyingAnnotationDigest(false);
+    }
   };
 
   return (
@@ -763,6 +860,65 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
               </MetaRow>
             </div>
 
+            <div className="border-t border-zinc-100 pt-5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <Wand2 size={14} className="text-zinc-400" />
+                  <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t("metaPanel.aiSummary.title")}</span>
+                </div>
+                <button
+                  onClick={() => void handleGeneratePaperSummary()}
+                  disabled={!selectedItem || !aiIsConfigured || isLoadingPaperSummary}
+                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-40"
+                  title={t("metaPanel.aiSummary.refresh")}
+                >
+                  {isLoadingPaperSummary ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+                  {t("metaPanel.aiSummary.refresh")}
+                </button>
+              </div>
+
+              {!aiIsConfigured ? (
+                <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-3 text-xs leading-relaxed text-zinc-500">
+                  {t("metaPanel.aiSummary.notConfigured")}
+                </div>
+              ) : isLoadingPaperSummary ? (
+                <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 text-xs text-zinc-400 animate-pulse">
+                  {t("metaPanel.aiSummary.loading")}
+                </div>
+              ) : paperSummary ? (
+                <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3">
+                  <div>
+                    <div className="text-sm font-semibold text-zinc-800">{paperSummary.title}</div>
+                    <div className="mt-1 text-sm leading-relaxed text-zinc-700">{paperSummary.summary}</div>
+                  </div>
+                  {paperSummary.keyPoints.length > 0 && (
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">{t("metaPanel.aiSummary.keyPoints")}</div>
+                      <ul className="mt-1 space-y-1 text-xs leading-relaxed text-zinc-600">
+                        {paperSummary.keyPoints.map((point, index) => (
+                          <li key={`summary-point-${index}`}>• {point}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {paperSummary.limitations.length > 0 && (
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">{t("metaPanel.aiSummary.limitations")}</div>
+                      <ul className="mt-1 space-y-1 text-xs leading-relaxed text-zinc-600">
+                        {paperSummary.limitations.map((point, index) => (
+                          <li key={`summary-limit-${index}`}>• {point}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-3 text-xs leading-relaxed text-zinc-500">
+                  {t("metaPanel.aiSummary.empty")}
+                </div>
+              )}
+            </div>
+
             {/* ── Notes section ───────────────────────────────────────── */}
             <div className="border-t border-zinc-100 pt-5 space-y-2">
               <div className="flex items-center justify-between gap-1.5">
@@ -770,33 +926,103 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                   <StickyNote size={14} className="text-zinc-400" />
                   <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t("metaPanel.notes.title")}</span>
                 </div>
-                <button
-                  onClick={async () => {
-                    if (!selectedItem) return;
-                    try {
-                      const updatedNote = await invoke<{content: string} | null>("append_annotations_to_note", { itemId: selectedItem.id });
-                      if (updatedNote) {
-                        setNoteText(updatedNote.content);
-                        feedback.success({
-                          title: t("feedback.meta.extractSuccess.title"),
-                          description: t("feedback.meta.extractSuccess.description"),
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={handleGenerateAnnotationDigest}
+                    disabled={!selectedItem || isGeneratingAnnotationDigest}
+                    className="px-2 py-1 text-[10px] font-medium flex items-center gap-1 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors disabled:opacity-50"
+                    title={t("metaPanel.notes.digestTitle")}
+                  >
+                    {isGeneratingAnnotationDigest ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
+                    {t("metaPanel.notes.digest")}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!selectedItem) return;
+                      try {
+                        const updatedNote = await invoke<{content: string} | null>("append_annotations_to_note", { itemId: selectedItem.id });
+                        if (updatedNote) {
+                          setNoteText(updatedNote.content);
+                          feedback.success({
+                            title: t("feedback.meta.extractSuccess.title"),
+                            description: t("feedback.meta.extractSuccess.description"),
+                          });
+                        }
+                      } catch (e) {
+                        console.error("Failed to extract annotations", e);
+                        feedback.error({
+                          title: t("feedback.meta.extractError.title"),
+                          description: t("feedback.meta.extractError.description"),
                         });
                       }
-                    } catch (e) {
-                      console.error("Failed to extract annotations", e);
-                      feedback.error({
-                        title: t("feedback.meta.extractError.title"),
-                        description: t("feedback.meta.extractError.description"),
-                      });
-                    }
-                  }}
-                  className="px-2 py-1 text-[10px] font-medium flex items-center gap-1 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
-                  title={t("metaPanel.notes.extractTitle")}
-                >
-                  <Wand2 size={12} />
+                    }}
+                    className="px-2 py-1 text-[10px] font-medium flex items-center gap-1 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                    title={t("metaPanel.notes.extractTitle")}
+                  >
+                    <Wand2 size={12} />
                     {t("metaPanel.notes.extract")}
-                </button>
+                  </button>
+                </div>
               </div>
+              {annotationDigest && (
+                <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 space-y-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">
+                        {t("metaPanel.notes.digestPreview")}
+                      </span>
+                      <span className="text-[10px] text-indigo-500">
+                        {t("metaPanel.notes.digestStats", {
+                          text: annotationDigest.stats.textAnnotations,
+                          highlight: annotationDigest.stats.highlightStrokes,
+                          ink: annotationDigest.stats.inkStrokes,
+                        })}
+                      </span>
+                    </div>
+                    <p className="text-sm leading-relaxed text-zinc-700">{annotationDigest.overview}</p>
+                    <p className="text-xs leading-relaxed text-zinc-500">{annotationDigest.coverageNote}</p>
+                  </div>
+                  <div className="space-y-2">
+                    {annotationDigest.sections.filter((section) => section.entries.length > 0).map((section) => (
+                      <div key={section.id} className="rounded-lg border border-white/80 bg-white/80 p-2.5">
+                        <div className="text-[11px] font-semibold text-zinc-700">{section.title}</div>
+                        <div className="mt-1 text-[11px] text-zinc-500">{section.summary}</div>
+                        <div className="mt-2 space-y-1.5">
+                          {section.entries.slice(0, 3).map((entry, index) => (
+                            <div key={`${section.id}-${entry.page}-${index}`} className="text-xs leading-relaxed text-zinc-600">
+                              <span className="font-medium text-indigo-600">{t("metaPanel.annotations.page", { page: entry.page })}</span>
+                              {" · "}
+                              {entry.text}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button
+                      onClick={() => setAnnotationDigest(null)}
+                      className="px-2.5 py-1.5 text-[11px] font-medium rounded-md border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+                    >
+                      {t("metaPanel.actions.cancel")}
+                    </button>
+                    <button
+                      onClick={() => handleApplyAnnotationDigest("append")}
+                      disabled={isApplyingAnnotationDigest}
+                      className="px-2.5 py-1.5 text-[11px] font-medium rounded-md border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                    >
+                      {t("metaPanel.notes.digestAppend")}
+                    </button>
+                    <button
+                      onClick={() => handleApplyAnnotationDigest("replace")}
+                      disabled={isApplyingAnnotationDigest}
+                      className="px-2.5 py-1.5 text-[11px] font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50"
+                    >
+                      {isApplyingAnnotationDigest ? t("metaPanel.actions.savingWithDots") : t("metaPanel.notes.digestReplace")}
+                    </button>
+                  </div>
+                </div>
+              )}
               <textarea
                 value={noteText}
                 onChange={e => setNoteText(e.target.value)}

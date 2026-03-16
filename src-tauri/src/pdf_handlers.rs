@@ -2,7 +2,6 @@
 /// Purpose: Encapsulates all interactions with PDFium.
 /// Capabilities: Rendering PDF pages to base64 images, extracting text nodes and selection rects,
 /// parsing abstract/metadata directly from the PDF bytes.
-
 use crate::models::SavedPdfPageAnnotations;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use image::codecs::jpeg::JpegEncoder;
@@ -74,7 +73,10 @@ pub fn get_text_rects(
     };
     let doc_lock = doc_arc.lock().unwrap();
     let doc = &doc_lock.0;
-    let page = doc.pages().get(page_index).map_err(|e: PdfiumError| e.to_string())?;
+    let page = doc
+        .pages()
+        .get(page_index)
+        .map_err(|e: PdfiumError| e.to_string())?;
 
     let page_height = page.height().value;
 
@@ -83,12 +85,12 @@ pub fn get_text_rects(
     let pdf_left = selection.left;
     let pdf_right = selection.right;
 
-    let rect = PdfRect::new_from_values(
-        pdf_bottom, pdf_left, pdf_top, pdf_right,
-    );
+    let rect = PdfRect::new_from_values(pdf_bottom, pdf_left, pdf_top, pdf_right);
 
     let text = page.text().map_err(|e: PdfiumError| e.to_string())?;
-    let chars = text.chars_inside_rect(rect).map_err(|e: PdfiumError| e.to_string())?;
+    let chars = text
+        .chars_inside_rect(rect)
+        .map_err(|e: PdfiumError| e.to_string())?;
 
     let mut rects = Vec::new();
     for ch in chars.iter() {
@@ -98,7 +100,12 @@ pub fn get_text_rects(
             let w = bounds.right().value - bounds.left().value;
             let h = bounds.top().value - bounds.bottom().value;
             if w > 0.0 && h > 0.0 {
-                rects.push(TextRect { x, y, width: w, height: h });
+                rects.push(TextRect {
+                    x,
+                    y,
+                    width: w,
+                    height: h,
+                });
             }
         }
     }
@@ -120,7 +127,10 @@ pub fn get_page_text(
     };
     let doc_lock = doc_arc.lock().unwrap();
     let doc = &doc_lock.0;
-    let page = doc.pages().get(page_index).map_err(|e: PdfiumError| e.to_string())?;
+    let page = doc
+        .pages()
+        .get(page_index)
+        .map_err(|e: PdfiumError| e.to_string())?;
 
     let page_height = page.height().value;
     let text_obj = page.text().map_err(|e: PdfiumError| e.to_string())?;
@@ -144,25 +154,43 @@ pub fn get_page_text(
             if let Some(mut node) = current_node.take() {
                 let y_tolerance = f32::max(node.height, h) * 0.3;
                 let horizontal_gap = x - (node.x + node.width);
-                
-                if (node.y - y).abs() < y_tolerance && x >= node.x && horizontal_gap < node.height * 3.0 {
-                    if horizontal_gap > node.height * 0.25 && !node.text.ends_with(' ') && !ch_str.starts_with(' ') {
+
+                if (node.y - y).abs() < y_tolerance
+                    && x >= node.x
+                    && horizontal_gap < node.height * 3.0
+                {
+                    if horizontal_gap > node.height * 0.25
+                        && !node.text.ends_with(' ')
+                        && !ch_str.starts_with(' ')
+                    {
                         node.text.push(' ');
                     }
                     node.text.push_str(&ch_str);
 
                     let new_right = f32::max(node.x + node.width, x + w);
-                    node.y = f32::min(node.y, y); 
+                    node.y = f32::min(node.y, y);
                     let new_bottom = f32::max(node.y + node.height, y + h);
                     node.width = new_right - node.x;
                     node.height = new_bottom - node.y;
                     current_node = Some(node);
                 } else {
                     nodes.push(node);
-                    current_node = Some(TextNode { text: ch_str, x, y, width: w, height: h });
+                    current_node = Some(TextNode {
+                        text: ch_str,
+                        x,
+                        y,
+                        width: w,
+                        height: h,
+                    });
                 }
             } else {
-                current_node = Some(TextNode { text: ch_str, x, y, width: w, height: h });
+                current_node = Some(TextNode {
+                    text: ch_str,
+                    x,
+                    y,
+                    width: w,
+                    height: h,
+                });
             }
         }
     }
@@ -185,14 +213,20 @@ pub async fn render_page(
         let docs = state.documents.lock().unwrap();
         docs.get(&path).cloned().ok_or("No PDF loaded")?
     };
-    
+
     let base64_str = tokio::task::spawn_blocking(move || -> Result<String, String> {
         let image = {
             let doc_lock = doc_arc.lock().unwrap();
             let doc = &doc_lock.0;
-            let page = doc.pages().get(page_index).map_err(|e: PdfiumError| e.to_string())?;
+            let page = doc
+                .pages()
+                .get(page_index)
+                .map_err(|e: PdfiumError| e.to_string())?;
 
-            let rotation = page.rotation().map(|r: PdfPageRenderRotation| r.as_degrees()).unwrap_or(0.0);
+            let rotation = page
+                .rotation()
+                .map(|r: PdfPageRenderRotation| r.as_degrees())
+                .unwrap_or(0.0);
             let (base_w, base_h) = if rotation == 90.0 || rotation == 270.0 {
                 (page.height().value, page.width().value)
             } else {
@@ -233,16 +267,17 @@ pub async fn render_page(
 }
 
 #[tauri::command]
-pub fn load_pdf(path: String, state: tauri::State<'_, crate::models::AppState>) -> Result<u16, String> {
+pub fn load_pdf(
+    path: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<u16, String> {
     let mut docs = state.documents.lock().unwrap();
     if let Some(doc_arc) = docs.get(&path) {
         let doc_lock = doc_arc.lock().unwrap();
         return Ok(doc_lock.0.pages().len());
     }
 
-    let pdfium = GLOBAL_PDFIUM
-        .get()
-        .expect("PDFium not initialized");
+    let pdfium = GLOBAL_PDFIUM.get().expect("PDFium not initialized");
 
     let doc = pdfium
         .0
@@ -250,12 +285,18 @@ pub fn load_pdf(path: String, state: tauri::State<'_, crate::models::AppState>) 
         .map_err(|e| format!("Failed to open PDF: {:?}", e))?;
 
     let pages = doc.pages().len();
-    docs.insert(path, std::sync::Arc::new(std::sync::Mutex::new(ThreadSafeDoc(doc))));
+    docs.insert(
+        path,
+        std::sync::Arc::new(std::sync::Mutex::new(ThreadSafeDoc(doc))),
+    );
     Ok(pages)
 }
 
 #[tauri::command]
-pub fn get_pdf_dimensions(path: String, state: tauri::State<'_, crate::models::AppState>) -> Result<Vec<PageDimensions>, String> {
+pub fn get_pdf_dimensions(
+    path: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<Vec<PageDimensions>, String> {
     let doc_arc = {
         let docs = state.documents.lock().unwrap();
         docs.get(&path).cloned().ok_or("PDF not loaded")?
@@ -265,7 +306,10 @@ pub fn get_pdf_dimensions(path: String, state: tauri::State<'_, crate::models::A
 
     let mut dimensions = Vec::new();
     for page in doc.pages().iter() {
-        let rotation: f32 = page.rotation().map(|r: PdfPageRenderRotation| r.as_degrees()).unwrap_or(0.0);
+        let rotation: f32 = page
+            .rotation()
+            .map(|r: PdfPageRenderRotation| r.as_degrees())
+            .unwrap_or(0.0);
         let mut w = page.width().value;
         let mut h = page.height().value;
 
@@ -281,8 +325,6 @@ pub fn get_pdf_dimensions(path: String, state: tauri::State<'_, crate::models::A
 
     Ok(dimensions)
 }
-
-
 
 #[derive(Serialize)]
 pub struct PageDimensions {
@@ -318,8 +360,14 @@ pub fn merge_page_text_nodes(page: &PdfPage<'_>) -> Result<Vec<TextNode>, String
                 let y_tolerance = f32::max(node.height, h) * 0.3;
                 let horizontal_gap = x - (node.x + node.width);
 
-                if (node.y - y).abs() < y_tolerance && x >= node.x && horizontal_gap < node.height * 3.0 {
-                    if horizontal_gap > node.height * 0.25 && !node.text.ends_with(' ') && !ch_str.starts_with(' ') {
+                if (node.y - y).abs() < y_tolerance
+                    && x >= node.x
+                    && horizontal_gap < node.height * 3.0
+                {
+                    if horizontal_gap > node.height * 0.25
+                        && !node.text.ends_with(' ')
+                        && !ch_str.starts_with(' ')
+                    {
                         node.text.push(' ');
                     }
                     node.text.push_str(&ch_str);
@@ -332,10 +380,22 @@ pub fn merge_page_text_nodes(page: &PdfPage<'_>) -> Result<Vec<TextNode>, String
                     current_node = Some(node);
                 } else {
                     nodes.push(node);
-                    current_node = Some(TextNode { text: ch_str, x, y, width: w, height: h });
+                    current_node = Some(TextNode {
+                        text: ch_str,
+                        x,
+                        y,
+                        width: w,
+                        height: h,
+                    });
                 }
             } else {
-                current_node = Some(TextNode { text: ch_str, x, y, width: w, height: h });
+                current_node = Some(TextNode {
+                    text: ch_str,
+                    x,
+                    y,
+                    width: w,
+                    height: h,
+                });
             }
         }
     }
@@ -345,6 +405,54 @@ pub fn merge_page_text_nodes(page: &PdfPage<'_>) -> Result<Vec<TextNode>, String
     }
 
     Ok(nodes)
+}
+
+pub fn extract_document_text_from_path(
+    path: &str,
+    max_pages: usize,
+    max_chars: usize,
+) -> Result<String, String> {
+    let pdfium = GLOBAL_PDFIUM.get().ok_or("PDFium not initialized")?;
+    let doc = pdfium
+        .0
+        .load_pdf_from_file(path, None)
+        .map_err(|e| format!("Failed to open PDF: {:?}", e))?;
+
+    let mut parts = Vec::new();
+    let mut total_chars = 0usize;
+
+    for (page_index, page) in doc.pages().iter().enumerate() {
+        if page_index >= max_pages || total_chars >= max_chars {
+            break;
+        }
+
+        let page_text = merge_page_text_nodes(&page)?
+            .into_iter()
+            .map(|node| node.text.trim().to_string())
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if page_text.is_empty() {
+            continue;
+        }
+
+        let remaining = max_chars.saturating_sub(total_chars);
+        let excerpt = if page_text.chars().count() > remaining {
+            let mut truncated = String::new();
+            for ch in page_text.chars().take(remaining) {
+                truncated.push(ch);
+            }
+            truncated
+        } else {
+            page_text
+        };
+
+        total_chars += excerpt.chars().count();
+        parts.push(format!("## Page {}\n{}", page_index + 1, excerpt));
+    }
+
+    Ok(parts.join("\n\n"))
 }
 
 #[tauri::command]
@@ -453,8 +561,10 @@ fn build_normalized_search_index(search_chars: &[SearchChar]) -> (Vec<char>, Vec
             let y_tolerance = f32::max(previous.height, current_char.height) * 0.35;
             let same_line = (previous.y - current_char.y).abs() < y_tolerance;
             let horizontal_gap = current_char.x - (previous.x + previous.width);
-            let line_break = !same_line && current_char.x < previous.x + previous.width + previous.height;
-            let word_gap = same_line && horizontal_gap > f32::max(previous.height, current_char.height) * 0.2;
+            let line_break =
+                !same_line && current_char.x < previous.x + previous.width + previous.height;
+            let word_gap =
+                same_line && horizontal_gap > f32::max(previous.height, current_char.height) * 0.2;
 
             if (line_break || word_gap) && !last_was_space {
                 normalized.push(' ');
@@ -491,7 +601,10 @@ fn build_normalized_search_index(search_chars: &[SearchChar]) -> (Vec<char>, Vec
     (normalized, mapping)
 }
 
-fn find_page_search_matches(page: &PdfPage<'_>, normalized_term: &[char]) -> Result<Vec<Vec<TextRect>>, String> {
+fn find_page_search_matches(
+    page: &PdfPage<'_>,
+    normalized_term: &[char],
+) -> Result<Vec<Vec<TextRect>>, String> {
     let search_chars = extract_page_search_chars(page)?;
     if search_chars.is_empty() || normalized_term.is_empty() {
         return Ok(Vec::new());
@@ -512,7 +625,10 @@ fn find_page_search_matches(page: &PdfPage<'_>, normalized_term: &[char]) -> Res
         let mut rects = Vec::new();
         let mut last_char_index: Option<usize> = None;
 
-        for mapped_index in mapping[start..start + normalized_term.len()].iter().flatten() {
+        for mapped_index in mapping[start..start + normalized_term.len()]
+            .iter()
+            .flatten()
+        {
             if last_char_index == Some(*mapped_index) {
                 continue;
             }
@@ -579,7 +695,11 @@ pub fn extract_page_lines(page: &PdfPage<'_>) -> Result<Vec<String>, String> {
         left.y
             .partial_cmp(&right.y)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| left.x.partial_cmp(&right.x).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| {
+                left.x
+                    .partial_cmp(&right.x)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
     });
 
     let mut lines: Vec<(f32, f32, Vec<String>)> = Vec::new();
@@ -623,7 +743,8 @@ pub fn extract_document_lines(document: &PdfDocument<'_>, max_pages: usize) -> V
 pub fn infer_title_from_first_page(document: &PdfDocument<'_>) -> Option<String> {
     let page = document.pages().get(0).ok()?;
     let page_height = page.height().value;
-    let mut candidates = merge_page_text_nodes(&page).ok()?
+    let mut candidates = merge_page_text_nodes(&page)
+        .ok()?
         .into_iter()
         .map(|node| {
             let cleaned = crate::metadata_fetch::clean_title_text(&node.text);
@@ -642,10 +763,16 @@ pub fn infer_title_from_first_page(document: &PdfDocument<'_>) -> Option<String>
     }
 
     candidates.sort_by(|(left_node, left_text), (right_node, right_text)| {
-        right_node.height
+        right_node
+            .height
             .partial_cmp(&left_node.height)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| left_node.y.partial_cmp(&right_node.y).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| {
+                left_node
+                    .y
+                    .partial_cmp(&right_node.y)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
             .then_with(|| right_text.len().cmp(&left_text.len()))
     });
 
@@ -656,14 +783,20 @@ pub fn infer_title_from_first_page(document: &PdfDocument<'_>) -> Option<String>
 
     let mut title_lines = candidates
         .into_iter()
-        .filter(|(node, _)| node.height >= min_height && node.y >= anchor_y - anchor_height * 0.5 && node.y <= max_y)
+        .filter(|(node, _)| {
+            node.height >= min_height && node.y >= anchor_y - anchor_height * 0.5 && node.y <= max_y
+        })
         .collect::<Vec<_>>();
 
     title_lines.sort_by(|(left, _), (right, _)| {
         left.y
             .partial_cmp(&right.y)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| left.x.partial_cmp(&right.x).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| {
+                left.x
+                    .partial_cmp(&right.x)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
     });
 
     let title = title_lines
@@ -680,7 +813,10 @@ pub fn infer_title_from_first_page(document: &PdfDocument<'_>) -> Option<String>
     }
 }
 
-pub fn infer_authors_from_first_page(document: &PdfDocument<'_>, inferred_title: Option<&str>) -> Option<String> {
+pub fn infer_authors_from_first_page(
+    document: &PdfDocument<'_>,
+    inferred_title: Option<&str>,
+) -> Option<String> {
     let page = document.pages().get(0).ok()?;
     let page_height = page.height().value;
     let nodes = merge_page_text_nodes(&page).ok()?;
@@ -693,10 +829,13 @@ pub fn infer_authors_from_first_page(document: &PdfDocument<'_>, inferred_title:
                 && node.width > 120.0
                 && node.height > 10.0
                 && crate::metadata_fetch::is_plausible_title(cleaned)
-                && inferred_title.map(|title| cleaned.contains(title) || title.contains(cleaned)).unwrap_or(true)
+                && inferred_title
+                    .map(|title| cleaned.contains(title) || title.contains(cleaned))
+                    .unwrap_or(true)
         })
         .max_by(|(left_node, _), (right_node, _)| {
-            left_node.height
+            left_node
+                .height
                 .partial_cmp(&right_node.height)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
@@ -730,7 +869,12 @@ pub fn infer_authors_from_first_page(document: &PdfDocument<'_>, inferred_title:
         left.y
             .partial_cmp(&right.y)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| right.width.partial_cmp(&left.width).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| {
+                right
+                    .width
+                    .partial_cmp(&left.width)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
     });
 
     let author_line = candidates.first()?.1.clone();
@@ -777,8 +921,12 @@ pub fn extract_pdf_metadata(path: &std::path::Path) -> Option<crate::models::Par
     let inferred_title = metadata_title
         .clone()
         .or_else(|| infer_title_from_first_page(&document))
-        .or_else(|| file_name_text.filter(|title| crate::metadata_fetch::is_plausible_title(title)));
-    let inferred_authors = metadata_authors.clone().or_else(|| infer_authors_from_first_page(&document, inferred_title.as_deref()));
+        .or_else(|| {
+            file_name_text.filter(|title| crate::metadata_fetch::is_plausible_title(title))
+        });
+    let inferred_authors = metadata_authors
+        .clone()
+        .or_else(|| infer_authors_from_first_page(&document, inferred_title.as_deref()));
 
     let inferred_year = metadata_year.or_else(|| {
         inferred_title
@@ -787,8 +935,12 @@ pub fn extract_pdf_metadata(path: &std::path::Path) -> Option<crate::models::Par
     });
 
     let inferred_abstract = crate::metadata_fetch::extract_abstract_from_lines(&document_lines);
-    let inferred_doi = crate::metadata_fetch::extract_doi_from_text(&searchable_text)
-        .or_else(|| path.file_stem().and_then(|value| value.to_str()).and_then(crate::metadata_fetch::extract_doi_from_text));
+    let inferred_doi =
+        crate::metadata_fetch::extract_doi_from_text(&searchable_text).or_else(|| {
+            path.file_stem()
+                .and_then(|value| value.to_str())
+                .and_then(crate::metadata_fetch::extract_doi_from_text)
+        });
     let inferred_arxiv_id = crate::metadata_fetch::extract_arxiv_id_from_text(&searchable_text)
         .or_else(|| crate::metadata_fetch::extract_arxiv_id_from_filename(path));
 

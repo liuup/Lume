@@ -171,6 +171,26 @@
       "annotationsEmpty": {
         "title": "No annotations to export",
         "description": "This paper does not have any saved annotations yet."
+      },
+      "digestSuccess": {
+        "title": "AI digest ready",
+        "description": "Generated a structured draft from the current annotations."
+      },
+      "digestError": {
+        "title": "Failed to generate AI digest",
+        "description": "Could not build an annotation digest for this paper."
+      },
+      "digestApplySuccess": {
+        "title": "Digest applied to note",
+        "description": "The AI digest draft was written into the note."
+      },
+      "digestApplyError": {
+        "title": "Failed to apply AI digest",
+        "description": "Could not write the AI digest draft into the note."
+      },
+      "paperSummaryError": {
+        "title": "Failed to summarize paper",
+        "description": "Could not generate an AI summary for the current paper."
       }
     },
     "export": {
@@ -187,7 +207,8 @@
       "appearance": "Appearance",
       "language": "Language & Region",
       "library": "Library & File Management",
-      "export": "Export & Integrations"
+      "export": "Export & Integrations",
+      "ai": "AI"
     },
     "theme": {
       "label": "Theme",
@@ -220,6 +241,37 @@
     "defaultCitationFormat": {
       "label": "Default Citation Format",
       "description": "Format used for quick copy operations"
+    },
+    "ai": {
+      "apiKey": {
+        "label": "API Key",
+        "description": "Stored locally and used for paper summary and translation requests",
+        "placeholder": "sk-..."
+      },
+      "completionUrl": {
+        "label": "Completion URL",
+        "description": "Use an OpenAI-compatible chat completions endpoint",
+        "placeholder": "https://api.openai.com/v1/chat/completions"
+      },
+      "model": {
+        "label": "Model",
+        "description": "Model name sent with each request",
+        "placeholder": "gpt-4o-mini"
+      },
+      "autoSummarize": {
+        "label": "Auto summarize paper",
+        "description": "Generate an AI summary automatically when opening a paper"
+      },
+      "summaryLanguage": {
+        "label": "Summary language",
+        "description": "Language used for generated paper summaries",
+        "placeholder": "zh-CN"
+      },
+      "translateLanguage": {
+        "label": "Translation target",
+        "description": "Target language for automatic selection translation",
+        "placeholder": "zh-CN"
+      }
     },
     "citationFormats": {
       "apa": "APA",
@@ -461,10 +513,25 @@
     },
     "notes": {
       "title": "Notes",
+      "digest": "AI Digest",
+      "digestTitle": "Generate a structured draft from saved annotations",
+      "digestPreview": "AI draft preview",
+      "digestStats": "{text} text · {highlight} highlights · {ink} ink",
+      "digestAppend": "Append to note",
+      "digestReplace": "Replace note",
       "extract": "Extract",
       "extractTitle": "Extract PDF text annotations to note",
       "placeholder": "Write your thoughts, summaries, or quotes in Markdown...",
       "save": "Save Note"
+    },
+    "aiSummary": {
+      "title": "AI Summary",
+      "refresh": "Refresh",
+      "loading": "Generating paper summary...",
+      "empty": "No AI summary yet. Click refresh to generate one.",
+      "notConfigured": "Configure AI API key, completion URL, and model in Settings to enable automatic paper summaries.",
+      "keyPoints": "Key Points",
+      "limitations": "Limitations"
     },
     "annotations": {
       "title": "Pdf Annotations",
@@ -508,6 +575,14 @@
     "errors": {
       "saveChanges": "Failed to save changes.",
       "saveNote": "Failed to save note."
+    }
+  },
+  "textLayer": {
+    "translation": {
+      "title": "Translation · {language}",
+      "loading": "Translating selection...",
+      "error": "Translation failed. Check your AI settings or completion endpoint.",
+      "notConfigured": "Configure AI settings first to enable automatic selection translation."
     }
   },
   "errorBoundary": {

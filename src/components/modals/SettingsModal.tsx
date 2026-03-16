@@ -1,4 +1,4 @@
-import { X, Moon, Sun, Monitor, Type, FileArchive, Settings } from "lucide-react";
+import { X, Moon, Sun, Monitor, Type, FileArchive, Settings, Bot, Languages } from "lucide-react";
 import { AppTheme, useSettings } from "../../hooks/useSettings";
 import { useI18n } from "../../hooks/useI18n";
 
@@ -174,6 +174,111 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <option value="gbt">{t("settings.citationFormats.gbt")}</option>
                     <option value="bibtex">{t("settings.citationFormats.bibtex")}</option>
                   </select>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <h3 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">{t("settings.sections.ai")}</h3>
+
+              <div className="space-y-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <Bot size={18} className="mt-0.5 text-zinc-400" />
+                    <div>
+                      <div className="text-sm font-medium text-zinc-800">{t("settings.ai.apiKey.label")}</div>
+                      <div className="text-xs text-zinc-500">{t("settings.ai.apiKey.description")}</div>
+                    </div>
+                  </div>
+                  <input
+                    type="password"
+                    value={settings.aiApiKey}
+                    onChange={(e) => updateSetting("aiApiKey", e.target.value)}
+                    className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-56 focus:ring-1 focus:ring-indigo-500 outline-none"
+                    placeholder={t("settings.ai.apiKey.placeholder")}
+                  />
+                </div>
+
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <Bot size={18} className="mt-0.5 text-zinc-400" />
+                    <div>
+                      <div className="text-sm font-medium text-zinc-800">{t("settings.ai.completionUrl.label")}</div>
+                      <div className="text-xs text-zinc-500">{t("settings.ai.completionUrl.description")}</div>
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    value={settings.aiCompletionUrl}
+                    onChange={(e) => updateSetting("aiCompletionUrl", e.target.value)}
+                    className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-56 focus:ring-1 focus:ring-indigo-500 outline-none"
+                    placeholder={t("settings.ai.completionUrl.placeholder")}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <Bot size={18} className="text-zinc-400" />
+                    <div>
+                      <div className="text-sm font-medium text-zinc-800">{t("settings.ai.model.label")}</div>
+                      <div className="text-xs text-zinc-500">{t("settings.ai.model.description")}</div>
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    value={settings.aiModel}
+                    onChange={(e) => updateSetting("aiModel", e.target.value)}
+                    className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-56 focus:ring-1 focus:ring-indigo-500 outline-none"
+                    placeholder={t("settings.ai.model.placeholder")}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <Bot size={18} className="text-zinc-400" />
+                    <div>
+                      <div className="text-sm font-medium text-zinc-800">{t("settings.ai.autoSummarize.label")}</div>
+                      <div className="text-xs text-zinc-500">{t("settings.ai.autoSummarize.description")}</div>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" className="sr-only peer" checked={settings.aiAutoSummarize} onChange={(e) => updateSetting("aiAutoSummarize", e.target.checked)} />
+                    <div className="w-9 h-5 bg-zinc-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                  </label>
+                </div>
+
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <Languages size={18} className="text-zinc-400" />
+                    <div>
+                      <div className="text-sm font-medium text-zinc-800">{t("settings.ai.summaryLanguage.label")}</div>
+                      <div className="text-xs text-zinc-500">{t("settings.ai.summaryLanguage.description")}</div>
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    value={settings.aiSummaryLanguage}
+                    onChange={(e) => updateSetting("aiSummaryLanguage", e.target.value)}
+                    className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-40 focus:ring-1 focus:ring-indigo-500 outline-none"
+                    placeholder={t("settings.ai.summaryLanguage.placeholder")}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <Languages size={18} className="text-zinc-400" />
+                    <div>
+                      <div className="text-sm font-medium text-zinc-800">{t("settings.ai.translateLanguage.label")}</div>
+                      <div className="text-xs text-zinc-500">{t("settings.ai.translateLanguage.description")}</div>
+                    </div>
+                  </div>
+                  <input
+                    type="text"
+                    value={settings.aiTranslateTargetLanguage}
+                    onChange={(e) => updateSetting("aiTranslateTargetLanguage", e.target.value)}
+                    className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-40 focus:ring-1 focus:ring-indigo-500 outline-none"
+                    placeholder={t("settings.ai.translateLanguage.placeholder")}
+                  />
                 </div>
               </div>
             </section>

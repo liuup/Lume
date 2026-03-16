@@ -1,15 +1,45 @@
+use crate::metadata_fetch::{
+    fetch_arxiv_metadata_by_id, fetch_arxiv_metadata_by_title, fetch_crossref_metadata_by_doi,
+    fetch_crossref_metadata_by_title, merge_arxiv_metadata, merge_crossref_metadata,
+};
 /// Module: src-tauri/src/library_commands.rs
 /// Purpose: Encapsulates all general file/directory manipulation commands.
-/// Capabilities: Moving, renaming, deleting, parsing library structure, managing annotations cache sidecars. 
+/// Capabilities: Moving, renaming, deleting, parsing library structure, managing annotations cache sidecars.
+use crate::models::{
+    AiAnnotationDigest, AiAnnotationDigestStats, AiDigestEntry, AiDigestSection, AiPaperSummary,
+    AiTranslationResult, CachedPdfMetadataRecord, LibraryItem, Note, ParsedPdfMetadata,
+    SavedPdfAnnotationsDocument, SavedPdfPageAnnotations,
+};
+use crate::pdf_handlers::{extract_document_text_from_path, extract_pdf_metadata};
 
-use crate::models::{CachedPdfMetadataRecord, LibraryItem, ParsedPdfMetadata, SavedPdfAnnotationsDocument, SavedPdfPageAnnotations, Note};
-use crate::pdf_handlers::extract_pdf_metadata;
-use crate::metadata_fetch::{fetch_arxiv_metadata_by_id, fetch_arxiv_metadata_by_title, fetch_crossref_metadata_by_doi, fetch_crossref_metadata_by_title, merge_arxiv_metadata, merge_crossref_metadata};
-
-use tauri::Manager;
+use rusqlite::OptionalExtension;
+use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
-use rusqlite::OptionalExtension;
+use tauri::Manager;
+
+#[derive(Clone)]
+struct DigestCandidate {
+    page: u16,
+    text: String,
+    category: &'static str,
+    reason: &'static str,
+}
+
+#[derive(Deserialize)]
+struct ChatCompletionResponse {
+    choices: Vec<ChatCompletionChoice>,
+}
+
+#[derive(Deserialize)]
+struct ChatCompletionChoice {
+    message: ChatCompletionMessage,
+}
+
+#[derive(Deserialize)]
+struct ChatCompletionMessage {
+    content: serde_json::Value,
+}
 
 pub fn library_root_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let root = app
@@ -18,8 +48,7 @@ pub fn library_root_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("Failed to resolve app data directory: {:?}", e))?
         .join("library");
 
-    fs::create_dir_all(&root)
-        .map_err(|e| format!("Failed to create library root: {}", e))?;
+    fs::create_dir_all(&root).map_err(|e| format!("Failed to create library root: {}", e))?;
 
     Ok(root)
 }
@@ -154,12 +183,14 @@ pub fn read_annotation_sidecar(path: &Path) -> Option<SavedPdfAnnotationsDocumen
     serde_json::from_str(&content).ok()
 }
 
-pub fn write_annotation_sidecar(path: &Path, document: &SavedPdfAnnotationsDocument) -> Result<(), String> {
+pub fn write_annotation_sidecar(
+    path: &Path,
+    document: &SavedPdfAnnotationsDocument,
+) -> Result<(), String> {
     let sidecar_path = annotation_sidecar_path(path);
     let content = serde_json::to_string_pretty(document)
         .map_err(|e| format!("Failed to serialize annotations: {}", e))?;
-    fs::write(sidecar_path, content)
-        .map_err(|e| format!("Failed to write annotations: {}", e))
+    fs::write(sidecar_path, content).map_err(|e| format!("Failed to write annotations: {}", e))
 }
 
 pub fn remove_annotation_sidecar(path: &Path) {
@@ -189,9 +220,7 @@ pub fn copy_annotation_sidecar(source_path: &Path, target_path: &Path) {
 }
 
 pub fn should_try_remote_metadata(meta: &ParsedPdfMetadata) -> bool {
-    meta.doi.is_some()
-        || meta.arxiv_id.is_some()
-        || meta.title.is_some()
+    meta.doi.is_some() || meta.arxiv_id.is_some() || meta.title.is_some()
 }
 
 pub fn resolve_pdf_metadata(path: &Path) -> ParsedPdfMetadata {
@@ -281,18 +310,9 @@ pub fn build_library_item(path: &Path) -> LibraryItem {
         .to_string();
     let path_str = path.to_string_lossy().to_string();
     let parsed = resolve_pdf_metadata(path);
-    let title = parsed
-        .title
-        .clone()
-        .unwrap_or_else(|| name.clone());
-    let authors = parsed
-        .authors
-        .clone()
-        .unwrap_or_else(|| "—".to_string());
-    let year = parsed
-        .year
-        .clone()
-        .unwrap_or_else(|| "—".to_string());
+    let title = parsed.title.clone().unwrap_or_else(|| name.clone());
+    let authors = parsed.authors.clone().unwrap_or_else(|| "—".to_string());
+    let year = parsed.year.clone().unwrap_or_else(|| "—".to_string());
     let abstract_text = parsed.r#abstract.clone().unwrap_or_default();
     let doi = parsed.doi.clone().unwrap_or_default();
     let arxiv_id = parsed.arxiv_id.clone().unwrap_or_default();
@@ -330,7 +350,10 @@ pub fn build_library_item(path: &Path) -> LibraryItem {
     }
 }
 
-pub fn fetch_item_from_db(conn: &rusqlite::Connection, id: &str) -> rusqlite::Result<Option<LibraryItem>> {
+pub fn fetch_item_from_db(
+    conn: &rusqlite::Connection,
+    id: &str,
+) -> rusqlite::Result<Option<LibraryItem>> {
     let mut stmt = conn.prepare("SELECT id, item_type, title, authors, year, abstract, doi, arxiv_id, publication, volume, issue, pages, publisher, isbn, url, language, date_added, date_modified, folder_path FROM items WHERE id = ?1")?;
     let mut item_iter = stmt.query_map(rusqlite::params![id], |row| {
         Ok(LibraryItem {
@@ -360,7 +383,9 @@ pub fn fetch_item_from_db(conn: &rusqlite::Connection, id: &str) -> rusqlite::Re
 
     if let Some(item_res) = item_iter.next() {
         let mut item = item_res?;
-        let mut att_stmt = conn.prepare("SELECT id, item_id, name, path, attachment_type FROM attachments WHERE item_id = ?1")?;
+        let mut att_stmt = conn.prepare(
+            "SELECT id, item_id, name, path, attachment_type FROM attachments WHERE item_id = ?1",
+        )?;
         let att_iter = att_stmt.query_map(rusqlite::params![id], |row| {
             Ok(crate::models::LibraryAttachment {
                 id: row.get(0)?,
@@ -471,16 +496,10 @@ pub fn sync_item_to_db(conn: &rusqlite::Connection, item: &LibraryItem) -> rusql
         conn.execute(
             "INSERT OR IGNORE INTO attachments (id, item_id, name, path, attachment_type)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![
-                att.id,
-                att.item_id,
-                att.name,
-                att.path,
-                att.attachment_type,
-            ],
+            rusqlite::params![att.id, att.item_id, att.name, att.path, att.attachment_type,],
         )?;
     }
-    
+
     Ok(())
 }
 
@@ -519,9 +538,12 @@ pub fn rekey_library_item_in_db(
     Ok(())
 }
 
-pub fn build_library_tree(path: &Path, is_root: bool, conn: &rusqlite::Connection) -> Result<crate::models::LibraryFolderNode, String> {
-    fs::create_dir_all(path)
-        .map_err(|e| format!("Failed to prepare library folder: {}", e))?;
+pub fn build_library_tree(
+    path: &Path,
+    is_root: bool,
+    conn: &rusqlite::Connection,
+) -> Result<crate::models::LibraryFolderNode, String> {
+    fs::create_dir_all(path).map_err(|e| format!("Failed to prepare library folder: {}", e))?;
 
     let mut child_dirs: Vec<PathBuf> = Vec::new();
     let mut pdf_paths: Vec<PathBuf> = Vec::new();
@@ -580,7 +602,10 @@ pub fn build_library_tree(path: &Path, is_root: bool, conn: &rusqlite::Connectio
 }
 
 #[tauri::command]
-pub fn load_library_tree(app: tauri::AppHandle, state: tauri::State<crate::models::AppState>) -> Result<Vec<crate::models::LibraryFolderNode>, String> {
+pub fn load_library_tree(
+    app: tauri::AppHandle,
+    state: tauri::State<crate::models::AppState>,
+) -> Result<Vec<crate::models::LibraryFolderNode>, String> {
     let root = library_root_dir(&app)?;
     let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
     Ok(vec![build_library_tree(&root, true, &conn)?])
@@ -597,7 +622,10 @@ pub fn get_all_annotations(path: String) -> Result<SavedPdfAnnotationsDocument, 
 }
 
 #[tauri::command]
-pub fn load_pdf_annotations(path: String, page_index: u16) -> Result<SavedPdfPageAnnotations, String> {
+pub fn load_pdf_annotations(
+    path: String,
+    page_index: u16,
+) -> Result<SavedPdfPageAnnotations, String> {
     let pdf_path = PathBuf::from(&path);
     if !pdf_path.exists() {
         return Err("PDF does not exist".to_string());
@@ -654,18 +682,20 @@ pub fn create_library_folder(parent_path: String, name: String) -> Result<String
     }
 
     let parent = PathBuf::from(parent_path);
-    fs::create_dir_all(&parent)
-        .map_err(|e| format!("Failed to access parent folder: {}", e))?;
+    fs::create_dir_all(&parent).map_err(|e| format!("Failed to access parent folder: {}", e))?;
 
     let target = unique_directory_path(&parent, trimmed_name);
-    fs::create_dir_all(&target)
-        .map_err(|e| format!("Failed to create folder: {}", e))?;
+    fs::create_dir_all(&target).map_err(|e| format!("Failed to create folder: {}", e))?;
 
     Ok(target.to_string_lossy().to_string())
 }
 
 #[tauri::command]
-pub fn import_pdf_to_folder(source_path: String, folder_path: String, state: tauri::State<'_, crate::models::AppState>) -> Result<String, String> {
+pub fn import_pdf_to_folder(
+    source_path: String,
+    folder_path: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<String, String> {
     let source = PathBuf::from(&source_path);
     if !source.exists() {
         return Err("Selected PDF does not exist".to_string());
@@ -684,8 +714,7 @@ pub fn import_pdf_to_folder(source_path: String, folder_path: String, state: tau
         .ok_or("Invalid PDF filename")?;
     let target = unique_file_path(&target_folder, file_name);
 
-    fs::copy(&source, &target)
-        .map_err(|e| format!("Failed to import PDF: {}", e))?;
+    fs::copy(&source, &target).map_err(|e| format!("Failed to import PDF: {}", e))?;
     copy_annotation_sidecar(&source, &target);
 
     let resolved_meta = resolve_pdf_metadata(&target);
@@ -694,38 +723,45 @@ pub fn import_pdf_to_folder(source_path: String, folder_path: String, state: tau
     let mut rename_pattern = "[Year] - [Author] - [Title]".to_string();
 
     if let Ok(conn) = state.db.lock() {
-        let mut stmt = conn.prepare("SELECT key, value FROM settings WHERE key IN ('autoRenamePdf', 'renamePattern')").unwrap();
-        let _ = stmt.query_map([], |row| {
-            let k: String = row.get(0)?;
-            let v: String = row.get(1)?;
-            if k == "autoRenamePdf" {
-                auto_rename = v == "true";
-            } else if k == "renamePattern" {
-                rename_pattern = v;
-            }
-            Ok(())
-        }).map(|mut iter| {
-            while let Some(Ok(_)) = iter.next() {}
-        });
+        let mut stmt = conn
+            .prepare(
+                "SELECT key, value FROM settings WHERE key IN ('autoRenamePdf', 'renamePattern')",
+            )
+            .unwrap();
+        let _ = stmt
+            .query_map([], |row| {
+                let k: String = row.get(0)?;
+                let v: String = row.get(1)?;
+                if k == "autoRenamePdf" {
+                    auto_rename = v == "true";
+                } else if k == "renamePattern" {
+                    rename_pattern = v;
+                }
+                Ok(())
+            })
+            .map(|mut iter| while let Some(Ok(_)) = iter.next() {});
     }
 
     let final_path = if auto_rename {
         let title = resolved_meta.title.as_deref().unwrap_or("Unknown Title");
         let year = resolved_meta.year.as_deref().unwrap_or("Unknown Year");
         let authors = resolved_meta.authors.as_deref().unwrap_or("Unknown Author");
-        
+
         let mut first_author = authors.split(',').next().unwrap_or("Unknown Author").trim();
         if first_author.contains(' ') {
-            first_author = first_author.split_whitespace().last().unwrap_or(first_author);
+            first_author = first_author
+                .split_whitespace()
+                .last()
+                .unwrap_or(first_author);
         }
 
         let proposed_name = rename_pattern
             .replace("[Year]", year)
             .replace("[Author]", first_author)
             .replace("[Title]", title);
-            
+
         let safe_name = sanitize_file_name(&proposed_name);
-        
+
         if safe_name.is_empty() {
             target.clone()
         } else {
@@ -743,8 +779,6 @@ pub fn import_pdf_to_folder(source_path: String, folder_path: String, state: tau
         target.clone()
     };
 
-
-
     if final_path != target {
         rename_cached_pdf_metadata(&target, &final_path);
         rename_annotation_sidecar(&target, &final_path);
@@ -759,7 +793,10 @@ pub fn import_pdf_to_folder(source_path: String, folder_path: String, state: tau
 }
 
 #[tauri::command]
-pub fn delete_library_pdf(path: String, state: tauri::State<'_, crate::models::AppState>) -> Result<(), String> {
+pub fn delete_library_pdf(
+    path: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<(), String> {
     let target = PathBuf::from(&path);
     if !target.exists() {
         remove_cached_pdf_metadata(&target);
@@ -775,13 +812,12 @@ pub fn delete_library_pdf(path: String, state: tauri::State<'_, crate::models::A
         docs.remove(&path);
     }
 
-    fs::remove_file(&target)
-        .map_err(|e| format!("Failed to delete PDF: {}", e))?;
+    fs::remove_file(&target).map_err(|e| format!("Failed to delete PDF: {}", e))?;
 
     remove_cached_pdf_metadata(&target);
     remove_annotation_sidecar(&target);
 
-        if let Ok(conn) = state.db.lock() {
+    if let Ok(conn) = state.db.lock() {
         let _ = conn.execute("DELETE FROM items WHERE id = ?1", rusqlite::params![&path]);
     }
 
@@ -789,7 +825,11 @@ pub fn delete_library_pdf(path: String, state: tauri::State<'_, crate::models::A
 }
 
 #[tauri::command]
-pub fn rename_library_pdf(path: String, new_name: String, state: tauri::State<'_, crate::models::AppState>) -> Result<String, String> {
+pub fn rename_library_pdf(
+    path: String,
+    new_name: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<String, String> {
     let source = PathBuf::from(&path);
     if !source.exists() {
         return Err("PDF does not exist".to_string());
@@ -824,14 +864,13 @@ pub fn rename_library_pdf(path: String, new_name: String, state: tauri::State<'_
         docs.remove(&path);
     }
 
-    fs::rename(&source, &target)
-        .map_err(|e| format!("Failed to rename PDF: {}", e))?;
+    fs::rename(&source, &target).map_err(|e| format!("Failed to rename PDF: {}", e))?;
 
     rename_cached_pdf_metadata(&source, &target);
     rename_annotation_sidecar(&source, &target);
 
     let target_path_str = target.to_string_lossy().to_string();
-    
+
     if let Ok(conn) = state.db.lock() {
         let new_folder_path = target
             .parent()
@@ -889,8 +928,7 @@ pub fn move_library_pdf(
         docs.remove(&path);
     }
 
-    fs::rename(&source, &target)
-        .map_err(|e| format!("Failed to move PDF: {}", e))?;
+    fs::rename(&source, &target).map_err(|e| format!("Failed to move PDF: {}", e))?;
 
     rename_cached_pdf_metadata(&source, &target);
     rename_annotation_sidecar(&source, &target);
@@ -955,8 +993,7 @@ pub fn rename_library_folder(
         }
     }
 
-    fs::rename(&source, &target)
-        .map_err(|e| format!("Failed to rename folder: {}", e))?;
+    fs::rename(&source, &target).map_err(|e| format!("Failed to rename folder: {}", e))?;
 
     if let Ok(conn) = state.db.lock() {
         let target_str = target.to_string_lossy().to_string();
@@ -1009,8 +1046,7 @@ pub fn delete_library_folder(
         }
     }
 
-    fs::remove_dir_all(&target)
-        .map_err(|e| format!("Failed to delete folder: {}", e))?;
+    fs::remove_dir_all(&target).map_err(|e| format!("Failed to delete folder: {}", e))?;
 
     if let Ok(conn) = state.db.lock() {
         let pattern = format!("{}/%", path);
@@ -1040,9 +1076,7 @@ pub fn delete_library_folder(
 // ─────────────────────────────────────────────────────────────
 
 pub fn fetch_item_tags(conn: &rusqlite::Connection, item_id: &str) -> Vec<String> {
-    let mut stmt = match conn.prepare(
-        "SELECT tag FROM item_tags WHERE item_id = ?1 ORDER BY tag",
-    ) {
+    let mut stmt = match conn.prepare("SELECT tag FROM item_tags WHERE item_id = ?1 ORDER BY tag") {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
@@ -1068,7 +1102,6 @@ pub fn search_library_db(
     conn: &rusqlite::Connection,
     params: &SearchLibraryParams,
 ) -> Result<Vec<crate::models::LibraryItem>, String> {
-
     let query_text = params.query.trim();
     let pattern = format!("%{}%", query_text.to_lowercase());
 
@@ -1159,7 +1192,9 @@ pub fn search_library_db(
         conditions.join(" AND ")
     );
 
-    let mut stmt = conn.prepare(&sql).map_err(|e| format!("Prepare error: {}", e))?;
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("Prepare error: {}", e))?;
 
     let rows = stmt
         .query_map(rusqlite::params_from_iter(param_values.iter()), |row| {
@@ -1256,6 +1291,122 @@ fn find_pdf_attachment_path(
     .map_err(|e| format!("Query PDF attachment failed: {}", e))
 }
 
+fn get_setting_value(conn: &rusqlite::Connection, key: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1 LIMIT 1",
+        rusqlite::params![key],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(|e| format!("Query setting failed: {}", e))
+}
+
+fn get_required_ai_settings(
+    conn: &rusqlite::Connection,
+) -> Result<(String, String, String), String> {
+    let api_key = get_setting_value(conn, "aiApiKey")?.unwrap_or_default();
+    let completion_url = get_setting_value(conn, "aiCompletionUrl")?.unwrap_or_default();
+    let model = get_setting_value(conn, "aiModel")?
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "gpt-4o-mini".to_string());
+
+    if api_key.trim().is_empty() {
+        return Err("Missing AI API key in settings".to_string());
+    }
+    if completion_url.trim().is_empty() {
+        return Err("Missing AI completion URL in settings".to_string());
+    }
+
+    Ok((api_key, completion_url, model))
+}
+
+fn completion_message_content_to_string(content: &serde_json::Value) -> String {
+    match content {
+        serde_json::Value::String(text) => text.trim().to_string(),
+        serde_json::Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| part.get("text").and_then(|value| value.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string(),
+        _ => String::new(),
+    }
+}
+
+fn call_openai_compatible_chat(
+    completion_url: &str,
+    api_key: &str,
+    model: &str,
+    system_prompt: &str,
+    user_prompt: &str,
+) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("Failed to build AI HTTP client: {}", e))?;
+
+    let payload = serde_json::json!({
+        "model": model,
+        "temperature": 0.2,
+        "messages": [
+            { "role": "system", "content": system_prompt },
+            { "role": "user", "content": user_prompt }
+        ]
+    });
+
+    let response = client
+        .post(completion_url)
+        .bearer_auth(api_key)
+        .json(&payload)
+        .send()
+        .map_err(|e| format!("AI request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!("AI request failed with {}: {}", status, body));
+    }
+
+    let parsed: ChatCompletionResponse = response
+        .json()
+        .map_err(|e| format!("Failed to parse AI response: {}", e))?;
+
+    let content = parsed
+        .choices
+        .first()
+        .map(|choice| completion_message_content_to_string(&choice.message.content))
+        .unwrap_or_default();
+
+    if content.trim().is_empty() {
+        return Err("AI response did not contain any text".to_string());
+    }
+
+    Ok(content)
+}
+
+fn parse_bullet_lines(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            line.trim_start_matches(|ch: char| {
+                ch == '-' || ch == '*' || ch == '•' || ch.is_ascii_digit() || ch == '.' || ch == ')'
+            })
+            .trim()
+            .to_string()
+        })
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+fn parse_tagged_output(content: &str, tag: &str) -> Option<String> {
+    content
+        .lines()
+        .find_map(|line| line.strip_prefix(tag).map(|value| value.trim().to_string()))
+        .filter(|value| !value.is_empty())
+}
+
 fn quote_markdown_block(text: &str) -> String {
     let mut quoted_lines = Vec::new();
     for line in text.lines() {
@@ -1307,7 +1458,11 @@ fn render_annotations_markdown(document: &SavedPdfAnnotationsDocument) -> String
             blocks.push(format!(
                 "- {} highlight {}",
                 highlight_count,
-                if highlight_count == 1 { "stroke" } else { "strokes" }
+                if highlight_count == 1 {
+                    "stroke"
+                } else {
+                    "strokes"
+                }
             ));
         }
 
@@ -1329,6 +1484,322 @@ fn render_annotations_markdown(document: &SavedPdfAnnotationsDocument) -> String
     }
 
     sections.join("\n\n")
+}
+
+fn normalize_digest_text(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string()
+}
+
+fn truncate_digest_text(text: &str, max_chars: usize) -> String {
+    let mut truncated = String::new();
+    let mut count = 0;
+
+    for ch in text.chars() {
+        if count >= max_chars {
+            break;
+        }
+        truncated.push(ch);
+        count += 1;
+    }
+
+    if text.chars().count() > max_chars {
+        truncated.push('…');
+    }
+
+    truncated
+}
+
+fn annotation_contains_any(text: &str, keywords: &[&str]) -> bool {
+    keywords.iter().any(|keyword| text.contains(keyword))
+}
+
+fn classify_digest_candidate(text: &str) -> (&'static str, &'static str) {
+    let lowered = text.to_lowercase();
+
+    if lowered.contains('?')
+        || annotation_contains_any(
+            &lowered,
+            &["why", "todo", "verify", "check", "unclear", "question"],
+        )
+        || annotation_contains_any(
+            text,
+            &["？", "待验证", "存疑", "为什么", "需要确认", "待查"],
+        )
+    {
+        return (
+            "questions",
+            "Contains an explicit question or follow-up marker.",
+        );
+    }
+
+    if annotation_contains_any(
+        &lowered,
+        &[
+            "limitation",
+            "weakness",
+            "future work",
+            "trade-off",
+            "however",
+            "but ",
+        ],
+    ) || annotation_contains_any(
+        text,
+        &["局限", "不足", "问题", "缺点", "未来工作", "但是", "然而"],
+    ) {
+        return (
+            "limitations",
+            "Mentions a caveat, weakness, or future-work concern.",
+        );
+    }
+
+    if annotation_contains_any(
+        &lowered,
+        &[
+            "method",
+            "model",
+            "dataset",
+            "training",
+            "baseline",
+            "ablation",
+            "architecture",
+            "parameter",
+        ],
+    ) || annotation_contains_any(
+        text,
+        &[
+            "方法",
+            "模型",
+            "数据集",
+            "训练",
+            "基线",
+            "消融",
+            "结构",
+            "参数",
+            "实验设置",
+        ],
+    ) {
+        return (
+            "methods",
+            "Looks like a method, setup, or implementation detail.",
+        );
+    }
+
+    if text.chars().any(|ch| ch.is_ascii_digit())
+        || annotation_contains_any(
+            &lowered,
+            &["%", "acc", "f1", "bleu", "auc", "p=", "±", "table", "fig"],
+        )
+        || annotation_contains_any(
+            text,
+            &["结果", "提升", "下降", "百分点", "表", "图", "实验"],
+        )
+    {
+        return (
+            "data",
+            "Includes numbers, metrics, or result-oriented wording.",
+        );
+    }
+
+    let long_enough = text.split_whitespace().count() >= 10 || text.chars().count() >= 24;
+    if long_enough
+        && (annotation_contains_any(
+            &lowered,
+            &["we ", "this paper", "show", "find", "propose", "conclude"],
+        ) || annotation_contains_any(text, &["本文", "提出", "发现", "表明", "说明", "结论"]))
+    {
+        return (
+            "quotes",
+            "Reads like a reusable sentence worth citing or paraphrasing.",
+        );
+    }
+
+    ("core", "Captured as a general key point.")
+}
+
+fn build_digest_candidates(document: &SavedPdfAnnotationsDocument) -> Vec<DigestCandidate> {
+    let mut pages: Vec<(u16, &SavedPdfPageAnnotations)> = document
+        .pages
+        .iter()
+        .filter_map(|(key, value)| key.parse::<u16>().ok().map(|page_idx| (page_idx, value)))
+        .collect();
+    pages.sort_by_key(|(page_idx, _)| *page_idx);
+
+    let mut candidates = Vec::new();
+
+    for (page_idx, page_annotations) in pages {
+        let mut text_annotations = page_annotations.text_annotations.clone();
+        text_annotations.sort_by(|a, b| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal));
+
+        for annotation in text_annotations {
+            let normalized = normalize_digest_text(&annotation.text);
+            if normalized.is_empty() {
+                continue;
+            }
+
+            let (category, reason) = classify_digest_candidate(&normalized);
+            candidates.push(DigestCandidate {
+                page: page_idx + 1,
+                text: normalized,
+                category,
+                reason,
+            });
+        }
+    }
+
+    candidates
+}
+
+fn summarize_digest_section(title: &str, entries: &[AiDigestEntry]) -> String {
+    match entries.len() {
+        0 => format!("No {} were detected.", title.to_lowercase()),
+        1 => format!(
+            "1 {} extracted from the current annotations.",
+            title.to_lowercase()
+        ),
+        count => format!(
+            "{} {} extracted from the current annotations.",
+            count,
+            title.to_lowercase()
+        ),
+    }
+}
+
+fn render_ai_annotation_digest_markdown(digest: &AiAnnotationDigest) -> String {
+    let mut blocks = vec![
+        "# AI Annotation Digest".to_string(),
+        String::new(),
+        digest.overview.clone(),
+        String::new(),
+        format!("> Coverage: {}", digest.coverage_note),
+        format!("> Limits: {}", digest.limitations),
+        String::new(),
+        format!(
+            "- Source stats: {} text annotations, {} highlight strokes, {} ink strokes",
+            digest.stats.text_annotations, digest.stats.highlight_strokes, digest.stats.ink_strokes
+        ),
+    ];
+
+    for section in &digest.sections {
+        if section.entries.is_empty() {
+            continue;
+        }
+
+        blocks.push(String::new());
+        blocks.push(format!("## {}", section.title));
+        blocks.push(String::new());
+        blocks.push(section.summary.clone());
+
+        for entry in &section.entries {
+            blocks.push(format!(
+                "- p.{}: {} _({})_",
+                entry.page, entry.text, entry.reason
+            ));
+        }
+    }
+
+    blocks.join("\n")
+}
+
+fn build_ai_annotation_digest(document: &SavedPdfAnnotationsDocument) -> AiAnnotationDigest {
+    let candidates = build_digest_candidates(document);
+    let highlight_strokes = document
+        .pages
+        .values()
+        .flat_map(|page| page.paths.iter())
+        .filter(|path| path.tool == "highlight")
+        .count();
+    let ink_strokes = document
+        .pages
+        .values()
+        .flat_map(|page| page.paths.iter())
+        .filter(|path| path.tool != "highlight")
+        .count();
+
+    let stats = AiAnnotationDigestStats {
+        text_annotations: candidates.len(),
+        highlight_strokes,
+        ink_strokes,
+    };
+
+    let mut sections = vec![
+        ("core", "Core Points"),
+        ("methods", "Method Details"),
+        ("data", "Key Data"),
+        ("questions", "Open Questions"),
+        ("quotes", "Reusable Quotes"),
+        ("limitations", "Limitations"),
+    ]
+    .into_iter()
+    .map(|(id, title)| AiDigestSection {
+        id: id.to_string(),
+        title: title.to_string(),
+        summary: String::new(),
+        entries: Vec::new(),
+    })
+    .collect::<Vec<_>>();
+
+    for candidate in candidates {
+        if let Some(section) = sections
+            .iter_mut()
+            .find(|section| section.id == candidate.category)
+        {
+            section.entries.push(AiDigestEntry {
+                page: candidate.page,
+                text: truncate_digest_text(&candidate.text, 180),
+                reason: candidate.reason.to_string(),
+            });
+        }
+    }
+
+    if sections.iter().all(|section| section.entries.is_empty()) {
+        sections[0].summary = "No text annotations are available to summarize yet.".to_string();
+    } else {
+        for section in &mut sections {
+            section.summary = summarize_digest_section(&section.title, &section.entries);
+        }
+    }
+
+    let overview = if stats.text_annotations == 0
+        && stats.highlight_strokes == 0
+        && stats.ink_strokes == 0
+    {
+        "No saved annotations are available yet, so an AI digest cannot be generated.".to_string()
+    } else if stats.text_annotations == 0 {
+        format!(
+            "This paper already has {} highlight strokes and {} ink strokes, but no text annotations. The current digest is therefore limited to annotation activity statistics.",
+            stats.highlight_strokes, stats.ink_strokes
+        )
+    } else {
+        format!(
+            "Generated a structured digest from {} text annotations, with {} highlight strokes and {} ink strokes as supporting activity signals.",
+            stats.text_annotations, stats.highlight_strokes, stats.ink_strokes
+        )
+    };
+
+    let coverage_note = if stats.text_annotations > 0 {
+        "Only saved text annotations are semantically classified. Highlight and ink strokes are counted but cannot yet be mapped back to quoted source text.".to_string()
+    } else {
+        "No saved text annotations were found, so the digest only reports annotation counts."
+            .to_string()
+    };
+
+    let limitations = "This is a local rules-based digest, not an LLM summary. It does not infer meaning from raw highlight geometry or handwritten strokes.".to_string();
+
+    let mut digest = AiAnnotationDigest {
+        overview,
+        coverage_note,
+        limitations,
+        stats,
+        sections,
+        markdown: String::new(),
+    };
+
+    digest.markdown = render_ai_annotation_digest_markdown(&digest);
+    digest
 }
 
 #[tauri::command]
@@ -1479,6 +1950,165 @@ pub fn generate_item_annotations_markdown(
     Ok(render_annotations_markdown(&document))
 }
 
+#[tauri::command]
+pub fn generate_annotation_digest(
+    item_id: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<AiAnnotationDigest, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    let pdf_path = find_pdf_attachment_path(&conn, &item_id)?;
+    drop(conn);
+
+    let Some(path_str) = pdf_path else {
+        return Err("No PDF attachment found for this item".to_string());
+    };
+
+    let document = read_annotation_sidecar(&PathBuf::from(&path_str)).unwrap_or_default();
+    Ok(build_ai_annotation_digest(&document))
+}
+
+#[tauri::command]
+pub fn summarize_document(
+    item_id: String,
+    language: Option<String>,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<AiPaperSummary, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    let pdf_path = find_pdf_attachment_path(&conn, &item_id)?;
+    let item = fetch_item_from_db(&conn, &item_id)
+        .map_err(|e| format!("Failed to load item metadata: {}", e))?
+        .ok_or("Item not found")?;
+    let (api_key, completion_url, model) = get_required_ai_settings(&conn)?;
+    let output_language = language
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| get_setting_value(&conn, "aiSummaryLanguage").ok().flatten())
+        .unwrap_or_else(|| "zh-CN".to_string());
+    drop(conn);
+
+    let Some(path_str) = pdf_path else {
+        return Err("No PDF attachment found for this item".to_string());
+    };
+
+    let extracted_text = extract_document_text_from_path(&path_str, 12, 14000)?;
+    if extracted_text.trim().is_empty() {
+        return Err("Could not extract readable text from this PDF".to_string());
+    }
+
+    let system_prompt = "You summarize academic papers. Follow the requested language exactly. Be concise, factual, and avoid markdown tables.";
+    let user_prompt = format!(
+        "Read the following academic paper excerpt and respond in plain text using this exact format:\nTITLE: <short title>\nSUMMARY: <2-4 sentences>\nKEY_POINTS:\n- <point 1>\n- <point 2>\n- <point 3>\nLIMITATIONS:\n- <limitation 1>\n- <limitation 2>\n\nWrite in language: {}.\n\nPaper metadata title: {}\n\nPaper excerpt:\n{}",
+        output_language,
+        item.title,
+        extracted_text
+    );
+
+    let content = call_openai_compatible_chat(
+        &completion_url,
+        &api_key,
+        &model,
+        system_prompt,
+        &user_prompt,
+    )?;
+
+    let title = parse_tagged_output(&content, "TITLE:")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| item.title.clone());
+    let summary = parse_tagged_output(&content, "SUMMARY:")
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| {
+            content
+                .lines()
+                .take(4)
+                .collect::<Vec<_>>()
+                .join(" ")
+                .trim()
+                .to_string()
+        });
+
+    let key_points_section = content
+        .split("KEY_POINTS:")
+        .nth(1)
+        .and_then(|section| section.split("LIMITATIONS:").next())
+        .unwrap_or("");
+    let limitations_section = content.split("LIMITATIONS:").nth(1).unwrap_or("");
+
+    Ok(AiPaperSummary {
+        title,
+        summary,
+        key_points: parse_bullet_lines(key_points_section)
+            .into_iter()
+            .take(5)
+            .collect(),
+        limitations: parse_bullet_lines(limitations_section)
+            .into_iter()
+            .take(4)
+            .collect(),
+        language: output_language,
+        source_excerpt: extracted_text.chars().take(600).collect(),
+    })
+}
+
+#[tauri::command]
+pub fn translate_selection(
+    text: String,
+    target_language: Option<String>,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<AiTranslationResult, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("No text selected".to_string());
+    }
+
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    let (api_key, completion_url, model) = get_required_ai_settings(&conn)?;
+    let resolved_target_language = target_language
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            get_setting_value(&conn, "aiTranslateTargetLanguage")
+                .ok()
+                .flatten()
+        })
+        .unwrap_or_else(|| "zh-CN".to_string());
+    drop(conn);
+
+    let system_prompt = "You are a precise academic translator. Return only the translated text, then a final line in the format SOURCE_LANGUAGE_HINT: <value>.";
+    let user_prompt = format!(
+        "Translate the following paper excerpt into {}. Preserve technical meaning and notation. Selected text:\n{}",
+        resolved_target_language,
+        trimmed
+    );
+
+    let content = call_openai_compatible_chat(
+        &completion_url,
+        &api_key,
+        &model,
+        system_prompt,
+        &user_prompt,
+    )?;
+
+    let source_language_hint = parse_tagged_output(&content, "SOURCE_LANGUAGE_HINT:")
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let translation = content
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("SOURCE_LANGUAGE_HINT:"))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string();
+
+    if translation.is_empty() {
+        return Err("AI translation response was empty".to_string());
+    }
+
+    Ok(AiTranslationResult {
+        translation,
+        source_language_hint,
+        target_language: resolved_target_language,
+        original_text: trimmed.to_string(),
+    })
+}
+
 // ─────────────────────────────────────────────────────────────
 // Tag Management Commands
 // ─────────────────────────────────────────────────────────────
@@ -1491,10 +2121,9 @@ pub struct TagInfo {
 }
 
 const MODERN_TAG_COLORS: [&str; 20] = [
-    "#94a3b8", "#9ca3af", "#a1a1aa", "#818cf8", "#a78bfa",
-    "#c4b5fd", "#93c5fd", "#7dd3fc", "#67e8f9", "#5eead4",
-    "#6ee7b7", "#86efac", "#bef264", "#fde68a", "#fdba74",
-    "#fca5a5", "#f9a8d4", "#f0abfc", "#d8b4fe", "#cbd5e1",
+    "#94a3b8", "#9ca3af", "#a1a1aa", "#818cf8", "#a78bfa", "#c4b5fd", "#93c5fd", "#7dd3fc",
+    "#67e8f9", "#5eead4", "#6ee7b7", "#86efac", "#bef264", "#fde68a", "#fdba74", "#fca5a5",
+    "#f9a8d4", "#f0abfc", "#d8b4fe", "#cbd5e1",
 ];
 
 fn pick_modern_tag_color(tag: &str) -> &'static str {
@@ -1539,19 +2168,20 @@ pub fn get_all_tags(
     state: tauri::State<'_, crate::models::AppState>,
 ) -> Result<Vec<TagInfo>, String> {
     let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
-    let mut stmt = conn.prepare(
-        "SELECT it.tag, COUNT(*) AS cnt, COALESCE(tc.color, '') AS color \
+    let mut stmt = conn
+        .prepare(
+            "SELECT it.tag, COUNT(*) AS cnt, COALESCE(tc.color, '') AS color \
          FROM item_tags it \
          LEFT JOIN tag_colors tc ON LOWER(it.tag) = LOWER(tc.tag) \
          GROUP BY it.tag \
          ORDER BY cnt DESC, it.tag ASC",
-    )
-    .map_err(|e| format!("Prepare error: {}", e))?;
+        )
+        .map_err(|e| format!("Prepare error: {}", e))?;
 
     let tags: Vec<TagInfo> = stmt
         .query_map([], |row| {
             Ok(TagInfo {
-                tag:   row.get(0)?,
+                tag: row.get(0)?,
                 count: row.get(1)?,
                 color: row.get(2)?,
             })
@@ -1664,7 +2294,10 @@ pub struct CitationData {
     pub isbn: String,
 }
 
-pub fn fetch_citation_data(conn: &rusqlite::Connection, item_id: &str) -> Result<CitationData, String> {
+pub fn fetch_citation_data(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+) -> Result<CitationData, String> {
     conn.query_row(
         "SELECT id, item_type, title, authors, year, publication, volume, issue, pages,
                 publisher, doi, arxiv_id, url, isbn
@@ -1672,20 +2305,20 @@ pub fn fetch_citation_data(conn: &rusqlite::Connection, item_id: &str) -> Result
         rusqlite::params![item_id],
         |r| {
             Ok(CitationData {
-                id:          r.get::<_, String>(0).unwrap_or_default(),
-                item_type:   r.get::<_, String>(1).unwrap_or_default(),
-                title:       r.get::<_, String>(2).unwrap_or_default(),
-                authors:     r.get::<_, String>(3).unwrap_or_default(),
-                year:        r.get::<_, String>(4).unwrap_or_default(),
+                id: r.get::<_, String>(0).unwrap_or_default(),
+                item_type: r.get::<_, String>(1).unwrap_or_default(),
+                title: r.get::<_, String>(2).unwrap_or_default(),
+                authors: r.get::<_, String>(3).unwrap_or_default(),
+                year: r.get::<_, String>(4).unwrap_or_default(),
                 publication: r.get::<_, String>(5).unwrap_or_default(),
-                volume:      r.get::<_, String>(6).unwrap_or_default(),
-                issue:       r.get::<_, String>(7).unwrap_or_default(),
-                pages:       r.get::<_, String>(8).unwrap_or_default(),
-                publisher:   r.get::<_, String>(9).unwrap_or_default(),
-                doi:         r.get::<_, String>(10).unwrap_or_default(),
-                arxiv_id:    r.get::<_, String>(11).unwrap_or_default(),
-                url:         r.get::<_, String>(12).unwrap_or_default(),
-                isbn:        r.get::<_, String>(13).unwrap_or_default(),
+                volume: r.get::<_, String>(6).unwrap_or_default(),
+                issue: r.get::<_, String>(7).unwrap_or_default(),
+                pages: r.get::<_, String>(8).unwrap_or_default(),
+                publisher: r.get::<_, String>(9).unwrap_or_default(),
+                doi: r.get::<_, String>(10).unwrap_or_default(),
+                arxiv_id: r.get::<_, String>(11).unwrap_or_default(),
+                url: r.get::<_, String>(12).unwrap_or_default(),
+                isbn: r.get::<_, String>(13).unwrap_or_default(),
             })
         },
     )
@@ -1697,7 +2330,10 @@ fn split_authors(raw: &str) -> Vec<String> {
     if raw.trim().is_empty() || raw.trim() == "—" {
         return vec![];
     }
-    raw.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect()
+    raw.split(',')
+        .map(|a| a.trim().to_string())
+        .filter(|a| !a.is_empty())
+        .collect()
 }
 
 /// Best-effort: given a full name like "Jane Smith" or "Smith Jane",
@@ -1712,7 +2348,17 @@ fn name_to_last_initials(name: &str) -> (String, String) {
             let last = parts.last().unwrap().to_string();
             let initials: String = parts[..parts.len() - 1]
                 .iter()
-                .map(|p| format!("{}.", p.chars().next().unwrap_or(' ').to_uppercase().next().unwrap_or(' ')))
+                .map(|p| {
+                    format!(
+                        "{}.",
+                        p.chars()
+                            .next()
+                            .unwrap_or(' ')
+                            .to_uppercase()
+                            .next()
+                            .unwrap_or(' ')
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(" ");
             (last, initials)
@@ -1722,7 +2368,9 @@ fn name_to_last_initials(name: &str) -> (String, String) {
 
 /// Format a DOI as a URL suffix segment.
 fn doi_url(doi: &str) -> String {
-    if doi.is_empty() { return String::new(); }
+    if doi.is_empty() {
+        return String::new();
+    }
     format!("https://doi.org/{}", doi)
 }
 
@@ -1734,19 +2382,30 @@ fn format_apa(item: &CitationData) -> String {
     let apa_authors = if authors_list.is_empty() {
         String::from("Unknown Author")
     } else {
-        let formatted: Vec<String> = authors_list.iter().map(|a| {
-            let (last, initials) = name_to_last_initials(a);
-            if initials.is_empty() { last } else { format!("{}, {}", last, initials) }
-        }).collect();
+        let formatted: Vec<String> = authors_list
+            .iter()
+            .map(|a| {
+                let (last, initials) = name_to_last_initials(a);
+                if initials.is_empty() {
+                    last
+                } else {
+                    format!("{}, {}", last, initials)
+                }
+            })
+            .collect();
         let n = formatted.len();
         if n == 1 {
             formatted[0].clone()
         } else {
-            format!("{}, & {}", formatted[..n-1].join(", "), formatted[n-1])
+            format!("{}, & {}", formatted[..n - 1].join(", "), formatted[n - 1])
         }
     };
 
-    let year = if item.year.is_empty() { "n.d.".to_string() } else { format!("({})", item.year) };
+    let year = if item.year.is_empty() {
+        "n.d.".to_string()
+    } else {
+        format!("({})", item.year)
+    };
 
     let mut source_parts: Vec<String> = Vec::new();
     if !item.publication.is_empty() {
@@ -1790,25 +2449,33 @@ fn format_mla(item: &CitationData) -> String {
         0 => "Unknown Author".to_string(),
         1 => {
             let (last, initials) = name_to_last_initials(&authors_list[0]);
-            if initials.is_empty() { last } else {
-                let first = authors_list[0].split_whitespace()
+            if initials.is_empty() {
+                last
+            } else {
+                let first = authors_list[0]
+                    .split_whitespace()
                     .take(authors_list[0].split_whitespace().count().saturating_sub(1))
-                    .collect::<Vec<_>>().join(" ");
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 format!("{}, {}", last, first)
             }
         }
         2 => {
             let (l0, _) = name_to_last_initials(&authors_list[0]);
-            let first0 = authors_list[0].split_whitespace()
+            let first0 = authors_list[0]
+                .split_whitespace()
                 .take(authors_list[0].split_whitespace().count().saturating_sub(1))
-                .collect::<Vec<_>>().join(" ");
+                .collect::<Vec<_>>()
+                .join(" ");
             format!("{}, {}, and {}", l0, first0, authors_list[1])
         }
         _ => {
             let (l0, _) = name_to_last_initials(&authors_list[0]);
-            let first0 = authors_list[0].split_whitespace()
+            let first0 = authors_list[0]
+                .split_whitespace()
                 .take(authors_list[0].split_whitespace().count().saturating_sub(1))
-                .collect::<Vec<_>>().join(" ");
+                .collect::<Vec<_>>()
+                .join(" ");
             format!("{}, {}, et al.", l0, first0)
         }
     };
@@ -1816,15 +2483,29 @@ fn format_mla(item: &CitationData) -> String {
     let mut out = format!("{}. \"{}.", mla_authors, item.title);
     if !item.publication.is_empty() {
         out.push_str(&format!("\" *{}*", item.publication));
-        if !item.volume.is_empty() { out.push_str(&format!(", vol. {}", item.volume)); }
-        if !item.issue.is_empty()  { out.push_str(&format!(", no. {}", item.issue)); }
-        if !item.year.is_empty()   { out.push_str(&format!(", {}", item.year)); }
-        if !item.pages.is_empty()  { out.push_str(&format!(", pp. {}", item.pages)); }
-        if !item.doi.is_empty()    { out.push_str(&format!(", doi:{}", item.doi)); }
+        if !item.volume.is_empty() {
+            out.push_str(&format!(", vol. {}", item.volume));
+        }
+        if !item.issue.is_empty() {
+            out.push_str(&format!(", no. {}", item.issue));
+        }
+        if !item.year.is_empty() {
+            out.push_str(&format!(", {}", item.year));
+        }
+        if !item.pages.is_empty() {
+            out.push_str(&format!(", pp. {}", item.pages));
+        }
+        if !item.doi.is_empty() {
+            out.push_str(&format!(", doi:{}", item.doi));
+        }
         out.push('.');
     } else {
-        if !item.publisher.is_empty() { out.push_str(&format!("\" {}", item.publisher)); }
-        if !item.year.is_empty() { out.push_str(&format!(", {}", item.year)); }
+        if !item.publisher.is_empty() {
+            out.push_str(&format!("\" {}", item.publisher));
+        }
+        if !item.year.is_empty() {
+            out.push_str(&format!(", {}", item.year));
+        }
         out.push('.');
     }
     out
@@ -1842,14 +2523,26 @@ fn format_chicago(item: &CitationData) -> String {
     let mut out = format!("{}. \"{}.", chicago_authors, item.title);
     if !item.publication.is_empty() {
         out.push_str(&format!("\" *{}*", item.publication));
-        if !item.volume.is_empty() { out.push_str(&format!(" {}", item.volume)); }
-        if !item.issue.is_empty()  { out.push_str(&format!(", no. {}", item.issue)); }
-        if !item.year.is_empty()   { out.push_str(&format!(" ({})", item.year)); }
-        if !item.pages.is_empty()  { out.push_str(&format!(": {}", item.pages)); }
+        if !item.volume.is_empty() {
+            out.push_str(&format!(" {}", item.volume));
+        }
+        if !item.issue.is_empty() {
+            out.push_str(&format!(", no. {}", item.issue));
+        }
+        if !item.year.is_empty() {
+            out.push_str(&format!(" ({})", item.year));
+        }
+        if !item.pages.is_empty() {
+            out.push_str(&format!(": {}", item.pages));
+        }
         out.push('.');
     } else {
-        if !item.publisher.is_empty() { out.push_str(&format!("\" {}", item.publisher)); }
-        if !item.year.is_empty() { out.push_str(&format!(", {}", item.year)); }
+        if !item.publisher.is_empty() {
+            out.push_str(&format!("\" {}", item.publisher));
+        }
+        if !item.year.is_empty() {
+            out.push_str(&format!(", {}", item.year));
+        }
         out.push('.');
     }
     if !item.doi.is_empty() {
@@ -1884,16 +2577,24 @@ fn format_gbt(item: &CitationData) -> String {
 
     if !item.publication.is_empty() {
         out.push_str(&format!(". {}", item.publication));
-        if !item.year.is_empty() { out.push_str(&format!(", {}", item.year)); }
+        if !item.year.is_empty() {
+            out.push_str(&format!(", {}", item.year));
+        }
         if !item.volume.is_empty() {
             out.push_str(&format!(", {}", item.volume));
-            if !item.issue.is_empty() { out.push_str(&format!("({})", item.issue)); }
+            if !item.issue.is_empty() {
+                out.push_str(&format!("({})", item.issue));
+            }
         }
-        if !item.pages.is_empty() { out.push_str(&format!(": {}", item.pages)); }
+        if !item.pages.is_empty() {
+            out.push_str(&format!(": {}", item.pages));
+        }
         out.push('.');
     } else if !item.publisher.is_empty() {
         out.push_str(&format!(". {}", item.publisher));
-        if !item.year.is_empty() { out.push_str(&format!(", {}", item.year)); }
+        if !item.year.is_empty() {
+            out.push_str(&format!(", {}", item.year));
+        }
         out.push('.');
     }
 
@@ -1905,11 +2606,27 @@ fn format_gbt(item: &CitationData) -> String {
 
 fn format_bibtex(item: &CitationData) -> String {
     // Generate a cite key from first-author-last + year
-    let first_author = split_authors(&item.authors).into_iter().next().unwrap_or_default();
+    let first_author = split_authors(&item.authors)
+        .into_iter()
+        .next()
+        .unwrap_or_default();
     let (last, _) = name_to_last_initials(&first_author);
-    let key_last = last.to_lowercase().replace(' ', "").chars().filter(|c| c.is_alphanumeric()).collect::<String>();
-    let key_year = if item.year.is_empty() { "nd".to_string() } else { item.year.clone() };
-    let cite_key = if key_last.is_empty() { format!("item{}", key_year) } else { format!("{}{}", key_last, key_year) };
+    let key_last = last
+        .to_lowercase()
+        .replace(' ', "")
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect::<String>();
+    let key_year = if item.year.is_empty() {
+        "nd".to_string()
+    } else {
+        item.year.clone()
+    };
+    let cite_key = if key_last.is_empty() {
+        format!("item{}", key_year)
+    } else {
+        format!("{}{}", key_last, key_year)
+    };
 
     let entry_type = match item.item_type.as_str() {
         "book" => "book",
@@ -1918,24 +2635,52 @@ fn format_bibtex(item: &CitationData) -> String {
         _ => "article",
     };
 
-    let journal_field = if entry_type == "article" { "journal" } else { "booktitle" };
+    let journal_field = if entry_type == "article" {
+        "journal"
+    } else {
+        "booktitle"
+    };
 
     // BibTeX author: join with " and "
     let bibtex_authors = split_authors(&item.authors).join(" and ");
 
     let mut fields: Vec<String> = Vec::new();
-    if !item.title.is_empty()       { fields.push(format!("  title     = {{{}}}", item.title)); }
-    if !bibtex_authors.is_empty()   { fields.push(format!("  author    = {{{}}}", bibtex_authors)); }
-    if !item.publication.is_empty() { fields.push(format!("  {}   = {{{}}}", journal_field, item.publication)); }
-    if !item.year.is_empty()        { fields.push(format!("  year      = {{{}}}", item.year)); }
-    if !item.volume.is_empty()      { fields.push(format!("  volume    = {{{}}}", item.volume)); }
-    if !item.issue.is_empty()       { fields.push(format!("  number    = {{{}}}", item.issue)); }
-    if !item.pages.is_empty()       { fields.push(format!("  pages     = {{{}}}", item.pages)); }
-    if !item.publisher.is_empty()   { fields.push(format!("  publisher = {{{}}}", item.publisher)); }
-    if !item.doi.is_empty()         { fields.push(format!("  doi       = {{{}}}", item.doi)); }
-    if !item.arxiv_id.is_empty()    { fields.push(format!("  eprint    = {{{}}}", item.arxiv_id)); }
-    if !item.isbn.is_empty()        { fields.push(format!("  isbn      = {{{}}}", item.isbn)); }
-    if !item.url.is_empty()         { fields.push(format!("  url       = {{{}}}", item.url)); }
+    if !item.title.is_empty() {
+        fields.push(format!("  title     = {{{}}}", item.title));
+    }
+    if !bibtex_authors.is_empty() {
+        fields.push(format!("  author    = {{{}}}", bibtex_authors));
+    }
+    if !item.publication.is_empty() {
+        fields.push(format!("  {}   = {{{}}}", journal_field, item.publication));
+    }
+    if !item.year.is_empty() {
+        fields.push(format!("  year      = {{{}}}", item.year));
+    }
+    if !item.volume.is_empty() {
+        fields.push(format!("  volume    = {{{}}}", item.volume));
+    }
+    if !item.issue.is_empty() {
+        fields.push(format!("  number    = {{{}}}", item.issue));
+    }
+    if !item.pages.is_empty() {
+        fields.push(format!("  pages     = {{{}}}", item.pages));
+    }
+    if !item.publisher.is_empty() {
+        fields.push(format!("  publisher = {{{}}}", item.publisher));
+    }
+    if !item.doi.is_empty() {
+        fields.push(format!("  doi       = {{{}}}", item.doi));
+    }
+    if !item.arxiv_id.is_empty() {
+        fields.push(format!("  eprint    = {{{}}}", item.arxiv_id));
+    }
+    if !item.isbn.is_empty() {
+        fields.push(format!("  isbn      = {{{}}}", item.isbn));
+    }
+    if !item.url.is_empty() {
+        fields.push(format!("  url       = {{{}}}", item.url));
+    }
 
     format!("@{}{{{},\n{}\n}}", entry_type, cite_key, fields.join(",\n"))
 }
@@ -1950,23 +2695,43 @@ fn format_ris(item: &CitationData) -> String {
 
     let mut lines: Vec<String> = Vec::new();
     lines.push(format!("TY  - {}", ty));
-    if !item.title.is_empty()       { lines.push(format!("TI  - {}", item.title)); }
+    if !item.title.is_empty() {
+        lines.push(format!("TI  - {}", item.title));
+    }
     for author in split_authors(&item.authors) {
         lines.push(format!("AU  - {}", author));
     }
-    if !item.year.is_empty()        { lines.push(format!("PY  - {}", item.year)); }
-    if !item.publication.is_empty() { lines.push(format!("JO  - {}", item.publication)); }
-    if !item.volume.is_empty()      { lines.push(format!("VL  - {}", item.volume)); }
-    if !item.issue.is_empty()       { lines.push(format!("IS  - {}", item.issue)); }
+    if !item.year.is_empty() {
+        lines.push(format!("PY  - {}", item.year));
+    }
+    if !item.publication.is_empty() {
+        lines.push(format!("JO  - {}", item.publication));
+    }
+    if !item.volume.is_empty() {
+        lines.push(format!("VL  - {}", item.volume));
+    }
+    if !item.issue.is_empty() {
+        lines.push(format!("IS  - {}", item.issue));
+    }
     if !item.pages.is_empty() {
         let ps: Vec<&str> = item.pages.splitn(2, '-').collect();
         lines.push(format!("SP  - {}", ps[0].trim()));
-        if ps.len() > 1 { lines.push(format!("EP  - {}", ps[1].trim())); }
+        if ps.len() > 1 {
+            lines.push(format!("EP  - {}", ps[1].trim()));
+        }
     }
-    if !item.publisher.is_empty()   { lines.push(format!("PB  - {}", item.publisher)); }
-    if !item.doi.is_empty()         { lines.push(format!("DO  - {}", item.doi)); }
-    if !item.isbn.is_empty()        { lines.push(format!("SN  - {}", item.isbn)); }
-    if !item.url.is_empty()         { lines.push(format!("UR  - {}", item.url)); }
+    if !item.publisher.is_empty() {
+        lines.push(format!("PB  - {}", item.publisher));
+    }
+    if !item.doi.is_empty() {
+        lines.push(format!("DO  - {}", item.doi));
+    }
+    if !item.isbn.is_empty() {
+        lines.push(format!("SN  - {}", item.isbn));
+    }
+    if !item.url.is_empty() {
+        lines.push(format!("UR  - {}", item.url));
+    }
     lines.push("ER  - ".to_string());
     lines.join("\n")
 }
@@ -1988,11 +2753,15 @@ fn format_csljson_one(item: &CitationData) -> String {
             let (last, _) = name_to_last_initials(a);
             let first_parts: Vec<&str> = a.split_whitespace().collect();
             let given = if first_parts.len() > 1 {
-                first_parts[..first_parts.len()-1].join(" ")
+                first_parts[..first_parts.len() - 1].join(" ")
             } else {
                 String::new()
             };
-            format!("{{\"family\":\"{}\",\"given\":\"{}\"}}", escape(&last), escape(&given))
+            format!(
+                "{{\"family\":\"{}\",\"given\":\"{}\"}}",
+                escape(&last),
+                escape(&given)
+            )
         })
         .collect::<Vec<_>>()
         .join(",");
@@ -2000,30 +2769,55 @@ fn format_csljson_one(item: &CitationData) -> String {
     let mut fields: Vec<String> = Vec::new();
     fields.push(format!("\"id\":\"{}\"", escape(&item.id)));
     fields.push(format!("\"type\":\"{}\"", csl_type));
-    if !item.title.is_empty()       { fields.push(format!("\"title\":\"{}\"", escape(&item.title))); }
-    if !author_json.is_empty()      { fields.push(format!("\"author\":[{}]", author_json)); }
-    if !item.year.is_empty()        { fields.push(format!("\"issued\":{{\"date-parts\":[[{}]]}}", item.year)); }
-    if !item.publication.is_empty() { fields.push(format!("\"container-title\":\"{}\"", escape(&item.publication))); }
-    if !item.volume.is_empty()      { fields.push(format!("\"volume\":\"{}\"", escape(&item.volume))); }
-    if !item.issue.is_empty()       { fields.push(format!("\"issue\":\"{}\"", escape(&item.issue))); }
-    if !item.pages.is_empty()       { fields.push(format!("\"page\":\"{}\"", escape(&item.pages))); }
-    if !item.publisher.is_empty()   { fields.push(format!("\"publisher\":\"{}\"", escape(&item.publisher))); }
-    if !item.doi.is_empty()         { fields.push(format!("\"DOI\":\"{}\"", escape(&item.doi))); }
-    if !item.isbn.is_empty()        { fields.push(format!("\"ISBN\":\"{}\"", escape(&item.isbn))); }
-    if !item.url.is_empty()         { fields.push(format!("\"URL\":\"{}\"", escape(&item.url))); }
+    if !item.title.is_empty() {
+        fields.push(format!("\"title\":\"{}\"", escape(&item.title)));
+    }
+    if !author_json.is_empty() {
+        fields.push(format!("\"author\":[{}]", author_json));
+    }
+    if !item.year.is_empty() {
+        fields.push(format!("\"issued\":{{\"date-parts\":[[{}]]}}", item.year));
+    }
+    if !item.publication.is_empty() {
+        fields.push(format!(
+            "\"container-title\":\"{}\"",
+            escape(&item.publication)
+        ));
+    }
+    if !item.volume.is_empty() {
+        fields.push(format!("\"volume\":\"{}\"", escape(&item.volume)));
+    }
+    if !item.issue.is_empty() {
+        fields.push(format!("\"issue\":\"{}\"", escape(&item.issue)));
+    }
+    if !item.pages.is_empty() {
+        fields.push(format!("\"page\":\"{}\"", escape(&item.pages)));
+    }
+    if !item.publisher.is_empty() {
+        fields.push(format!("\"publisher\":\"{}\"", escape(&item.publisher)));
+    }
+    if !item.doi.is_empty() {
+        fields.push(format!("\"DOI\":\"{}\"", escape(&item.doi)));
+    }
+    if !item.isbn.is_empty() {
+        fields.push(format!("\"ISBN\":\"{}\"", escape(&item.isbn)));
+    }
+    if !item.url.is_empty() {
+        fields.push(format!("\"URL\":\"{}\"", escape(&item.url)));
+    }
     format!("{{{}}}", fields.join(","))
 }
 
 pub fn apply_format(item: &CitationData, format: &str) -> String {
     match format {
-        "apa"      => format_apa(item),
-        "mla"      => format_mla(item),
-        "chicago"  => format_chicago(item),
-        "gbt"      => format_gbt(item),
-        "bibtex"   => format_bibtex(item),
-        "ris"      => format_ris(item),
-        "csljson"  => format!("[{}]", format_csljson_one(item)),
-        _          => format_apa(item),
+        "apa" => format_apa(item),
+        "mla" => format_mla(item),
+        "chicago" => format_chicago(item),
+        "gbt" => format_gbt(item),
+        "bibtex" => format_bibtex(item),
+        "ris" => format_ris(item),
+        "csljson" => format!("[{}]", format_csljson_one(item)),
+        _ => format_apa(item),
     }
 }
 
@@ -2062,7 +2856,8 @@ pub fn export_items_db(
     };
     if format == "csljson" {
         // Unwrap individual JSON objects and wrap in one array
-        let objects: Vec<String> = parts.iter()
+        let objects: Vec<String> = parts
+            .iter()
             .map(|p| p.trim_start_matches('[').trim_end_matches(']').to_string())
             .collect();
         return Ok(std::format!("[{}]", objects.join(",")));
@@ -2125,10 +2920,10 @@ pub fn save_setting(
 
 #[cfg(test)]
 mod tests {
-    use super::render_annotations_markdown;
+    use super::{build_ai_annotation_digest, render_annotations_markdown};
     use crate::models::{
-        SavedAnnotationPath, SavedAnnotationPoint, SavedPdfAnnotationsDocument, SavedPdfPageAnnotations,
-        SavedTextAnnotation,
+        SavedAnnotationPath, SavedAnnotationPoint, SavedPdfAnnotationsDocument,
+        SavedPdfPageAnnotations, SavedTextAnnotation,
     };
     use std::collections::HashMap;
 
@@ -2146,7 +2941,10 @@ mod tests {
             tool: tool.to_string(),
             points: vec![
                 SavedAnnotationPoint { x: 10.0, y },
-                SavedAnnotationPoint { x: 20.0, y: y + 3.0 },
+                SavedAnnotationPoint {
+                    x: 20.0,
+                    y: y + 3.0,
+                },
             ],
         }
     }
@@ -2178,7 +2976,8 @@ mod tests {
             },
         );
 
-        let output = render_annotations_markdown(&SavedPdfAnnotationsDocument { version: 1, pages });
+        let output =
+            render_annotations_markdown(&SavedPdfAnnotationsDocument { version: 1, pages });
 
         let expected = "### Annotations on Page 1\n\n> Intro quote\n\n### Annotations on Page 2\n\n> Earlier note\n> Second line\n\n> Later note";
         assert_eq!(output, expected);
@@ -2199,7 +2998,8 @@ mod tests {
             },
         );
 
-        let output = render_annotations_markdown(&SavedPdfAnnotationsDocument { version: 1, pages });
+        let output =
+            render_annotations_markdown(&SavedPdfAnnotationsDocument { version: 1, pages });
 
         let expected = "### Annotations on Page 3\n\n> Key takeaway\n\n- 2 highlight strokes\n\n- 1 ink stroke";
         assert_eq!(output, expected);
@@ -2224,9 +3024,95 @@ mod tests {
             },
         );
 
-        let output = render_annotations_markdown(&SavedPdfAnnotationsDocument { version: 1, pages });
+        let output =
+            render_annotations_markdown(&SavedPdfAnnotationsDocument { version: 1, pages });
 
         let expected = "### Annotations on Page 2\n\n- 1 ink stroke\n\n### Annotations on Page 4\n\n> Final page note";
         assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn build_ai_annotation_digest_classifies_text_annotations_into_sections() {
+        let mut pages = HashMap::new();
+        pages.insert(
+            "0".to_string(),
+            SavedPdfPageAnnotations {
+                paths: vec![
+                    path_annotation("highlight", 10.0),
+                    path_annotation("draw", 20.0),
+                ],
+                text_annotations: vec![
+                    text_annotation(10.0, "Why does the baseline collapse on small datasets?"),
+                    text_annotation(20.0, "Accuracy improves from 82.1% to 88.4% on test split."),
+                    text_annotation(
+                        30.0,
+                        "The method uses a two-stage training schedule with 3 ablations.",
+                    ),
+                    text_annotation(
+                        40.0,
+                        "The paper notes a limitation in cross-domain generalization.",
+                    ),
+                ],
+            },
+        );
+
+        let digest = build_ai_annotation_digest(&SavedPdfAnnotationsDocument { version: 1, pages });
+
+        assert_eq!(digest.stats.text_annotations, 4);
+        assert_eq!(digest.stats.highlight_strokes, 1);
+        assert_eq!(digest.stats.ink_strokes, 1);
+        assert!(digest.markdown.contains("# AI Annotation Digest"));
+
+        let questions = digest
+            .sections
+            .iter()
+            .find(|section| section.id == "questions")
+            .unwrap();
+        assert_eq!(questions.entries.len(), 1);
+        assert_eq!(questions.entries[0].page, 1);
+
+        let data = digest
+            .sections
+            .iter()
+            .find(|section| section.id == "data")
+            .unwrap();
+        assert_eq!(data.entries.len(), 1);
+
+        let methods = digest
+            .sections
+            .iter()
+            .find(|section| section.id == "methods")
+            .unwrap();
+        assert_eq!(methods.entries.len(), 1);
+
+        let limitations = digest
+            .sections
+            .iter()
+            .find(|section| section.id == "limitations")
+            .unwrap();
+        assert_eq!(limitations.entries.len(), 1);
+    }
+
+    #[test]
+    fn build_ai_annotation_digest_reports_limits_without_text_annotations() {
+        let mut pages = HashMap::new();
+        pages.insert(
+            "1".to_string(),
+            SavedPdfPageAnnotations {
+                paths: vec![
+                    path_annotation("highlight", 10.0),
+                    path_annotation("draw", 20.0),
+                ],
+                text_annotations: vec![],
+            },
+        );
+
+        let digest = build_ai_annotation_digest(&SavedPdfAnnotationsDocument { version: 1, pages });
+
+        assert_eq!(digest.stats.text_annotations, 0);
+        assert!(digest
+            .coverage_note
+            .contains("No saved text annotations were found"));
+        assert!(digest.overview.contains("no text annotations"));
     }
 }

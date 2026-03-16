@@ -113,6 +113,50 @@ export interface SavedPdfAnnotationsDocument {
   pages: Record<string, SavedPdfPageAnnotations>;
 }
 
+export interface AiDigestEntry {
+  page: number;
+  text: string;
+  reason: string;
+}
+
+export interface AiDigestSection {
+  id: string;
+  title: string;
+  summary: string;
+  entries: AiDigestEntry[];
+}
+
+export interface AiAnnotationDigestStats {
+  textAnnotations: number;
+  highlightStrokes: number;
+  inkStrokes: number;
+}
+
+export interface AiAnnotationDigest {
+  overview: string;
+  coverageNote: string;
+  limitations: string;
+  stats: AiAnnotationDigestStats;
+  sections: AiDigestSection[];
+  markdown: string;
+}
+
+export interface AiPaperSummary {
+  title: string;
+  summary: string;
+  keyPoints: string[];
+  limitations: string[];
+  language: string;
+  sourceExcerpt: string;
+}
+
+export interface AiTranslationResult {
+  translation: string;
+  sourceLanguageHint: string;
+  targetLanguage: string;
+  originalText: string;
+}
+
 export interface CliOpenRequest {
   target: string;
   source: string;
