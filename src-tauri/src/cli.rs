@@ -659,6 +659,36 @@ fn parse_cli_from_args(raw_args: Vec<String>) -> Result<LumeCli, String> {
     LumeCli::try_parse_from(normalized).map_err(|err| err.to_string())
 }
 
+fn absolutize_existing_path(path: &str) -> Result<String, String> {
+    let candidate = PathBuf::from(path);
+    let absolute = if candidate.is_absolute() {
+        candidate
+    } else {
+        env::current_dir()
+            .map_err(|err| format!("Failed to resolve current directory: {}", err))?
+            .join(candidate)
+    };
+
+    Ok(absolute.to_string_lossy().to_string())
+}
+
+fn normalize_import_source_path(path: String) -> Result<String, String> {
+    let candidate = PathBuf::from(&path);
+    if !candidate.exists() {
+        return Err(format!("Path does not exist: {}", path));
+    }
+    absolutize_existing_path(&path)
+}
+
+fn normalize_open_target(target: String) -> Result<String, String> {
+    let candidate = PathBuf::from(&target);
+    if candidate.exists() {
+        absolutize_existing_path(&target)
+    } else {
+        Ok(target)
+    }
+}
+
 fn normalize_legacy_args(raw_args: Vec<String>) -> Vec<String> {
     if raw_args.iter().any(|arg| arg == "--list-papers") {
         let mut normalized = vec![raw_args.first().cloned().unwrap_or_else(|| "lume".to_string())];
@@ -755,8 +785,9 @@ fn dispatch(cli: LumeCli, mode: InvocationMode) -> Result<DispatchDecision, Stri
 }
 
 fn dispatch_import(path: String, folder: String, tags: Vec<String>) -> Result<DispatchDecision, String> {
+    let normalized_path = normalize_import_source_path(path)?;
     let request = CliRequest::Import {
-        path: path.clone(),
+        path: normalized_path.clone(),
         folder: folder.clone(),
         tags: tags.clone(),
     };
@@ -768,7 +799,7 @@ fn dispatch_import(path: String, folder: String, tags: Vec<String>) -> Result<Di
 
     let library_root = resolve_library_root_dir()?;
     let conn = open_db()?;
-    let result = run_import_with_conn(&conn, &library_root, path, folder, tags)?;
+    let result = run_import_with_conn(&conn, &library_root, normalized_path, folder, tags)?;
     print_import_result(&result);
     Ok(DispatchDecision::Handled)
 }
@@ -788,8 +819,9 @@ fn dispatch_sync() -> Result<DispatchDecision, String> {
 }
 
 fn dispatch_open(mode: InvocationMode, target: String) -> Result<DispatchDecision, String> {
+    let normalized_target = normalize_open_target(target)?;
     let request = CliRequest::Open {
-        target: target.clone(),
+        target: normalized_target.clone(),
     };
 
     if let Some(response) = crate::cli_ipc::try_send_request(&request)? {
@@ -799,11 +831,11 @@ fn dispatch_open(mode: InvocationMode, target: String) -> Result<DispatchDecisio
 
     match mode {
         InvocationMode::Embedded => {
-            crate::cli_ipc::store_startup_open_request(&target)?;
+            crate::cli_ipc::store_startup_open_request(&normalized_target)?;
             Ok(DispatchDecision::LaunchGui)
         }
         InvocationMode::Standalone => {
-            launch_gui_with_open_request(&target)?;
+            launch_gui_with_open_request(&normalized_target)?;
             Ok(DispatchDecision::Handled)
         }
     }
