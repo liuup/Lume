@@ -15,6 +15,10 @@
     "infoPanel": {
       "show": "显示信息面板",
       "hide": "隐藏信息面板"
+    },
+    "aiPanel": {
+      "show": "显示 AI 侧边栏",
+      "hide": "隐藏 AI 侧边栏"
     }
   },
   "searchBar": {
@@ -575,6 +579,19 @@
     "errors": {
       "saveChanges": "保存更改失败。",
       "saveNote": "保存笔记失败。"
+    }
+  },
+  "aiPanel": {
+    "title": "AI",
+    "close": "关闭 AI 侧边栏",
+    "summary": {
+      "title": "论文总结",
+      "refresh": "刷新",
+      "loading": "正在生成论文总结...",
+      "empty": "还没有论文总结，可点击刷新生成。",
+      "notConfigured": "请先在设置中配置 AI API Key、Completion 地址和模型名称，才能启用论文总结。",
+      "keyPoints": "关键要点",
+      "limitations": "局限性"
     }
   },
   "textLayer": {

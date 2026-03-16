@@ -15,6 +15,10 @@
     "infoPanel": {
       "show": "Show Info Panel",
       "hide": "Hide Info Panel"
+    },
+    "aiPanel": {
+      "show": "Show AI Panel",
+      "hide": "Hide AI Panel"
     }
   },
   "searchBar": {
@@ -575,6 +579,19 @@
     "errors": {
       "saveChanges": "Failed to save changes.",
       "saveNote": "Failed to save note."
+    }
+  },
+  "aiPanel": {
+    "title": "AI",
+    "close": "Close AI panel",
+    "summary": {
+      "title": "Paper Summary",
+      "refresh": "Refresh",
+      "loading": "Generating paper summary...",
+      "empty": "No paper summary yet. Click refresh to generate one.",
+      "notConfigured": "Configure AI API key, completion URL, and model in Settings to enable paper summary.",
+      "keyPoints": "Key Points",
+      "limitations": "Limitations"
     }
   },
   "textLayer": {

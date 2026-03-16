@@ -6,6 +6,7 @@ import { PdfViewer } from "./components/PdfViewer";
 import { FolderSidebar } from "./components/layout/FolderSidebar";
 import { LibraryView } from "./components/layout/LibraryView";
 import { MetaPanel } from "./components/layout/MetaPanel";
+import { AIPanel } from "./components/layout/AIPanel";
 import { SearchBar } from "./components/SearchBar";
 import { SettingsModal } from "./components/modals/SettingsModal";
 import { X } from "lucide-react";
@@ -63,6 +64,9 @@ function App() {
   const [scale, setScale] = useState<number>(1.5);
   const [activeTool, setActiveTool] = useState<ToolType>('none');
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+  const [isAiPanelOpen, setIsAiPanelOpen] = useState(true);
+  const [rightPanelWidth, setRightPanelWidth] = useState(320);
+  const [aiPanelWidth, setAiPanelWidth] = useState(340);
   const [showSearch, setShowSearch] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
@@ -192,6 +196,7 @@ function App() {
   }
 
   const mainRef = useRef<HTMLElement>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
 
   const zoomIn = () => setScale(s => Math.min(s + 0.25, 4.0));
   const zoomOut = () => setScale(s => Math.max(s - 0.25, 0.5));
@@ -213,6 +218,55 @@ function App() {
     const s = Math.max(0.25, Math.min(4.0, (ch - padding) / baseH));
     if (!isNaN(s)) setScale(s);
   };
+
+  useEffect(() => {
+    return () => {
+      resizeCleanupRef.current?.();
+    };
+  }, []);
+
+  const startPanelResize = useCallback((
+    event: React.MouseEvent<HTMLDivElement>,
+    side: "left" | "right",
+  ) => {
+    event.preventDefault();
+
+    const minWidth = side === "left" ? 280 : 300;
+    const maxWidth = 520;
+
+    document.body.style.userSelect = "none";
+    document.body.style.webkitUserSelect = "none";
+    document.body.style.cursor = "col-resize";
+
+    const handlePointerMove = (moveEvent: MouseEvent) => {
+      if (side === "left") {
+        const nextWidth = Math.min(maxWidth, Math.max(minWidth, moveEvent.clientX));
+        setAiPanelWidth(nextWidth);
+      } else {
+        const nextWidth = Math.min(maxWidth, Math.max(minWidth, window.innerWidth - moveEvent.clientX));
+        setRightPanelWidth(nextWidth);
+      }
+    };
+
+    const cleanup = () => {
+      window.removeEventListener("mousemove", handlePointerMove);
+      window.removeEventListener("mouseup", handlePointerUp);
+      document.body.style.userSelect = "";
+      document.body.style.webkitUserSelect = "";
+      document.body.style.cursor = "";
+      resizeCleanupRef.current = null;
+    };
+
+    const handlePointerUp = () => {
+      cleanup();
+    };
+
+    resizeCleanupRef.current?.();
+    resizeCleanupRef.current = cleanup;
+
+    window.addEventListener("mousemove", handlePointerMove);
+    window.addEventListener("mouseup", handlePointerUp);
+  }, []);
 
   // ── Apply Default Zoom when a new PDF is opened ──
   useEffect(() => {
@@ -661,69 +715,80 @@ function App() {
             />
           </div>
         ) : (
-          <div className="flex flex-col flex-1 min-w-0 relative view-enter" key="pdf-view">
-            <Toolbar
-              onZoomIn={zoomIn}
-              onZoomOut={zoomOut}
-              scale={scale}
-              hasPdf={!!pdfPath}
-              activeTool={activeTool}
-              onToolChange={setActiveTool}
-              isRightPanelOpen={isRightPanelOpen}
-              onToggleRightPanel={() => setIsRightPanelOpen(v => !v)}
-              onFitWidth={fitWidth}
-              onFitHeight={fitHeight}
-              currentPage={currentPage}
-              totalPages={totalPages}
-              onPageJump={handlePageJump}
+          <div className="flex flex-1 min-w-0 relative view-enter" key="pdf-view">
+            <AIPanel
+              selectedItem={selectedItem}
+              isOpen={isAiPanelOpen}
+              onClose={() => setIsAiPanelOpen(false)}
+              width={aiPanelWidth}
+              onResizeStart={(event) => startPanelResize(event, "left")}
             />
+            <div className="flex flex-col flex-1 min-w-0 relative">
+              <Toolbar
+                onZoomIn={zoomIn}
+                onZoomOut={zoomOut}
+                scale={scale}
+                hasPdf={!!pdfPath}
+                activeTool={activeTool}
+                onToolChange={setActiveTool}
+                isAiPanelOpen={isAiPanelOpen}
+                onToggleAiPanel={() => setIsAiPanelOpen(v => !v)}
+                isRightPanelOpen={isRightPanelOpen}
+                onToggleRightPanel={() => setIsRightPanelOpen(v => !v)}
+                onFitWidth={fitWidth}
+                onFitHeight={fitHeight}
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageJump={handlePageJump}
+              />
 
-            <main ref={mainRef} className="flex-1 overflow-y-hidden relative flex justify-center canvas-pattern">
-              {showSearch && (
-                <SearchBar
-                  value={searchInput}
-                  totalMatches={searchInput.trim() === searchTerm ? searchMatches.length : 0}
-                  activeMatchIndex={searchInput.trim() === searchTerm ? activeSearchIndex : -1}
-                  isSearching={isSearchLoading}
-                  onValueChange={handleSearchInputChange}
-                  onSearch={handleDocumentSearch}
-                  onClose={() => {
-                    clearSearchState();
-                    setShowSearch(false);
-                  }}
-                />
-              )}
-              {/* Main Content Area */}
-              {isLoading && (
-                <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-200/50 backdrop-blur-sm animate-fade-in">
-                  <div className="flex flex-col items-center space-y-4">
-                    <div className="w-8 h-8 border-2 border-zinc-400 border-t-zinc-600 rounded-full animate-spin" />
-                    <div className="text-sm font-medium text-zinc-600">{t("app.loading.switchingDocument")}</div>
-                  </div>
-                </div>
-              )}
-              {openTabs.map(tab => (
-                <div 
-                  key={tab.id}
-                  ref={tab.id === activeTabId ? activePdfScrollRef : null}
-                  className={`flex-1 w-full bg-zinc-200/50 overflow-y-auto min-h-0 absolute inset-0 ${tab.id === activeTabId ? 'block' : 'hidden'}`} 
-                  onScroll={handleScroll}
-                >
-                  <PdfViewer 
-                    tabId={tab.id}
-                    pdfPath={tab.item.attachments?.[0]?.path || ""}
-                    totalPages={tab.totalPages} 
-                    dimensions={tab.dimensions} 
-                    scale={scale} 
-                    activeTool={activeTool}
-                    currentPage={tab.currentPage}
-                    searchMatches={tab.id === activeTabId ? searchMatches : []}
-                    activeSearchIndex={tab.id === activeTabId ? activeSearchIndex : -1}
-                    onAnnotationsSaved={handleAnnotationsSaved}
+              <main ref={mainRef} className="flex-1 overflow-y-hidden relative flex justify-center canvas-pattern">
+                {showSearch && (
+                  <SearchBar
+                    value={searchInput}
+                    totalMatches={searchInput.trim() === searchTerm ? searchMatches.length : 0}
+                    activeMatchIndex={searchInput.trim() === searchTerm ? activeSearchIndex : -1}
+                    isSearching={isSearchLoading}
+                    onValueChange={handleSearchInputChange}
+                    onSearch={handleDocumentSearch}
+                    onClose={() => {
+                      clearSearchState();
+                      setShowSearch(false);
+                    }}
                   />
-                </div>
-              ))}
-            </main>
+                )}
+                {/* Main Content Area */}
+                {isLoading && (
+                  <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-200/50 backdrop-blur-sm animate-fade-in">
+                    <div className="flex flex-col items-center space-y-4">
+                      <div className="w-8 h-8 border-2 border-zinc-400 border-t-zinc-600 rounded-full animate-spin" />
+                      <div className="text-sm font-medium text-zinc-600">{t("app.loading.switchingDocument")}</div>
+                    </div>
+                  </div>
+                )}
+                {openTabs.map(tab => (
+                  <div 
+                    key={tab.id}
+                    ref={tab.id === activeTabId ? activePdfScrollRef : null}
+                    className={`flex-1 w-full bg-zinc-200/50 overflow-y-auto min-h-0 absolute inset-0 ${tab.id === activeTabId ? 'block' : 'hidden'}`} 
+                    onScroll={handleScroll}
+                  >
+                    <PdfViewer 
+                      tabId={tab.id}
+                      pdfPath={tab.item.attachments?.[0]?.path || ""}
+                      totalPages={tab.totalPages} 
+                      dimensions={tab.dimensions} 
+                      scale={scale} 
+                      activeTool={activeTool}
+                      currentPage={tab.currentPage}
+                      searchMatches={tab.id === activeTabId ? searchMatches : []}
+                      activeSearchIndex={tab.id === activeTabId ? activeSearchIndex : -1}
+                      onAnnotationsSaved={handleAnnotationsSaved}
+                    />
+                  </div>
+                ))}
+              </main>
+            </div>
           </div>
         )}
 
@@ -732,6 +797,8 @@ function App() {
             selectedItem={selectedItem}
             isOpen={isRightPanelOpen}
             onClose={() => setIsRightPanelOpen(false)}
+            width={rightPanelWidth}
+            onResizeStart={(event) => startPanelResize(event, "right")}
             tagColors={tagColors}
             onItemUpdated={() => {
               handleItemUpdatedLocally();

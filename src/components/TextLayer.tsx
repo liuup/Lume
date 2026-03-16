@@ -23,7 +23,7 @@ interface TextLayerProps {
 }
 
 interface TranslationPopupState {
-  text: string;
+  selectedText: string;
   x: number;
   y: number;
   result: AiTranslationResult | null;
@@ -45,6 +45,32 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
   const cacheKey = getTextLayerCacheKey(pdfPath, pageIndex);
   const requestIdRef = useRef(0);
   const layerRef = useRef<HTMLDivElement>(null);
+
+  const getSelectionRect = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      return null;
+    }
+
+    const anchorNode = selection.anchorNode;
+    const focusNode = selection.focusNode;
+    const layerElement = layerRef.current;
+    if (!layerElement || !(anchorNode && layerElement.contains(anchorNode)) || !(focusNode && layerElement.contains(focusNode))) {
+      return null;
+    }
+
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) {
+      return null;
+    }
+
+    return {
+      selectedText: selection.toString().trim(),
+      x: rect.left + rect.width / 2,
+      y: rect.bottom + 10,
+    };
+  };
 
   useEffect(() => {
     if (textLayerCache.has(cacheKey)) {
@@ -107,12 +133,34 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
       }
     };
 
+    const syncPopupPosition = () => {
+      setTranslationPopup((current) => {
+        if (!current) return null;
+
+        const nextRect = getSelectionRect();
+        if (!nextRect || !nextRect.selectedText) {
+          return current.isLoading ? current : null;
+        }
+
+        return {
+          ...current,
+          selectedText: nextRect.selectedText,
+          x: nextRect.x,
+          y: nextRect.y,
+        };
+      });
+    };
+
     document.addEventListener("mousedown", hidePopup);
     document.addEventListener("selectionchange", handleSelectionChange);
+    window.addEventListener("scroll", syncPopupPosition, true);
+    window.addEventListener("resize", syncPopupPosition);
 
     return () => {
       document.removeEventListener("mousedown", hidePopup);
       document.removeEventListener("selectionchange", handleSelectionChange);
+      window.removeEventListener("scroll", syncPopupPosition, true);
+      window.removeEventListener("resize", syncPopupPosition);
     };
   }, []);
 
@@ -129,16 +177,18 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
     if (!layerElement || !(anchorNode && layerElement.contains(anchorNode)) || !(focusNode && layerElement.contains(focusNode))) {
       return;
     }
+    const selectionRect = getSelectionRect();
+    if (!selectionRect || !selectionRect.selectedText) {
+      return;
+    }
 
-    const range = selection.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
     const aiIsConfigured = Boolean(settings.aiApiKey.trim() && settings.aiCompletionUrl.trim() && settings.aiModel.trim());
 
     if (!aiIsConfigured) {
       setTranslationPopup({
-        text: selectedText,
-        x: rect.left + rect.width / 2,
-        y: rect.bottom + 10,
+        selectedText,
+        x: selectionRect.x,
+        y: selectionRect.y,
         result: null,
         isLoading: false,
         error: t("textLayer.translation.notConfigured"),
@@ -150,9 +200,9 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
     requestIdRef.current = requestId;
 
     setTranslationPopup({
-      text: selectedText,
-      x: rect.left + rect.width / 2,
-      y: rect.bottom + 10,
+      selectedText,
+      x: selectionRect.x,
+      y: selectionRect.y,
       result: null,
       isLoading: true,
       error: null,
@@ -167,9 +217,9 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
       if (requestIdRef.current !== requestId) return;
 
       setTranslationPopup({
-        text: selectedText,
-        x: rect.left + rect.width / 2,
-        y: rect.bottom + 10,
+        selectedText,
+        x: selectionRect.x,
+        y: selectionRect.y,
         result,
         isLoading: false,
         error: null,
@@ -178,9 +228,9 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
       if (requestIdRef.current !== requestId) return;
       console.error("Failed to translate selection", error);
       setTranslationPopup({
-        text: selectedText,
-        x: rect.left + rect.width / 2,
-        y: rect.bottom + 10,
+        selectedText,
+        x: selectionRect.x,
+        y: selectionRect.y,
         result: null,
         isLoading: false,
         error: t("textLayer.translation.error"),
@@ -247,9 +297,9 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
             {t("textLayer.translation.title", { language: settings.aiTranslateTargetLanguage || "zh-CN" })}
           </div>
           <div className="mt-1 text-xs leading-relaxed text-zinc-500 line-clamp-3">
-            {translationPopup.text}
+            {translationPopup.selectedText}
           </div>
-          <div className="mt-2 text-sm leading-relaxed text-zinc-700">
+          <div className="mt-2 text-sm leading-relaxed text-zinc-700 whitespace-pre-wrap">
             {translationPopup.isLoading
               ? t("textLayer.translation.loading")
               : translationPopup.error

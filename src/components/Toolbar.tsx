@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type, PanelRight, ChevronDown, Eraser } from "lucide-react";
+import { ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type, PanelRight, PanelLeft, ChevronDown, Eraser } from "lucide-react";
 import { ToolType } from "../types";
 import { useI18n } from "../hooks/useI18n";
 
@@ -10,6 +10,8 @@ interface ToolbarProps {
   hasPdf: boolean;
   activeTool: ToolType;
   onToolChange: (tool: ToolType) => void;
+  isAiPanelOpen: boolean;
+  onToggleAiPanel: () => void;
   isRightPanelOpen: boolean;
   onToggleRightPanel: () => void;
   onFitWidth: () => void;
@@ -26,6 +28,8 @@ export function Toolbar({
   hasPdf,
   activeTool,
   onToolChange,
+  isAiPanelOpen,
+  onToggleAiPanel,
   isRightPanelOpen,
   onToggleRightPanel,
   onFitWidth,
@@ -66,8 +70,20 @@ export function Toolbar({
 
   return (
     <header className="h-14 bg-white/80 backdrop-blur-md border-b border-zinc-200 flex items-center justify-between px-4 z-20 shrink-0 sticky top-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)]">
-      {/* Left flexible spacer for dragging */}
-      <div className="flex-1 h-full cursor-default" data-tauri-drag-region />
+      {/* Left controls / draggable space */}
+      <div className="flex-1 h-full flex items-center cursor-default" data-tauri-drag-region>
+        <TooltipButton
+          onClick={onToggleAiPanel}
+          tooltip={isAiPanelOpen ? t("toolbar.aiPanel.hide") : t("toolbar.aiPanel.show")}
+          className={`p-2 rounded-xl transition-all active:scale-90 relative z-10 ${
+            isAiPanelOpen
+              ? "text-indigo-600 bg-indigo-50 hover:bg-indigo-100"
+              : "text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100"
+          }`}
+        >
+          <PanelLeft size={16} />
+        </TooltipButton>
+      </div>
 
       {/* Center — zoom + tools + pages */}
       <div className="flex items-center bg-zinc-100/80 p-1 rounded-2xl border border-zinc-200/50 shrink-0">

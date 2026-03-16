@@ -1,5 +1,5 @@
 import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit, Edit2, Check, Book, Building, Link2, Copy, Quote, StickyNote, Wand2, Highlighter, Search, Download, Loader2 } from "lucide-react";
-import { AiAnnotationDigest, AiPaperSummary, LibraryItem, SavedPdfAnnotationsDocument } from "../../types";
+import { AiAnnotationDigest, LibraryItem, SavedPdfAnnotationsDocument } from "../../types";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CitationFormat } from "./ExportModal";
@@ -13,6 +13,8 @@ interface MetaPanelProps {
   selectedItem: LibraryItem | null;
   isOpen: boolean;
   onClose: () => void;
+  width?: number;
+  onResizeStart?: (event: React.MouseEvent<HTMLDivElement>) => void;
   onItemUpdated?: () => void;
   tagColors?: Record<string, string>;
   onPageJump?: (page: number) => void;
@@ -191,7 +193,7 @@ function downloadTextFile(content: string, fileName: string, mime: string) {
   URL.revokeObjectURL(url);
 }
 
-export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagColors = {}, onPageJump, annotationsRefreshKey = 0 }: MetaPanelProps) {
+export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResizeStart, onItemUpdated, tagColors = {}, onPageJump, annotationsRefreshKey = 0 }: MetaPanelProps) {
   const { t } = useI18n();
   const feedback = useFeedback();
   const [isEditing, setIsEditing] = useState(false);
@@ -216,8 +218,6 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   const [noteText, setNoteText] = useState("");
   const [isLoadingNote, setIsLoadingNote] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
-  const [paperSummary, setPaperSummary] = useState<AiPaperSummary | null>(null);
-  const [isLoadingPaperSummary, setIsLoadingPaperSummary] = useState(false);
   const [annotationDigest, setAnnotationDigest] = useState<AiAnnotationDigest | null>(null);
   const [isGeneratingAnnotationDigest, setIsGeneratingAnnotationDigest] = useState(false);
   const [isApplyingAnnotationDigest, setIsApplyingAnnotationDigest] = useState(false);
@@ -296,43 +296,10 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   }, [selectedItem?.id]);
 
   useEffect(() => {
-    setPaperSummary(null);
-    setIsLoadingPaperSummary(false);
     setAnnotationDigest(null);
     setIsGeneratingAnnotationDigest(false);
     setIsApplyingAnnotationDigest(false);
   }, [selectedItem?.id]);
-
-  const aiIsConfigured = Boolean(settings.aiApiKey.trim() && settings.aiCompletionUrl.trim() && settings.aiModel.trim());
-
-  const handleGeneratePaperSummary = useCallback(async () => {
-    if (!selectedItem || !aiIsConfigured) return;
-
-    setIsLoadingPaperSummary(true);
-    try {
-      const summary = await invoke<AiPaperSummary>("summarize_document", {
-        itemId: selectedItem.id,
-        language: settings.aiSummaryLanguage,
-      });
-      setPaperSummary(summary);
-    } catch (error) {
-      console.error("Failed to generate paper summary", error);
-      feedback.error({
-        title: t("feedback.meta.paperSummaryError.title"),
-        description: t("feedback.meta.paperSummaryError.description"),
-      });
-    } finally {
-      setIsLoadingPaperSummary(false);
-    }
-  }, [aiIsConfigured, feedback, selectedItem, settings.aiSummaryLanguage, t]);
-
-  useEffect(() => {
-    if (!selectedItem || !isOpen || !settings.aiAutoSummarize || !aiIsConfigured || paperSummary || isLoadingPaperSummary) {
-      return;
-    }
-
-    void handleGeneratePaperSummary();
-  }, [aiIsConfigured, handleGeneratePaperSummary, isLoadingPaperSummary, isOpen, paperSummary, selectedItem, settings.aiAutoSummarize]);
 
   // Load note when selection changes
   useEffect(() => {
@@ -620,7 +587,13 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
   };
 
   return (
-    <aside className="w-80 bg-white border-l border-zinc-200 flex flex-col h-full shrink-0 animate-slide-left">
+    <aside className="relative bg-white border-l border-zinc-200 flex flex-col h-full shrink-0 animate-slide-left" style={{ width }}>
+      <div
+        className="absolute top-0 left-0 h-full w-2 cursor-col-resize z-20 group"
+        onMouseDown={onResizeStart}
+      >
+        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent group-hover:bg-indigo-300" />
+      </div>
       {/* Header */}
       <div className="h-14 border-b border-zinc-200 flex items-center justify-between px-4 shrink-0 bg-zinc-50/50">
         <h2 className="font-semibold text-zinc-800 tracking-tight">{t("metaPanel.title")}</h2>
@@ -859,66 +832,6 @@ export function MetaPanel({ selectedItem, isOpen, onClose, onItemUpdated, tagCol
                 <span className="text-zinc-500 text-xs font-mono break-all line-clamp-2" title={selectedItem.attachments?.[0]?.name}>{selectedItem.attachments?.[0]?.name || t("metaPanel.none")}</span>
               </MetaRow>
             </div>
-
-            <div className="border-t border-zinc-100 pt-5 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
-                  <Wand2 size={14} className="text-zinc-400" />
-                  <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t("metaPanel.aiSummary.title")}</span>
-                </div>
-                <button
-                  onClick={() => void handleGeneratePaperSummary()}
-                  disabled={!selectedItem || !aiIsConfigured || isLoadingPaperSummary}
-                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-40"
-                  title={t("metaPanel.aiSummary.refresh")}
-                >
-                  {isLoadingPaperSummary ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
-                  {t("metaPanel.aiSummary.refresh")}
-                </button>
-              </div>
-
-              {!aiIsConfigured ? (
-                <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-3 text-xs leading-relaxed text-zinc-500">
-                  {t("metaPanel.aiSummary.notConfigured")}
-                </div>
-              ) : isLoadingPaperSummary ? (
-                <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-3 text-xs text-zinc-400 animate-pulse">
-                  {t("metaPanel.aiSummary.loading")}
-                </div>
-              ) : paperSummary ? (
-                <div className="space-y-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-3">
-                  <div>
-                    <div className="text-sm font-semibold text-zinc-800">{paperSummary.title}</div>
-                    <div className="mt-1 text-sm leading-relaxed text-zinc-700">{paperSummary.summary}</div>
-                  </div>
-                  {paperSummary.keyPoints.length > 0 && (
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">{t("metaPanel.aiSummary.keyPoints")}</div>
-                      <ul className="mt-1 space-y-1 text-xs leading-relaxed text-zinc-600">
-                        {paperSummary.keyPoints.map((point, index) => (
-                          <li key={`summary-point-${index}`}>• {point}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                  {paperSummary.limitations.length > 0 && (
-                    <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">{t("metaPanel.aiSummary.limitations")}</div>
-                      <ul className="mt-1 space-y-1 text-xs leading-relaxed text-zinc-600">
-                        {paperSummary.limitations.map((point, index) => (
-                          <li key={`summary-limit-${index}`}>• {point}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="rounded-lg border border-dashed border-zinc-200 bg-zinc-50 px-3 py-3 text-xs leading-relaxed text-zinc-500">
-                  {t("metaPanel.aiSummary.empty")}
-                </div>
-              )}
-            </div>
-
             {/* ── Notes section ───────────────────────────────────────── */}
             <div className="border-t border-zinc-100 pt-5 space-y-2">
               <div className="flex items-center justify-between gap-1.5">
