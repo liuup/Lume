@@ -149,8 +149,8 @@ npm run tauri build -- --bundles nsis --ci
 安装完成后，主程序本体仍然是 `Lume.exe`，因此安装版默认也支持：
 
 ```powershell
-Lume.exe --list-papers
-Lume.exe --list-papers --json
+Lume.exe list
+Lume.exe list --json
 ```
 
 ### 5. 重要说明
@@ -169,7 +169,7 @@ Lume.exe --list-papers --json
 
 - **安装版** 可从 bundle 资源中找到 `pdfium.dll`
 - **绿色版** 可从 `Lume.exe` 同目录找到 `pdfium.dll`
-- **安装版 / 绿色版** 都复用同一个 `Lume.exe`，因此都内置 `--list-papers` CLI 参数
+- **安装版 / 绿色版** 都复用同一个 `Lume.exe`，因此都内置原生子命令式 CLI（如 `list` / `search` / `open`）
 
 ---
 
@@ -240,14 +240,14 @@ sudo dpkg -i src-tauri/target/release/bundle/deb/*.deb
 安装后可直接验证 CLI：
 
 ```bash
-Lume --list-papers
-Lume --list-papers --json
+Lume list
+Lume list --json
 ```
 
 ### 5. 重要说明
 
 - `.deb` 包会携带 `libpdfium.so`
-- Linux 包同样复用主程序二进制，因此默认支持 `--list-papers`
+- Linux 包同样复用主程序二进制，因此默认支持原生子命令式 CLI
 - 当前配置为 Debian 包声明了常见运行时依赖，减少安装后缺库概率
 
 ---
@@ -289,12 +289,12 @@ Lume --list-papers --json
 
 Windows job 当前还包含两步 CLI 冒烟验证：
 
-- 直接运行绿色版中的 `Lume.exe --list-papers`
-- 静默安装 NSIS 包后，再运行安装目录里的 `Lume.exe --list-papers`
+- 直接运行绿色版中的 `Lume.exe list`
+- 静默安装 NSIS 包后，再运行安装目录里的 `Lume.exe list`
 
 Linux job 当前还包含一步 CLI 冒烟验证：
 
-- 安装 `.deb` 后直接运行包内安装出的 `Lume --list-papers`
+- 安装 `.deb` 后直接运行包内安装出的 `Lume list`
 
 如果这些检查中的任意一步失败，artifact 不会上传，草稿发布也不会继续更新。
 

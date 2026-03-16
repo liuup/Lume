@@ -9,7 +9,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "cli:list": "cargo run --manifest-path src-tauri/Cargo.toml -- --list-papers"
+    "cli:list": "cargo run --manifest-path src-tauri/Cargo.toml --bin lume-cli -- list"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

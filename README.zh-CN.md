@@ -77,6 +77,31 @@ npm install
 npm run tauri dev
 ```
 
+### CLI
+
+Lume 现在提供了原生 CLI，既可以通过主程序二进制使用，也可以在开发环境中通过独立的 `lume-cli` 辅助二进制使用。
+
+列出当前文库中的条目：
+
+```bash
+Lume list
+Lume list --json
+```
+
+搜索、导出或唤起 GUI：
+
+```bash
+Lume search "transformer" --json
+Lume export --format bibtex -o refs.bib
+Lume open /absolute/path/to/paper.pdf
+```
+
+开发时可直接运行：
+
+```bash
+npm run cli:list
+```
+
 ### 构建应用
 
 ```bash

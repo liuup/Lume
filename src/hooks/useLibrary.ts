@@ -8,11 +8,14 @@
  * Context: Extracted from App.tsx to decouple complex local state logic from layout and rendering structure.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useEffectEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useFeedback } from "./useFeedback";
 import { useI18n } from "./useI18n";
 import { 
+  CliLibraryChangedPayload,
+  CliOpenRequest,
   FolderNode, 
   LibraryItem, 
   OpenTab, 
@@ -163,6 +166,71 @@ export function useLibrary() {
       });
     });
   }, [feedback, t]);
+
+  const handleCliOpen = useEffectEvent(async (request: CliOpenRequest) => {
+    const target = request.target?.trim();
+    if (!target) return;
+
+    try {
+      const tree = await refreshLibrary();
+      const libraryItem = findItem(tree, target);
+      if (libraryItem) {
+        if (libraryItem.folder_path && findFolder(tree, libraryItem.folder_path)) {
+          setSelectedFolderId(libraryItem.folder_path);
+        }
+        setSelectedItemId(libraryItem.id);
+        await handleOpenItem(libraryItem);
+        return;
+      }
+
+      const externalItem = createLibraryItem(target);
+      setSelectedItemId(externalItem.id);
+      await handleOpenItem(externalItem);
+    } catch (err) {
+      console.error("Failed to open CLI target", err);
+      feedback.error({
+        title: t("feedback.library.openError.title"),
+        description: t("feedback.library.openError.description"),
+      });
+    }
+  });
+
+  const handleCliLibraryChanged = useEffectEvent(async () => {
+    try {
+      await handleItemUpdatedLocally();
+    } catch (err) {
+      console.error("Failed to refresh library after CLI change", err);
+    }
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlistenOpen: (() => void) | null = null;
+    let unlistenChanged: (() => void) | null = null;
+
+    (async () => {
+      unlistenOpen = await listen<CliOpenRequest>("cli-open-request", (event) => {
+        void handleCliOpen(event.payload);
+      });
+
+      unlistenChanged = await listen<CliLibraryChangedPayload>("cli-library-changed", () => {
+        void handleCliLibraryChanged();
+      });
+
+      const pending = await invoke<CliOpenRequest | null>("take_pending_cli_open_request");
+      if (!cancelled && pending) {
+        await handleCliOpen(pending);
+      }
+    })().catch((err) => {
+      console.error("Failed to initialize CLI listeners", err);
+    });
+
+    return () => {
+      cancelled = true;
+      if (unlistenOpen) unlistenOpen();
+      if (unlistenChanged) unlistenChanged();
+    };
+  }, []);
 
   const handleAddItem = async () => {
     const { open } = await import("@tauri-apps/plugin-dialog");

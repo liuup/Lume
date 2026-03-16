@@ -79,27 +79,34 @@ npm run tauri dev
 
 ### CLI
 
-Lume now supports a built-in CLI flag in the main app binary for reading the local library database.
+Lume now ships with a native CLI in both the main app binary and the standalone `lume-cli` helper binary.
 
 List the currently saved papers:
 
 ```bash
-Lume --list-papers
+Lume list
 ```
 
 Print the same list as JSON:
 
 ```bash
-Lume --list-papers --json
+Lume list --json
 ```
 
-On Windows, the packaged GUI executable also supports terminal output directly:
+Search the library or export citations:
 
 ```bash
-Lume.exe --list-papers
+Lume search "transformer" --json
+Lume export --format bibtex -o refs.bib
 ```
 
-During development, you can run the same flow from the repo root:
+Open a library item or any PDF path in the GUI:
+
+```bash
+Lume open /absolute/path/to/paper.pdf
+```
+
+During development, run the standalone helper from the repo root:
 
 ```bash
 npm run cli:list

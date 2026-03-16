@@ -4,6 +4,7 @@
 
 pub mod models;
 pub mod cli;
+pub mod cli_ipc;
 pub mod db;
 pub mod metadata_fetch;
 pub mod pdf_handlers;
@@ -39,6 +40,9 @@ fn candidate_pdfium_dirs(app: &tauri::App) -> Vec<std::path::PathBuf> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            crate::cli_ipc::focus_main_window(app);
+        }))
         .setup(|app| {
             // Warm up PDFium lazily
             if pdf_handlers::GLOBAL_PDFIUM.get().is_none() {
@@ -63,11 +67,18 @@ pub fn run() {
             
             let app_handle = app.handle();
             let db_conn = init_db(&app_handle).expect("Failed to initialize database");
+            let cli_runtime = crate::cli_ipc::CliRuntimeState::default();
+
+            if let Some(request) = crate::cli_ipc::startup_open_request_from_env()? {
+                cli_runtime.set_pending_open(request);
+            }
             
             app.manage(crate::models::AppState {
                 documents: Arc::new(Mutex::new(HashMap::new())),
                 db: Arc::new(Mutex::new(db_conn)),
             });
+            app.manage(cli_runtime);
+            crate::cli_ipc::start_ipc_server(app_handle.clone())?;
             
             Ok(())
         })
@@ -104,7 +115,8 @@ pub fn run() {
             pdf_handlers::get_text_rects,
             pdf_handlers::get_page_text,
             pdf_handlers::search_pdf_text,
-            pdf_handlers::render_page
+            pdf_handlers::render_page,
+            cli_ipc::take_pending_cli_open_request
         ])
         .run(tauri::generate_context!())
         .expect("error while running Lume");

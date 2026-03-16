@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { Toolbar } from "./components/Toolbar";
 import { PdfViewer } from "./components/PdfViewer";
 import { FolderSidebar } from "./components/layout/FolderSidebar";
@@ -9,7 +10,7 @@ import { SearchBar } from "./components/SearchBar";
 import { SettingsModal } from "./components/modals/SettingsModal";
 import { X } from "lucide-react";
 
-import { LibraryItem, PdfSearchMatch, TagInfo, ToolType } from "./types";
+import { CliLibraryChangedPayload, LibraryItem, PdfSearchMatch, TagInfo, ToolType } from "./types";
 import { useLibrary } from "./hooks/useLibrary";
 import { useSettings } from "./hooks/useSettings";
 import { useI18n } from "./hooks/useI18n";
@@ -123,6 +124,22 @@ function App() {
   }, [feedback, t]);
 
   useEffect(() => { refreshAllTags(); }, [refreshAllTags]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    (async () => {
+      unlisten = await listen<CliLibraryChangedPayload>("cli-library-changed", () => {
+        void refreshAllTags();
+      });
+    })().catch((err) => {
+      console.error("Failed to listen for CLI library updates", err);
+    });
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [refreshAllTags]);
 
   const handleUpdateItemTags = useCallback(async (item: LibraryItem, tags: string[]) => {
     const normalizedTags = Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean)));

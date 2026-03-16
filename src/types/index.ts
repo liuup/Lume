@@ -112,3 +112,13 @@ export interface SavedPdfAnnotationsDocument {
   version: number;
   pages: Record<string, SavedPdfPageAnnotations>;
 }
+
+export interface CliOpenRequest {
+  target: string;
+  source: string;
+  focus: boolean;
+}
+
+export interface CliLibraryChangedPayload {
+  reason: string;
+}
