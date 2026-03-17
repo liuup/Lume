@@ -3,70 +3,84 @@
 [English](README.md) | [中文](README.zh-CN.md)
 
 > [!WARNING]
-> Lume is still in a prototype stage. It currently contains many bugs, incomplete features, and rough edges. Please do not rely on it yet for important data or production research workflows.
+> Lume is still a prototype. Expect bugs, rough edges, and breaking changes in both data flow and UX.
 
-Lume is a desktop literature tool built for academic reading and knowledge organization. It brings PDF reading, annotations, metadata editing, tags, notes, and citation export into one lightweight local-first app.
+Lume is a local-first desktop app for reading and organizing academic PDFs. It combines a paper library, reader, annotations, notes, metadata enrichment, translation, AI summaries, and citation export in one Tauri application.
 
-Built with Tauri + React + TypeScript + PDFium, Lume is not trying to be just another PDF viewer. It is designed to become a smooth research workspace.
+## What It Does Today
 
----
+- Local library with folders, subfolders, trash, rename, move, and search
+- PDF import from file picker and drag-and-drop into the app window
+- Multi-tab reading with lazy page loading, zoom presets, and in-document search
+- Local annotations stored alongside PDFs and paper-level Markdown notes
+- Metadata extraction from the PDF itself, then remote enrichment via arXiv, Crossref, and OpenAlex
+- Metadata trace/report so you can inspect which provider filled which fields
+- Citation generation and export
+- Selection translation with `google`, `bing` web, or `llm`
+- AI paper summary and annotation digest
+- Native CLI for listing, searching, exporting, tagging, and opening items
 
-## Why Lume
+## Current Architecture
 
-- **Local-first**: your papers, annotations, and notes stay under your control
-- **Reading + organization in one flow**: not just reading, but turning material into reusable knowledge
-- **Lightweight desktop experience**: fast startup, clean UI, cross-platform
-- **Built for research workflows**: tags, metadata, annotations, and exports are centered around academic use cases
+### Frontend
 
----
+- `React 19 + TypeScript + Vite`
+- `Tailwind CSS` for styling
+- `src/App.tsx` orchestrates the shell layout, drag-drop import, tabs, reader panels, and library interactions
+- State is split into focused hooks:
+  - `useLibrary` for library actions and Tauri command calls
+  - `useSettings` for persisted settings and theme/font application
+  - `useFeedback` for toast notifications
+  - `useI18n` for runtime locale loading
 
-## Current Core Capabilities
+### Backend
 
-### Library Management
-- Local paper library management
-- Folder / subfolder organization
-- PDF import, delete, rename, and move
-- Global search with field filters
-- Tag system with color management
+- `Tauri v2 + Rust`
+- `src-tauri/src/lib.rs` wires shared app state, plugins, CLI IPC, and command registration
+- `src-tauri/src/library_commands.rs` owns library CRUD, search, notes, tags, export, translation, annotation sidecars, and settings persistence
+- `src-tauri/src/metadata_fetch.rs` owns metadata parsing, provider orchestration, retries, caching, merge policy, and fetch reports
+- `src-tauri/src/pdf_handlers.rs` owns PDFium-backed page rendering, text extraction, selection rects, and PDF-derived metadata hints
+- `src-tauri/src/cli.rs` and `src-tauri/src/cli_ipc.rs` implement the native CLI and single-instance handoff to the GUI
 
-### PDF Reading
-- Multi-tab reading
-- Page rendering with lazy loading
-- Zoom in / out, fit width, fit height
-- Text layer loading and text selection
-- In-document PDF search (`Ctrl+F`)
+### PDF Pipeline
 
-### Annotation and Knowledge Workflow
-- Drawing, highlight, and text annotations
-- Local annotation persistence
-- Paper-level Markdown notes
-- Metadata completion from DOI / arXiv
-- Citation preview and multi-format export
+Lume currently uses a hybrid PDF stack:
 
----
+- `pdfium-render` in Rust for raster rendering, text extraction, text-rect lookup, and metadata hints
+- `pdfjs-dist` in the frontend for document/page caching and warmup
 
-## Who Is It For
+So the project is no longer accurately described as a pure “PDFium app” or a pure “PDF.js app”; both are part of the current runtime.
 
-Lume is especially suitable for:
+### Storage Model
 
-- Students and researchers who read papers frequently
-- Users who want reading, annotation, notes, and citations in one place
-- Zotero / PDF Expert / Skim users who prefer a local-first and lightweight workflow
+Application data lives under Tauri `app_data_dir()`:
 
----
+- `library/` for imported PDFs
+- `trash/` for soft-deleted PDFs
+- `lume_library.db` for SQLite-backed items, attachments, notes, tags, settings, and caches
+- per-PDF annotation sidecars stored next to the imported file as `.<filename>.Lume-annotations.json`
 
-## Development Status
+The app is local-first: imported files are copied into Lume-managed storage instead of being referenced in place.
 
-Lume is evolving quickly. Current priorities include:
+## Metadata Retrieval Flow
 
-- Annotation management view
-- Automatic metadata recognition when dropping PDFs in
-- BibTeX / RIS import
-- More reader shortcuts and stronger UX polish
+Lume’s current metadata flow is modeled as a staged pipeline rather than a single lookup:
 
-See [docs/zotero-gap-analysis.md](docs/zotero-gap-analysis.md) for the full product gap analysis and roadmap.
+1. Parse candidate title/authors/year/DOI/arXiv ID directly from the PDF.
+2. Run exact identifier lookups first (`arXiv ID`, `Crossref DOI`, `OpenAlex DOI`).
+3. If metadata is still incomplete, run fuzzy title searches (`OpenAlex`, `Crossref`, `arXiv`) with title variants plus author/year scoring.
+4. Merge results field-by-field with provider priority and preprint-aware rules.
+5. Cache the result and persist a metadata fetch report for later inspection in the UI.
 
----
+This is designed to improve noisy PDF imports and avoid letting preprint metadata overwrite a confirmed venue/publication result.
+
+## AI and Translation
+
+- AI summaries and LLM translation use a user-configured OpenAI-compatible completion endpoint
+- Non-LLM selection translation can use:
+  - `google` via the public web endpoint
+  - `bing` via the Bing Translator web flow
+- `llm` translation requires the AI endpoint settings to be configured
 
 ## Quick Start
 
@@ -79,34 +93,17 @@ npm run tauri dev
 
 ### CLI
 
-Lume now ships with a native CLI in both the main app binary and the standalone `lume-cli` helper binary.
-
-List the currently saved papers:
+Examples:
 
 ```bash
 Lume list
-```
-
-Print the same list as JSON:
-
-```bash
 Lume list --json
-```
-
-Search the library or export citations:
-
-```bash
 Lume search "transformer" --json
 Lume export --format bibtex -o refs.bib
-```
-
-Open a library item or any PDF path in the GUI:
-
-```bash
 Lume open /absolute/path/to/paper.pdf
 ```
 
-During development, run the standalone helper from the repo root:
+During development:
 
 ```bash
 npm run cli:list
@@ -118,39 +115,23 @@ npm run cli:list
 npm run tauri build
 ```
 
-Detailed local build, packaging, platform-specific notes, and manual GitHub Actions build instructions are available here:
-
-- [docs/build-and-release-guide.md](docs/build-and-release-guide.md)
-
----
-
-## Release Outputs
-
-The repository currently supports manual GitHub Actions builds for:
-
-- **macOS**: `.app` / `.dmg`
-- **Windows Portable**: runnable `Lume.exe + pdfium.dll`
-- **Windows Installer**: NSIS installer `.exe`
-
-For local packaging or CI adjustments, see [docs/build-and-release-guide.md](docs/build-and-release-guide.md).
-
----
+Detailed packaging and release notes are in [docs/build-and-release-guide.md](docs/build-and-release-guide.md).
 
 ## Tech Stack
 
-- **Desktop Shell**: Tauri v2
-- **Frontend**: React + TypeScript + Vite
-- **Styling**: Tailwind CSS
-- **Backend**: Rust
-- **PDF Engine**: PDFium
-- **Storage**: SQLite + local sidecar annotation files
+- Desktop shell: `Tauri v2`
+- Frontend: `React 19`, `TypeScript`, `Vite`
+- Styling: `Tailwind CSS`
+- Backend: `Rust`
+- Database: `SQLite` via `rusqlite`
+- PDF engines: `pdfium-render` and `pdfjs-dist`
+- Network metadata sources: `arXiv`, `Crossref`, `OpenAlex`
 
----
+## Project Status
 
-## Vision
+The app is moving fast. The current codebase already contains the foundations for a serious local research workflow, but it is not stable yet. If you are evaluating the project, the best framing is:
 
-Lume is not trying to solve the problem of “building another PDF reader”, but rather:
+- usable for development and experimentation
+- not yet safe to trust as your only literature manager
 
-> How can we make the path from “opening a paper” to “organizing knowledge” as short, light, and natural as possible?
-
-If you care about literature management, academic reading workflows, or alternatives to Zotero, this project is worth following.
+For roadmap context, see [docs/zotero-gap-analysis.md](docs/zotero-gap-analysis.md).

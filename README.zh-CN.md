@@ -3,70 +3,84 @@
 [English](README.md) | [中文](README.zh-CN.md)
 
 > [!WARNING]
-> Lume 目前仍处于原型阶段，存在较多 bug、未完成功能和体验问题。暂时不建议将它用于重要数据管理或正式研究工作流。
+> Lume 目前仍处于原型阶段。数据流、功能和交互都还在快速变化，现阶段仍然会有 bug、缺口和破坏性调整。
 
-Lume 是一个面向学术阅读与知识整理的桌面文献工具。它将 PDF 阅读、批注、元数据管理、标签、笔记与引用导出整合在一个轻量的本地应用中。
+Lume 是一个面向学术阅读与整理的本地优先桌面应用。它把论文库管理、PDF 阅读、批注、笔记、元数据补全、翻译、AI 摘要和引用导出整合在同一个 Tauri 应用里。
 
-基于 Tauri + React + TypeScript + PDFium 构建，Lume 的目标不是做一个“能打开 PDF 的工具”，而是做一个真正顺手的研究工作台。
+## 当前已经支持
 
----
+- 本地论文库，支持文件夹 / 子文件夹 / 回收站 / 重命名 / 移动 / 搜索
+- 通过文件选择器或直接拖拽 PDF 到应用窗口导入
+- 多标签阅读、懒加载渲染、缩放预设、文内搜索
+- 本地批注持久化，以及论文级 Markdown 笔记
+- 先从 PDF 本体提取线索，再通过 arXiv、Crossref、OpenAlex 做元数据补全
+- 元数据抓取报告，可查看每一步 provider 命中了什么字段
+- 引用生成与导出
+- 划词翻译，支持 `google`、`bing` 网页端、`llm`
+- AI 论文摘要和批注 digest
+- 原生 CLI，可用于列出、搜索、导出、打标签、打开条目
 
-## 为什么是 Lume
+## 当前技术架构
 
-- **本地优先**：文献、批注、笔记都在本地掌控
-- **阅读与整理一体化**：不是“看完就散”，而是直接沉淀到笔记与引用流
-- **轻量桌面体验**：启动快、界面干净、跨平台
-- **面向研究场景**：标签、元数据、注释、导出都围绕论文工作流设计
+### 前端
 
----
+- `React 19 + TypeScript + Vite`
+- `Tailwind CSS`
+- `src/App.tsx` 负责主界面骨架、拖拽导入、标签页、阅读面板和文库交互
+- 状态按职责拆在几个 hook 里：
+  - `useLibrary`：文库状态和 Tauri 命令调用
+  - `useSettings`：持久化设置、主题和字号应用
+  - `useFeedback`：右下角消息提示
+  - `useI18n`：运行时语言包加载
 
-## 当前已具备的核心能力
+### 后端
 
-### 文献管理
-- 本地论文库目录管理
-- 文件夹 / 子文件夹组织
-- PDF 导入、删除、重命名、移动
-- 全局检索与字段过滤
-- 标签系统与颜色管理
+- `Tauri v2 + Rust`
+- `src-tauri/src/lib.rs` 负责共享状态、插件、CLI IPC 和命令注册
+- `src-tauri/src/library_commands.rs` 负责文库 CRUD、搜索、笔记、标签、导出、翻译、批注 sidecar 和设置持久化
+- `src-tauri/src/metadata_fetch.rs` 负责元数据解析、provider 编排、重试、缓存、字段合并策略和抓取报告
+- `src-tauri/src/pdf_handlers.rs` 负责基于 PDFium 的页面渲染、文本提取、选区矩形和 PDF 原始元数据线索
+- `src-tauri/src/cli.rs` 与 `src-tauri/src/cli_ipc.rs` 负责原生 CLI 和单实例 GUI 唤起
 
-### PDF 阅读
-- 多标签阅读
-- 页面渲染与懒加载
-- 放大 / 缩小 / 适应宽度 / 适应高度
-- 文本层加载与文本选择
-- PDF 内关键词搜索（Ctrl+F）
+### PDF 管线
 
-### 批注与知识整理
-- 手写绘制、荧光笔、文本批注
-- 批注本地持久化
-- 论文级 Markdown 笔记
-- 从 DOI / arXiv 补全元数据
-- 引用预览与多格式导出
+Lume 现在是混合 PDF 架构：
 
----
+- Rust 侧的 `pdfium-render` 负责位图渲染、文本提取、选区定位和 PDF 内部线索提取
+- 前端的 `pdfjs-dist` 负责文档 / 页面缓存和预热
 
-## 适合谁
+所以当前项目已经不能简单描述成“纯 PDFium”或“纯 PDF.js”方案，两边都在参与运行时。
 
-Lume 目前特别适合：
+### 存储模型
 
-- 需要高频阅读 PDF 论文的学生 / 研究者
-- 希望把“阅读 + 批注 + 笔记 + 引用”放在一个工具里的用户
-- 喜欢本地优先、可控、轻量工作流的 Zotero / PDF Expert / Skim 用户
+应用数据存放在 Tauri 的 `app_data_dir()` 下：
 
----
+- `library/`：导入后的 PDF
+- `trash/`：软删除后的 PDF
+- `lume_library.db`：SQLite 数据库，保存条目、附件、笔记、标签、设置和缓存
+- 每篇 PDF 旁边会有批注 sidecar：`.<文件名>.Lume-annotations.json`
 
-## 开发状态
+Lume 是本地优先模型。导入时会把 PDF 复制进 Lume 管理的目录，而不是直接引用原始路径。
 
-Lume 正在快速迭代中，当前重点方向包括：
+## 元数据抓取流程
 
-- 批注管理视图
-- 拖入 PDF 自动识别元数据
-- BibTeX / RIS 导入
-- 阅读器快捷键与更完整的人性化细节
+当前元数据流程不是“查一个源就结束”，而是分阶段推进：
 
-完整产品差距分析与路线图见 [docs/zotero-gap-analysis.md](docs/zotero-gap-analysis.md)。
+1. 先从 PDF 本体提取候选标题、作者、年份、DOI、arXiv ID。
+2. 先跑精确查询：`arXiv ID`、`Crossref DOI`、`OpenAlex DOI`。
+3. 如果结果仍然不完整，再跑模糊标题检索：`OpenAlex`、`Crossref`、`arXiv`，并结合标题变体、作者和年份打分。
+4. 按字段粒度 merge，不同 provider 有优先级，preprint 结果不会反向覆盖正式发表信息。
+5. 结果会缓存，并把抓取报告保存下来，供 UI 展示。
 
----
+这套流程的目标是提升“从 PDF 导入论文后自动补全元数据”的稳定性，尤其是减少预印本信息覆盖正式 venue 的问题。
+
+## AI 与翻译
+
+- AI 摘要和 `llm` 翻译走用户配置的 OpenAI 兼容 completion endpoint
+- 非 LLM 翻译目前支持：
+  - `google`：公共网页接口
+  - `bing`：Bing Translator 网页端流程
+- 只有 `llm` 翻译需要先配置 AI 接口
 
 ## 快速开始
 
@@ -79,68 +93,45 @@ npm run tauri dev
 
 ### CLI
 
-Lume 现在提供了原生 CLI，既可以通过主程序二进制使用，也可以在开发环境中通过独立的 `lume-cli` 辅助二进制使用。
-
-列出当前文库中的条目：
+示例：
 
 ```bash
 Lume list
 Lume list --json
-```
-
-搜索、导出或唤起 GUI：
-
-```bash
 Lume search "transformer" --json
 Lume export --format bibtex -o refs.bib
 Lume open /absolute/path/to/paper.pdf
 ```
 
-开发时可直接运行：
+开发环境可直接运行：
 
 ```bash
 npm run cli:list
 ```
 
-### 构建应用
+### 构建
 
 ```bash
 npm run tauri build
 ```
 
-详细的本地编译、打包、平台差异说明，以及 GitHub Actions 手动构建方式，已迁移到单独文档：
-
-- [docs/build-and-release-guide.md](docs/build-and-release-guide.md)
-
----
-
-## 发布产物
-
-当前仓库已支持手动执行 GitHub Actions 构建：
-
-- **macOS**：产出 `.app` / `.dmg`
-- **Windows 绿色版**：产出可直接运行的 `Lume.exe + pdfium.dll`
-- **Windows 安装版**：产出 NSIS 安装器 `.exe`
-
-如需本地手工打包或修改 CI 流程，请查看 [docs/build-and-release-guide.md](docs/build-and-release-guide.md)。
-
----
+打包与发布说明见 [docs/build-and-release-guide.md](docs/build-and-release-guide.md)。
 
 ## 技术栈
 
-- **Desktop Shell**: Tauri v2
-- **Frontend**: React + TypeScript + Vite
-- **Styling**: Tailwind CSS
-- **Backend**: Rust
-- **PDF Engine**: PDFium
-- **Storage**: SQLite + 本地 sidecar 批注文件
+- 桌面壳：`Tauri v2`
+- 前端：`React 19`、`TypeScript`、`Vite`
+- 样式：`Tailwind CSS`
+- 后端：`Rust`
+- 数据库：`rusqlite` 驱动的 `SQLite`
+- PDF 引擎：`pdfium-render` + `pdfjs-dist`
+- 元数据来源：`arXiv`、`Crossref`、`OpenAlex`
 
----
+## 当前状态
 
-## 愿景
+这个项目已经有比较清晰的本地研究工作流雏形，但还没有到稳定可托付主数据的阶段。更准确的描述是：
 
-Lume 想解决的问题不是“再做一个 PDF 阅读器”，而是：
+- 适合开发、试用和快速迭代
+- 还不适合作为唯一的正式文献管理器
 
-> 如何让研究者从“打开论文”到“整理知识”之间的链路尽可能短、轻、自然。
-
-如果你正在关注文献管理、学术阅读工作流或 Zotero 替代方案，欢迎关注这个项目。
+路线图和产品差距分析见 [docs/zotero-gap-analysis.md](docs/zotero-gap-analysis.md)。
