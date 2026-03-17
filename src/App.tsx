@@ -1,4 +1,4 @@
-import { Suspense, lazy, useState, useRef, useEffect, useCallback, useEffectEvent } from "react";
+import { Suspense, lazy, useState, useRef, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -120,6 +120,11 @@ function App() {
   const dragOverFolderIdRef = useRef<string | null>(null);
   const isFileDropActiveRef = useRef(false);
   const fileDropFolderIdRef = useRef<string | null>(null);
+  const lastExternalDropPathsRef = useRef<{ signature: string; timestamp: number } | null>(null);
+  const lastExternalDropRef = useRef<{ signature: string; timestamp: number } | null>(null);
+  const inFlightExternalDropsRef = useRef<Set<string>>(new Set());
+  const resolveImportFolderIdRef = useRef<(folderId: string | null) => string>(() => DEFAULT_FOLDER.id);
+  const importPdfPathsRef = useRef(importPdfPaths);
   const searchCacheRef = useRef<Map<string, PdfSearchMatch[]>>(new Map());
   const searchRequestIdRef = useRef(0);
   const activePdfScrollRef = useRef<HTMLDivElement | null>(null);
@@ -190,6 +195,14 @@ function App() {
     setFileDropPaths([]);
     setFileDropFolderId(null);
   }, []);
+
+  useEffect(() => {
+    resolveImportFolderIdRef.current = resolveImportFolderId;
+  }, [resolveImportFolderId]);
+
+  useEffect(() => {
+    importPdfPathsRef.current = importPdfPaths;
+  }, [importPdfPaths]);
 
   // ── Tag system state ─────────────────────────────────────────────────────
   const [allTags, setAllTags] = useState<TagInfo[]>([]);
@@ -421,25 +434,50 @@ function App() {
     const target = document.elementFromPoint(physicalX / scale, physicalY / scale) as HTMLElement | null;
     const folderTarget = target?.closest("[data-folder-drop-id]") as HTMLElement | null;
     const hoveredFolderId = folderTarget?.dataset.folderDropId ?? null;
-    const nextFolderId = resolveImportFolderId(hoveredFolderId);
+    const nextFolderId = resolveImportFolderIdRef.current(hoveredFolderId);
 
     if (fileDropFolderIdRef.current !== nextFolderId) {
       fileDropFolderIdRef.current = nextFolderId;
       setFileDropFolderId(nextFolderId);
     }
-  }, [resolveImportFolderId]);
+  }, []);
 
-  const handleExternalPdfDrop = useEffectEvent((paths: string[], folderId: string | null) => {
-    const pdfPaths = paths.filter((path) => /\.pdf$/i.test(path));
+  const handleExternalPdfDrop = useCallback((paths: string[], folderId: string | null) => {
+    const pdfPaths = Array.from(new Set(paths.filter((path) => /\.pdf$/i.test(path))));
     if (pdfPaths.length === 0) {
       return;
     }
 
-    void importPdfPaths(pdfPaths, resolveImportFolderId(folderId));
-  });
+    const pathSignature = [...pdfPaths].sort().join("||");
+    const lastPathDrop = lastExternalDropPathsRef.current;
+    const now = Date.now();
+    if (lastPathDrop && lastPathDrop.signature === pathSignature && now - lastPathDrop.timestamp < 2000) {
+      return;
+    }
+
+    const resolvedFolderId = resolveImportFolderIdRef.current(folderId);
+    const signature = `${resolvedFolderId}::${pathSignature}`;
+    const lastDrop = lastExternalDropRef.current;
+    if (lastDrop && lastDrop.signature === signature && now - lastDrop.timestamp < 1500) {
+      return;
+    }
+    if (inFlightExternalDropsRef.current.has(signature)) {
+      return;
+    }
+
+    lastExternalDropPathsRef.current = { signature: pathSignature, timestamp: now };
+    lastExternalDropRef.current = { signature, timestamp: now };
+    inFlightExternalDropsRef.current.add(signature);
+    void importPdfPathsRef.current(pdfPaths, resolvedFolderId).finally(() => {
+      window.setTimeout(() => {
+        inFlightExternalDropsRef.current.delete(signature);
+      }, 1500);
+    });
+  }, []);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
+    let disposed = false;
 
     getCurrentWindow()
       .onDragDropEvent((event) => {
@@ -469,12 +507,20 @@ function App() {
           return;
         }
 
+        if (event.payload.type !== "drop") {
+          return;
+        }
+
         const targetFolderId = fileDropFolderIdRef.current;
         const droppedPaths = event.payload.paths;
         clearFileDropState();
         handleExternalPdfDrop(droppedPaths, targetFolderId);
       })
       .then((fn) => {
+        if (disposed) {
+          fn();
+          return;
+        }
         unlisten = fn;
       })
       .catch((error) => {
@@ -482,11 +528,12 @@ function App() {
       });
 
     return () => {
+      disposed = true;
       if (unlisten) {
         unlisten();
       }
     };
-  }, [clearFileDropState, handleExternalPdfDrop, updateFileDropFolder]);
+  }, []);
 
   const handleItemPointerDown = useCallback((item: { id: string; title: string }, event: React.MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;

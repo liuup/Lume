@@ -64,7 +64,7 @@ function getToastStyles(variant: FeedbackVariant) {
 
 function FeedbackViewport({ items, onDismiss }: { items: FeedbackItem[]; onDismiss: (id: string) => void }) {
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[120] flex w-[min(360px,calc(100vw-2rem))] flex-col gap-2">
+    <div className="pointer-events-none fixed bottom-4 right-4 z-[120] flex w-[min(280px,calc(100vw-2rem))] flex-col gap-2">
       {items.map((item) => {
         const styles = getToastStyles(item.variant);
         const Icon = item.variant === "success" ? CheckCircle2 : item.variant === "error" ? AlertCircle : Info;
@@ -72,23 +72,21 @@ function FeedbackViewport({ items, onDismiss }: { items: FeedbackItem[]; onDismi
         return (
           <div
             key={item.id}
-            className={`pointer-events-auto rounded-2xl border px-3 py-3 shadow-[0_18px_45px_-18px_rgba(0,0,0,0.28)] backdrop-blur-sm transition-all ${styles.panel}`}
+            className={`pointer-events-auto rounded-xl border px-2.5 py-2 shadow-[0_14px_36px_-20px_rgba(0,0,0,0.28)] backdrop-blur-sm transition-all ${styles.panel}`}
             role="status"
             aria-live={item.variant === "error" ? "assertive" : "polite"}
+            title={item.description}
           >
-            <div className="flex items-start gap-3">
-              <div className={`mt-0.5 rounded-xl p-2 ${styles.iconWrap}`}>
-                <Icon size={16} />
+            <div className="flex items-center gap-2">
+              <div className={`shrink-0 rounded-lg p-1.5 ${styles.iconWrap}`}>
+                <Icon size={14} />
               </div>
               <div className="min-w-0 flex-1">
-                <div className={`text-sm font-semibold ${styles.title}`}>{item.title}</div>
-                {item.description ? (
-                  <div className={`mt-0.5 text-xs leading-relaxed ${styles.description}`}>{item.description}</div>
-                ) : null}
+                <div className={`truncate text-sm font-semibold ${styles.title}`}>{item.title}</div>
               </div>
               <button
                 onClick={() => onDismiss(item.id)}
-                className={`rounded-lg p-1 transition-colors ${styles.button}`}
+                className={`shrink-0 rounded-md p-1 transition-colors ${styles.button}`}
                 aria-label="Dismiss notification"
               >
                 <X size={14} />
@@ -118,7 +116,7 @@ export function FeedbackProvider({ children }: { children: ReactNode }) {
       duration: payload.duration ?? DEFAULT_DURATION[variant],
     };
 
-    setItems((prev) => [...prev, item]);
+    setItems((prev) => [...prev, item].slice(-2));
     return id;
   }, []);
 
