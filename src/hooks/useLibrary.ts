@@ -245,53 +245,102 @@ export function useLibrary() {
     };
   }, []);
 
+  const importPdfPaths = async (paths: string[], folderIdOverride?: string | null) => {
+    const normalizedPaths = Array.from(
+      new Set(paths.map((path) => path.trim()).filter((path) => path && /\.pdf$/i.test(path))),
+    );
+
+    if (normalizedPaths.length === 0) {
+      feedback.error({
+        title: t("feedback.library.import.error.title"),
+        description: t("feedback.library.import.error.description"),
+      });
+      return [] as LibraryItem[];
+    }
+
+    try {
+      const preferredFolderId = folderIdOverride && folderIdOverride !== TRASH_FOLDER_ID
+        ? folderIdOverride
+        : selectedFolderId !== TRASH_FOLDER_ID
+          ? selectedFolderId
+          : folderTree[0]?.id ?? DEFAULT_FOLDER.id;
+      const targetFolder = findFolder(folderTree, preferredFolderId) ?? folderTree[0];
+      if (!targetFolder) return [] as LibraryItem[];
+
+      setIsLoading(true);
+      void preloadPdfCoreRuntime();
+
+      const importedPaths: string[] = [];
+      for (const sourcePath of normalizedPaths) {
+        const importedPath: string = await invoke("import_pdf_to_folder", {
+          sourcePath,
+          folderPath: targetFolder.path,
+        });
+        importedPaths.push(importedPath);
+        void preloadPdfDocument(importedPath);
+      }
+
+      const focusedImportedPath = importedPaths[importedPaths.length - 1];
+      const pages: number = await invoke("load_pdf", { path: focusedImportedPath });
+      const refreshedTree = await refreshLibrary(targetFolder.id);
+      const importedItems = importedPaths.map((importedPath) => (
+        findItem(refreshedTree, importedPath) ?? createLibraryItem(importedPath)
+      ));
+      const focusedItem = importedItems[importedItems.length - 1];
+
+      setOpenTabs((prev) => {
+        if (prev.find((tab) => tab.id === focusedItem.id)) return prev;
+        return [...prev, {
+          id: focusedItem.id,
+          item: focusedItem,
+          totalPages: pages,
+          dimensions: createPlaceholderDimensions(pages),
+          currentPage: 1,
+        }];
+      });
+      setActiveTabId(focusedItem.id);
+      setSelectedItemId(focusedItem.id);
+
+      feedback.success({
+        title: t("feedback.library.import.success.title"),
+        description: importedItems.length === 1
+          ? t("feedback.library.import.success.description", {
+              title: focusedItem.title || focusedItem.attachments[0]?.name || trimmedFileName(normalizedPaths[0]),
+            })
+          : t("feedback.library.import.success.multipleDescription", {
+              count: importedItems.length,
+            }),
+      });
+
+      return importedItems;
+    } catch (err) {
+      console.error("Failed to import PDF", err);
+      feedback.error({
+        title: t("feedback.library.import.error.title"),
+        description: t("feedback.library.import.error.description"),
+      });
+      return [] as LibraryItem[];
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleAddItem = async () => {
     const { open } = await import("@tauri-apps/plugin-dialog");
     try {
-      const targetFolder = findFolder(folderTree, selectedFolderId);
-      if (!targetFolder) return;
-
       const selected = await open({
         multiple: false,
         filters: [{ name: "PDF", extensions: ["pdf"] }],
       });
       if (selected && typeof selected === "string") {
-        setIsLoading(true);
-        void preloadPdfCoreRuntime();
-        const importedPath: string = await invoke("import_pdf_to_folder", {
-          sourcePath: selected,
-          folderPath: targetFolder.path,
-        });
-        void preloadPdfDocument(importedPath);
-        const pages: number = await invoke("load_pdf", { path: importedPath });
-        const refreshedTree = await refreshLibrary(targetFolder.id);
-        const newItem = findItem(refreshedTree, importedPath) ?? createLibraryItem(importedPath);
-        
-        setOpenTabs(prev => {
-          if (prev.find(tab => tab.id === newItem.id)) return prev;
-          return [...prev, {
-            id: newItem.id,
-            item: newItem,
-            totalPages: pages,
-            dimensions: createPlaceholderDimensions(pages),
-            currentPage: 1
-          }];
-        });
-        setActiveTabId(newItem.id);
-        setSelectedItemId(newItem.id);
-        setIsLoading(false);
-        feedback.success({
-          title: t("feedback.library.import.success.title"),
-          description: t("feedback.library.import.success.description", { title: newItem.title || newItem.attachments[0]?.name || trimmedFileName(selected) }),
-        });
+        await importPdfPaths([selected]);
       }
     } catch (err) {
-      console.error("Failed to open PDF", err);
+      console.error("Failed to select PDF", err);
       feedback.error({
         title: t("feedback.library.import.error.title"),
         description: t("feedback.library.import.error.description"),
       });
-      setIsLoading(false);
     }
   };
 
@@ -633,14 +682,14 @@ export function useLibrary() {
         setActiveTabId("library");
       }
       feedback.success({
-        title: t("feedback.library.trash.emptySuccess.title"),
-        description: t("feedback.library.trash.emptySuccess.description"),
+        title: t("feedback.library.item.trash.emptySuccess.title"),
+        description: t("feedback.library.item.trash.emptySuccess.description"),
       });
     } catch (err) {
       console.error("Failed to empty trash", err);
       feedback.error({
-        title: t("feedback.library.trash.emptyError.title"),
-        description: t("feedback.library.trash.emptyError.description"),
+        title: t("feedback.library.item.trash.emptyError.title"),
+        description: t("feedback.library.item.trash.emptyError.description"),
       });
     } finally {
       setIsLoading(false);
@@ -665,7 +714,9 @@ export function useLibrary() {
     setSelectedItemId,
     refreshLibrary,
     findItem,
+    findFolder,
     handleAddItem,
+    importPdfPaths,
     handleOpenItem,
     handleCloseTab,
     handlePageJump,

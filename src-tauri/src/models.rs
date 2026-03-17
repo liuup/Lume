@@ -179,12 +179,49 @@ pub struct ParsedPdfMetadata {
     pub language: Option<String>,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataFetchStep {
+    pub stage: String,
+    pub provider: String,
+    pub query: String,
+    pub status: String,
+    pub score: Option<f32>,
+    #[serde(default)]
+    pub fields_changed: Vec<String>,
+    pub note: Option<String>,
+    pub metadata_completed: bool,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataFetchReport {
+    #[serde(default)]
+    pub summary: String,
+    pub network_complete: bool,
+    pub metadata_completed: bool,
+    pub is_preprint: bool,
+    #[serde(default)]
+    pub title_queries: Vec<String>,
+    #[serde(default)]
+    pub steps: Vec<MetadataFetchStep>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct CachedPdfMetadataRecord {
     pub file_size: u64,
     pub modified_unix_ms: u64,
     pub network_complete: bool,
     pub meta: ParsedPdfMetadata,
+    #[serde(default)]
+    pub report: Option<MetadataFetchReport>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetrieveMetadataResult {
+    pub item: LibraryItem,
+    pub report: MetadataFetchReport,
 }
 
 #[derive(Default, Serialize, Deserialize)]

@@ -54,6 +54,31 @@ export interface LibraryItem {
   attachments: Attachment[];
 }
 
+export interface MetadataFetchStep {
+  stage: string;
+  provider: string;
+  query: string;
+  status: string;
+  score?: number | null;
+  fieldsChanged: string[];
+  note?: string | null;
+  metadataCompleted: boolean;
+}
+
+export interface MetadataFetchReport {
+  summary: string;
+  networkComplete: boolean;
+  metadataCompleted: boolean;
+  isPreprint: boolean;
+  titleQueries: string[];
+  steps: MetadataFetchStep[];
+}
+
+export interface RetrieveMetadataResult {
+  item: LibraryItem;
+  report: MetadataFetchReport;
+}
+
 export interface FolderNode {
   id: string;
   name: string;

@@ -3,13 +3,15 @@ use regex::Regex;
 /// Purpose: Encapsulates all fetching logic for Crossref and arXiv metadata APIs.
 /// Capabilities: Defines internal regex engines to extract DOIs and arXiv IDs and exposes methods to query external literature APIs.
 use reqwest::blocking::Client;
-use std::collections::HashSet;
-use std::sync::OnceLock;
-use std::time::Duration;
+use serde::Deserialize;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, OnceLock};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::models::{
     CrossrefAuthor, CrossrefSearchResponse, CrossrefWorkMessage, CrossrefWorkResponse,
-    LibraryItem, ParsedPdfMetadata,
+    LibraryItem, MetadataFetchReport, MetadataFetchStep, ParsedPdfMetadata, RetrieveMetadataResult,
 };
 
 static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
@@ -17,15 +19,304 @@ static DOI_REGEX: OnceLock<Regex> = OnceLock::new();
 static ARXIV_REGEX: OnceLock<Regex> = OnceLock::new();
 static ARXIV_LEGACY_REGEX: OnceLock<Regex> = OnceLock::new();
 static XML_ENTRY_REGEX: OnceLock<Regex> = OnceLock::new();
+static METADATA_REQUEST_CACHE: OnceLock<Mutex<HashMap<String, MetadataRequestCacheEntry>>> =
+    OnceLock::new();
+const FUZZY_METADATA_MATCH_THRESHOLD: f32 = 0.74;
+const METADATA_REQUEST_MAX_ATTEMPTS: usize = 2;
+const METADATA_REQUEST_RETRY_DELAY_MS: u64 = 250;
+const METADATA_REQUEST_SUCCESS_CACHE_SECS: u64 = 600;
+const METADATA_REQUEST_EMPTY_CACHE_SECS: u64 = 180;
+const METADATA_REQUEST_ERROR_COOLDOWN_SECS: u64 = 90;
+
+#[derive(Clone, Copy)]
+enum MetadataProvider {
+    ArxivId,
+    CrossrefDoi,
+    OpenAlexDoi,
+    OpenAlexTitle,
+    CrossrefTitle,
+    ArxivTitle,
+}
+
+impl MetadataProvider {
+    fn priority(self) -> usize {
+        match self {
+            MetadataProvider::OpenAlexDoi => 10,
+            MetadataProvider::CrossrefDoi => 20,
+            MetadataProvider::ArxivId => 30,
+            MetadataProvider::OpenAlexTitle => 110,
+            MetadataProvider::CrossrefTitle => 120,
+            MetadataProvider::ArxivTitle => 130,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            MetadataProvider::ArxivId => "arxiv_id",
+            MetadataProvider::CrossrefDoi => "crossref_doi",
+            MetadataProvider::OpenAlexDoi => "openalex_doi",
+            MetadataProvider::OpenAlexTitle => "openalex_title",
+            MetadataProvider::CrossrefTitle => "crossref_title",
+            MetadataProvider::ArxivTitle => "arxiv_title",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum MetadataStage {
+    Precise,
+    Fuzzy,
+    Refresh,
+}
+
+impl MetadataStage {
+    fn name(self) -> &'static str {
+        match self {
+            MetadataStage::Precise => "precise",
+            MetadataStage::Fuzzy => "fuzzy",
+            MetadataStage::Refresh => "refresh",
+        }
+    }
+}
+
+#[derive(Default)]
+struct MetadataMergePriority {
+    title: usize,
+    authors: usize,
+    year: usize,
+    abstract_text: usize,
+    doi: usize,
+    arxiv_id: usize,
+    publication: usize,
+    volume: usize,
+    issue: usize,
+    pages: usize,
+    publisher: usize,
+    isbn: usize,
+    url: usize,
+    language: usize,
+}
+
+impl MetadataMergePriority {
+    fn new() -> Self {
+        Self {
+            title: usize::MAX,
+            authors: usize::MAX,
+            year: usize::MAX,
+            abstract_text: usize::MAX,
+            doi: usize::MAX,
+            arxiv_id: usize::MAX,
+            publication: usize::MAX,
+            volume: usize::MAX,
+            issue: usize::MAX,
+            pages: usize::MAX,
+            publisher: usize::MAX,
+            isbn: usize::MAX,
+            url: usize::MAX,
+            language: usize::MAX,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct OpenAlexWorksResponse {
+    #[serde(default)]
+    results: Vec<OpenAlexWork>,
+}
+
+#[derive(Deserialize)]
+struct OpenAlexWork {
+    #[serde(default)]
+    display_name: String,
+    doi: Option<String>,
+    publication_year: Option<i32>,
+    #[serde(default)]
+    r#type: String,
+    language: Option<String>,
+    primary_location: Option<OpenAlexPrimaryLocation>,
+    #[serde(default)]
+    authorships: Vec<OpenAlexAuthorship>,
+    biblio: Option<OpenAlexBiblio>,
+    abstract_inverted_index: Option<HashMap<String, Vec<usize>>>,
+}
+
+#[derive(Deserialize)]
+struct OpenAlexPrimaryLocation {
+    landing_page_url: Option<String>,
+    pdf_url: Option<String>,
+    source: Option<OpenAlexSource>,
+    raw_source_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OpenAlexSource {
+    display_name: Option<String>,
+    host_organization_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OpenAlexAuthorship {
+    author: Option<OpenAlexAuthor>,
+    raw_author_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OpenAlexAuthor {
+    display_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct OpenAlexBiblio {
+    volume: Option<String>,
+    issue: Option<String>,
+    first_page: Option<String>,
+    last_page: Option<String>,
+}
+
+pub struct RemoteMetadataEnrichmentResult {
+    pub meta: ParsedPdfMetadata,
+    pub network_complete: bool,
+    pub report: MetadataFetchReport,
+}
+
+#[derive(Clone)]
+struct MetadataRequestCacheEntry {
+    expires_at: Instant,
+    result: Result<Option<ParsedPdfMetadata>, String>,
+}
 
 pub fn http_client() -> &'static Client {
     HTTP_CLIENT.get_or_init(|| {
         Client::builder()
-            .timeout(Duration::from_secs(8))
+            .timeout(Duration::from_secs(15))
             .user_agent("Lume/0.1 (metadata enrichment)")
             .build()
             .expect("failed to build metadata HTTP client")
     })
+}
+
+fn metadata_request_cache() -> &'static Mutex<HashMap<String, MetadataRequestCacheEntry>> {
+    METADATA_REQUEST_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn normalize_metadata_request_query(provider: MetadataProvider, query: &str) -> String {
+    match provider {
+        MetadataProvider::CrossrefDoi | MetadataProvider::OpenAlexDoi => {
+            normalize_doi(query).unwrap_or_else(|| query.trim().to_lowercase())
+        }
+        MetadataProvider::ArxivId => {
+            normalize_arxiv_id(query).unwrap_or_else(|| query.trim().to_lowercase())
+        }
+        MetadataProvider::OpenAlexTitle
+        | MetadataProvider::CrossrefTitle
+        | MetadataProvider::ArxivTitle => normalize_title_for_match(query),
+    }
+}
+
+fn metadata_request_cache_key(provider: MetadataProvider, query: &str) -> String {
+    format!(
+        "{}:{}",
+        provider.name(),
+        normalize_metadata_request_query(provider, query)
+    )
+}
+
+fn get_cached_metadata_request(
+    provider: MetadataProvider,
+    query: &str,
+) -> Option<Result<Option<ParsedPdfMetadata>, String>> {
+    let key = metadata_request_cache_key(provider, query);
+    let now = Instant::now();
+    let mut cache = metadata_request_cache().lock().ok()?;
+
+    match cache.get(&key) {
+        Some(entry) if entry.expires_at > now => Some(entry.result.clone()),
+        Some(_) => {
+            cache.remove(&key);
+            None
+        }
+        None => None,
+    }
+}
+
+fn store_cached_metadata_request(
+    provider: MetadataProvider,
+    query: &str,
+    result: &Result<Option<ParsedPdfMetadata>, String>,
+) {
+    let ttl_secs = match result {
+        Ok(Some(_)) => METADATA_REQUEST_SUCCESS_CACHE_SECS,
+        Ok(None) => METADATA_REQUEST_EMPTY_CACHE_SECS,
+        Err(_) => METADATA_REQUEST_ERROR_COOLDOWN_SECS,
+    };
+
+    if let Ok(mut cache) = metadata_request_cache().lock() {
+        cache.insert(
+            metadata_request_cache_key(provider, query),
+            MetadataRequestCacheEntry {
+                expires_at: Instant::now() + Duration::from_secs(ttl_secs),
+                result: result.clone(),
+            },
+        );
+    }
+}
+
+fn should_retry_metadata_error(error: &str) -> bool {
+    let lower = error.to_lowercase();
+
+    lower.contains("timed out")
+        || lower.contains("timeout")
+        || lower.contains("connection")
+        || lower.contains("transport")
+        || lower.contains("dns")
+        || lower.contains("tempor")
+        || lower.contains("429")
+        || lower.contains("502")
+        || lower.contains("503")
+        || lower.contains("504")
+}
+
+fn retry_metadata_request<T, F>(mut operation: F) -> Result<T, String>
+where
+    F: FnMut() -> Result<T, String>,
+{
+    let mut last_error = None;
+
+    for attempt in 0..METADATA_REQUEST_MAX_ATTEMPTS {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error) => {
+                let is_last_attempt = attempt + 1 == METADATA_REQUEST_MAX_ATTEMPTS;
+                if is_last_attempt || !should_retry_metadata_error(&error) {
+                    return Err(error);
+                }
+
+                last_error = Some(error);
+                std::thread::sleep(Duration::from_millis(
+                    METADATA_REQUEST_RETRY_DELAY_MS * (attempt as u64 + 1),
+                ));
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| "metadata request failed".to_string()))
+}
+
+fn execute_metadata_request<F>(
+    provider: MetadataProvider,
+    query: &str,
+    operation: F,
+) -> Result<Option<ParsedPdfMetadata>, String>
+where
+    F: FnOnce() -> Result<Option<ParsedPdfMetadata>, String>,
+{
+    if let Some(cached) = get_cached_metadata_request(provider, query) {
+        return cached;
+    }
+
+    let result = operation();
+    store_cached_metadata_request(provider, query, &result);
+    result
 }
 
 pub fn doi_regex() -> &'static Regex {
@@ -117,6 +408,50 @@ pub fn normalize_authors(value: &str) -> String {
     clean_author_text(value)
         .replace(" and ", ", ")
         .replace(" ; ", ", ")
+}
+
+pub fn normalize_author_for_match(value: &str) -> String {
+    normalize_authors(value)
+        .to_lowercase()
+        .chars()
+        .map(|ch| if ch.is_alphanumeric() { ch } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub fn author_tokens(value: &str) -> HashSet<String> {
+    normalize_author_for_match(value)
+        .split_whitespace()
+        .filter(|token| token.len() > 1)
+        .filter(|token| !matches!(*token, "and" | "et" | "al"))
+        .map(|token| token.to_string())
+        .collect()
+}
+
+pub fn author_match_score(left: &str, right: &str) -> f32 {
+    let left_normalized = normalize_author_for_match(left);
+    let right_normalized = normalize_author_for_match(right);
+
+    if left_normalized.is_empty() || right_normalized.is_empty() {
+        return 0.0;
+    }
+
+    if left_normalized == right_normalized {
+        return 1.0;
+    }
+
+    let left_tokens = author_tokens(left);
+    let right_tokens = author_tokens(right);
+    if left_tokens.is_empty() || right_tokens.is_empty() {
+        return 0.0;
+    }
+
+    let shared = left_tokens.intersection(&right_tokens).count() as f32;
+    let coverage = shared / left_tokens.len().max(right_tokens.len()) as f32;
+    let jaccard = shared / left_tokens.union(&right_tokens).count() as f32;
+    coverage.max(jaccard)
 }
 
 pub fn extract_year_from_text(value: &str) -> Option<String> {
@@ -455,6 +790,156 @@ pub fn titles_confidently_match(left: &str, right: &str) -> bool {
     title_match_score(left, right) >= 0.72
 }
 
+fn strip_balanced_title_segments(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    let mut round_depth = 0usize;
+    let mut square_depth = 0usize;
+
+    for ch in value.chars() {
+        match ch {
+            '(' => round_depth += 1,
+            ')' => round_depth = round_depth.saturating_sub(1),
+            '[' => square_depth += 1,
+            ']' => square_depth = square_depth.saturating_sub(1),
+            _ if round_depth == 0 && square_depth == 0 => output.push(ch),
+            _ => {}
+        }
+    }
+
+    clean_title_text(&output)
+}
+
+fn push_title_variant(variants: &mut Vec<String>, candidate: String) {
+    let cleaned = clean_title_text(&candidate);
+    if !is_plausible_title(&cleaned) {
+        return;
+    }
+
+    let normalized = normalize_title_for_match(&cleaned);
+    if normalized.is_empty() {
+        return;
+    }
+
+    if variants
+        .iter()
+        .any(|existing| normalize_title_for_match(existing) == normalized)
+    {
+        return;
+    }
+
+    variants.push(cleaned);
+}
+
+pub fn build_title_query_variants(title: &str) -> Vec<String> {
+    let cleaned = clean_title_text(title);
+    let mut variants = Vec::new();
+
+    push_title_variant(&mut variants, cleaned.clone());
+    push_title_variant(&mut variants, strip_balanced_title_segments(&cleaned));
+
+    for separator in [":", " - ", " | ", " -- "] {
+        if let Some((prefix, _)) = cleaned.split_once(separator) {
+            push_title_variant(&mut variants, prefix.to_string());
+        }
+    }
+
+    if let Some(stripped) = cleaned
+        .strip_prefix("arxiv:")
+        .or_else(|| cleaned.strip_prefix("Arxiv:"))
+        .or_else(|| cleaned.strip_prefix("preprint:"))
+        .or_else(|| cleaned.strip_prefix("Preprint:"))
+    {
+        push_title_variant(&mut variants, stripped.to_string());
+    }
+
+    variants
+}
+
+pub fn is_preprint_publication(value: &str) -> bool {
+    let lower = value.trim().to_lowercase();
+    !lower.is_empty()
+        && (lower.contains("arxiv")
+            || lower.contains("biorxiv")
+            || lower.contains("medrxiv")
+            || lower.contains("chemrxiv")
+            || lower.contains("openreview")
+            || lower.contains("corr")
+            || lower == "preprint")
+}
+
+pub fn is_preprint_metadata(meta: &ParsedPdfMetadata) -> bool {
+    meta.publication
+        .as_deref()
+        .map(is_preprint_publication)
+        .unwrap_or(false)
+}
+
+pub fn is_metadata_completed(meta: &ParsedPdfMetadata) -> bool {
+    let title = meta.title.as_deref().map(str::trim).unwrap_or_default();
+    let authors = meta.authors.as_deref().map(str::trim).unwrap_or_default();
+    let publication = meta.publication.as_deref().map(str::trim).unwrap_or_default();
+    let year = meta.year.as_deref().map(str::trim).unwrap_or_default();
+
+    !title.is_empty()
+        && !authors.is_empty()
+        && !publication.is_empty()
+        && !year.is_empty()
+        && !is_preprint_metadata(meta)
+}
+
+pub fn year_match_score(left: &str, right: &str) -> f32 {
+    match (left.trim().parse::<i32>(), right.trim().parse::<i32>()) {
+        (Ok(left_year), Ok(right_year)) if left_year == right_year => 1.0,
+        (Ok(left_year), Ok(right_year)) if (left_year - right_year).abs() == 1 => 0.7,
+        (Ok(_), Ok(_)) => 0.0,
+        _ => 0.0,
+    }
+}
+
+pub fn metadata_candidate_match_score(
+    title: &str,
+    authors: Option<&str>,
+    year: Option<&str>,
+    candidate: &ParsedPdfMetadata,
+) -> f32 {
+    let Some(candidate_title) = candidate.title.as_deref() else {
+        return 0.0;
+    };
+
+    let title_score = title_match_score(title, candidate_title);
+    if title_score == 0.0 {
+        return 0.0;
+    }
+
+    let mut score = title_score;
+
+    if let (Some(candidate_authors), Some(query_authors)) = (
+        candidate.authors.as_deref().filter(|value| !value.trim().is_empty()),
+        authors.filter(|value| !value.trim().is_empty()),
+    ) {
+        let author_score = author_match_score(query_authors, candidate_authors);
+        score = (score * 0.82) + (author_score * 0.18);
+
+        if author_score < 0.2 && title_score < 0.95 {
+            score *= 0.7;
+        }
+    }
+
+    if let (Some(candidate_year), Some(query_year)) = (
+        candidate.year.as_deref().filter(|value| !value.trim().is_empty()),
+        year.filter(|value| !value.trim().is_empty()),
+    ) {
+        let year_score = year_match_score(query_year, candidate_year);
+        score = (score * 0.95) + (year_score * 0.05);
+
+        if year_score == 0.0 && title_score < 0.95 {
+            score *= 0.85;
+        }
+    }
+
+    score
+}
+
 pub fn extract_xml_tag_values(block: &str, tag_name: &str) -> Vec<String> {
     let pattern = format!(
         r"(?is)<(?:[a-z0-9_\-]+:)?{}\b[^>]*>(.*?)</(?:[a-z0-9_\-]+:)?{}>",
@@ -640,118 +1125,900 @@ pub fn crossref_message_to_metadata(message: CrossrefWorkMessage) -> ParsedPdfMe
     }
 }
 
+pub fn openalex_abstract_to_text(
+    abstract_inverted_index: &HashMap<String, Vec<usize>>,
+) -> Option<String> {
+    let max_index = abstract_inverted_index
+        .values()
+        .flat_map(|positions| positions.iter().copied())
+        .max()?;
+    let mut tokens = vec![String::new(); max_index + 1];
+
+    for (word, positions) in abstract_inverted_index {
+        for position in positions {
+            if *position < tokens.len() {
+                tokens[*position] = word.clone();
+            }
+        }
+    }
+
+    let abstract_text = tokens
+        .into_iter()
+        .filter(|token| !token.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let cleaned = clean_abstract_text(&abstract_text);
+    if is_plausible_abstract(&cleaned) {
+        Some(cleaned)
+    } else {
+        None
+    }
+}
+
+fn openalex_authors(authorships: &[OpenAlexAuthorship]) -> Option<String> {
+    let authors = authorships
+        .iter()
+        .filter_map(|authorship| {
+            authorship
+                .author
+                .as_ref()
+                .and_then(|author| author.display_name.as_deref())
+                .map(clean_author_text)
+                .filter(|value| !value.is_empty())
+                .or_else(|| {
+                    authorship
+                        .raw_author_name
+                        .as_deref()
+                        .map(clean_author_text)
+                        .filter(|value| !value.is_empty())
+                })
+        })
+        .collect::<Vec<_>>();
+
+    if authors.is_empty() {
+        None
+    } else {
+        Some(authors.join(", "))
+    }
+}
+
+fn openalex_work_to_metadata(work: OpenAlexWork) -> ParsedPdfMetadata {
+    let doi = work.doi.as_deref().and_then(normalize_doi);
+    let mut arxiv_id = doi
+        .as_deref()
+        .and_then(|value| value.split("/arxiv.").nth(1))
+        .and_then(normalize_arxiv_id);
+    let title = Some(clean_title_text(&work.display_name)).filter(|value| is_plausible_title(value));
+    let authors = openalex_authors(&work.authorships);
+    let year = work.publication_year.map(|year| year.to_string());
+
+    let publication = work
+        .primary_location
+        .as_ref()
+        .and_then(|location| {
+            location
+                .source
+                .as_ref()
+                .and_then(|source| source.display_name.clone())
+                .or_else(|| location.raw_source_name.clone())
+        })
+        .map(|value| clean_title_text(&value))
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            if work.r#type.eq_ignore_ascii_case("preprint") && arxiv_id.is_some() {
+                Some("arXiv".to_string())
+            } else {
+                None
+            }
+        });
+
+    if arxiv_id.is_none() {
+        arxiv_id = work
+            .primary_location
+            .as_ref()
+            .and_then(|location| location.landing_page_url.as_deref())
+            .and_then(normalize_arxiv_id);
+    }
+
+    let pages = work.biblio.as_ref().and_then(|biblio| {
+        match (
+            biblio.first_page.as_deref().map(clean_title_text),
+            biblio.last_page.as_deref().map(clean_title_text),
+        ) {
+            (Some(first), Some(last)) if !first.is_empty() && !last.is_empty() && first != last => {
+                Some(format!("{}-{}", first, last))
+            }
+            (Some(first), _) if !first.is_empty() => Some(first),
+            _ => None,
+        }
+    });
+
+    ParsedPdfMetadata {
+        title,
+        authors,
+        year,
+        r#abstract: work
+            .abstract_inverted_index
+            .as_ref()
+            .and_then(openalex_abstract_to_text),
+        doi,
+        arxiv_id,
+        publication,
+        volume: work
+            .biblio
+            .as_ref()
+            .and_then(|biblio| biblio.volume.as_deref())
+            .map(clean_title_text)
+            .filter(|value| !value.is_empty()),
+        issue: work
+            .biblio
+            .as_ref()
+            .and_then(|biblio| biblio.issue.as_deref())
+            .map(clean_title_text)
+            .filter(|value| !value.is_empty()),
+        pages,
+        publisher: work
+            .primary_location
+            .as_ref()
+            .and_then(|location| location.source.as_ref())
+            .and_then(|source| source.host_organization_name.as_deref())
+            .map(clean_title_text)
+            .filter(|value| !value.is_empty()),
+        isbn: None,
+        url: work
+            .primary_location
+            .as_ref()
+            .and_then(|location| {
+                location
+                    .landing_page_url
+                    .clone()
+                    .or_else(|| location.pdf_url.clone())
+            })
+            .map(|value| clean_title_text(&value))
+            .filter(|value| !value.is_empty()),
+        language: work
+            .language
+            .as_deref()
+            .map(clean_title_text)
+            .filter(|value| !value.is_empty()),
+    }
+}
+
 pub fn fetch_crossref_metadata_by_doi(doi: &str) -> Result<Option<ParsedPdfMetadata>, String> {
     let url = format!(
         "https://api.crossref.org/works/{}",
         urlencoding::encode(doi)
     );
-    let response = http_client()
-        .get(url)
-        .send()
-        .map_err(|e| format!("Crossref lookup failed: {}", e))?;
+    execute_metadata_request(MetadataProvider::CrossrefDoi, doi, || {
+        retry_metadata_request(|| {
+            let response = http_client()
+                .get(&url)
+                .send()
+                .map_err(|e| format!("Crossref lookup failed: {}", e))?;
 
-    if response.status().as_u16() == 404 {
-        return Ok(None);
-    }
+            if response.status().as_u16() == 404 {
+                return Ok(None);
+            }
 
-    let payload = response
-        .error_for_status()
-        .map_err(|e| format!("Crossref lookup failed: {}", e))?
-        .json::<CrossrefWorkResponse>()
-        .map_err(|e| format!("Failed to decode Crossref response: {}", e))?;
+            let payload = response
+                .error_for_status()
+                .map_err(|e| format!("Crossref lookup failed: {}", e))?
+                .json::<CrossrefWorkResponse>()
+                .map_err(|e| format!("Failed to decode Crossref response: {}", e))?;
 
-    Ok(Some(crossref_message_to_metadata(payload.message)))
+            Ok(Some(crossref_message_to_metadata(payload.message)))
+        })
+    })
 }
 
-pub fn fetch_crossref_metadata_by_title(title: &str) -> Result<Option<ParsedPdfMetadata>, String> {
-    let payload = http_client()
-        .get("https://api.crossref.org/works")
-        .query(&[("query.bibliographic", title), ("rows", "5")])
-        .send()
-        .map_err(|e| format!("Crossref title search failed: {}", e))?
-        .error_for_status()
-        .map_err(|e| format!("Crossref title search failed: {}", e))?
-        .json::<CrossrefSearchResponse>()
-        .map_err(|e| format!("Failed to decode Crossref search response: {}", e))?;
+pub fn fetch_openalex_metadata_by_doi(doi: &str) -> Result<Option<ParsedPdfMetadata>, String> {
+    let filter = format!("doi:{}", doi);
+    execute_metadata_request(MetadataProvider::OpenAlexDoi, doi, || {
+        retry_metadata_request(|| {
+            let payload = http_client()
+                .get("https://api.openalex.org/works")
+                .query(&[("filter", filter.clone()), ("per-page", "1".to_string())])
+                .send()
+                .map_err(|e| format!("OpenAlex DOI lookup failed: {}", e))?
+                .error_for_status()
+                .map_err(|e| format!("OpenAlex DOI lookup failed: {}", e))?
+                .json::<OpenAlexWorksResponse>()
+                .map_err(|e| format!("Failed to decode OpenAlex DOI response: {}", e))?;
 
-    let candidate = payload
-        .message
-        .items
-        .into_iter()
-        .map(|item| {
-            let score = item
-                .title
-                .first()
-                .map(|candidate_title| title_match_score(title, candidate_title))
-                .unwrap_or(0.0);
-            (score, item)
+            Ok(payload.results.into_iter().next().map(openalex_work_to_metadata))
         })
-        .filter(|(score, _)| *score >= 0.72)
-        .max_by(|(left_score, _), (right_score, _)| {
-            left_score
-                .partial_cmp(right_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map(|(_, item)| crossref_message_to_metadata(item));
+    })
+}
 
-    Ok(candidate)
+pub fn fetch_crossref_metadata_by_title(
+    title: &str,
+    authors: Option<&str>,
+    year: Option<&str>,
+) -> Result<Option<ParsedPdfMetadata>, String> {
+    let cache_query = format!("{} | {} | {}", title, authors.unwrap_or(""), year.unwrap_or(""));
+    execute_metadata_request(MetadataProvider::CrossrefTitle, &cache_query, || {
+        retry_metadata_request(|| {
+            let payload = http_client()
+                .get("https://api.crossref.org/works")
+                .query(&[("query.bibliographic", title), ("rows", "5")])
+                .send()
+                .map_err(|e| format!("Crossref title search failed: {}", e))?
+                .error_for_status()
+                .map_err(|e| format!("Crossref title search failed: {}", e))?
+                .json::<CrossrefSearchResponse>()
+                .map_err(|e| format!("Failed to decode Crossref search response: {}", e))?;
+
+            let candidate = payload
+                .message
+                .items
+                .into_iter()
+                .map(|item| {
+                    let parsed = crossref_message_to_metadata(item);
+                    let score = metadata_candidate_match_score(title, authors, year, &parsed);
+                    (score, parsed)
+                })
+                .filter(|(score, _)| *score >= FUZZY_METADATA_MATCH_THRESHOLD)
+                .max_by(|(left_score, _), (right_score, _)| {
+                    left_score
+                        .partial_cmp(right_score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|(_, parsed)| parsed);
+
+            Ok(candidate)
+        })
+    })
 }
 
 pub fn fetch_arxiv_metadata_by_id(arxiv_id: &str) -> Result<Option<ParsedPdfMetadata>, String> {
-    let xml = http_client()
-        .get("https://export.arxiv.org/api/query")
-        .query(&[("id_list", arxiv_id)])
-        .send()
-        .map_err(|e| format!("arXiv lookup failed: {}", e))?
-        .error_for_status()
-        .map_err(|e| format!("arXiv lookup failed: {}", e))?
-        .text()
-        .map_err(|e| format!("Failed to read arXiv response: {}", e))?;
+    execute_metadata_request(MetadataProvider::ArxivId, arxiv_id, || {
+        retry_metadata_request(|| {
+            let xml = http_client()
+                .get("https://export.arxiv.org/api/query")
+                .query(&[("id_list", arxiv_id)])
+                .send()
+                .map_err(|e| format!("arXiv lookup failed: {}", e))?
+                .error_for_status()
+                .map_err(|e| format!("arXiv lookup failed: {}", e))?
+                .text()
+                .map_err(|e| format!("Failed to read arXiv response: {}", e))?;
 
-    Ok(parse_arxiv_feed_entries(&xml).into_iter().next())
+            Ok(parse_arxiv_feed_entries(&xml).into_iter().next())
+        })
+    })
 }
 
-pub fn fetch_arxiv_metadata_by_title(title: &str) -> Result<Option<ParsedPdfMetadata>, String> {
-    let search_query = format!("ti:\"{}\"", title);
-    let xml = http_client()
-        .get("https://export.arxiv.org/api/query")
-        .query(&[
-            ("search_query", search_query.as_str()),
-            ("start", "0"),
-            ("max_results", "5"),
-        ])
-        .send()
-        .map_err(|e| format!("arXiv title search failed: {}", e))?
-        .error_for_status()
-        .map_err(|e| format!("arXiv title search failed: {}", e))?
-        .text()
-        .map_err(|e| format!("Failed to read arXiv search response: {}", e))?;
+pub fn fetch_openalex_metadata_by_title(
+    title: &str,
+    authors: Option<&str>,
+    year: Option<&str>,
+) -> Result<Option<ParsedPdfMetadata>, String> {
+    let cache_query = format!("{} | {} | {}", title, authors.unwrap_or(""), year.unwrap_or(""));
+    execute_metadata_request(MetadataProvider::OpenAlexTitle, &cache_query, || {
+        retry_metadata_request(|| {
+            let payload = http_client()
+                .get("https://api.openalex.org/works")
+                .query(&[
+                    ("search", title.to_string()),
+                    ("per-page", "5".to_string()),
+                ])
+                .send()
+                .map_err(|e| format!("OpenAlex title search failed: {}", e))?
+                .error_for_status()
+                .map_err(|e| format!("OpenAlex title search failed: {}", e))?
+                .json::<OpenAlexWorksResponse>()
+                .map_err(|e| format!("Failed to decode OpenAlex title response: {}", e))?;
 
-    let candidate = parse_arxiv_feed_entries(&xml)
-        .into_iter()
-        .filter(|item| {
-            item.title
-                .as_deref()
-                .map(|candidate_title| titles_confidently_match(title, candidate_title))
-                .unwrap_or(false)
+            let candidate = payload
+                .results
+                .into_iter()
+                .map(openalex_work_to_metadata)
+                .map(|parsed| {
+                    let score = metadata_candidate_match_score(title, authors, year, &parsed);
+                    (score, parsed)
+                })
+                .filter(|(score, _)| *score >= FUZZY_METADATA_MATCH_THRESHOLD)
+                .max_by(|(left_score, _), (right_score, _)| {
+                    left_score
+                        .partial_cmp(right_score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|(_, parsed)| parsed);
+
+            Ok(candidate)
         })
-        .max_by(|left, right| {
-            let left_score = left
-                .title
-                .as_deref()
-                .map(|candidate_title| title_match_score(title, candidate_title))
-                .unwrap_or(0.0);
-            let right_score = right
-                .title
-                .as_deref()
-                .map(|candidate_title| title_match_score(title, candidate_title))
-                .unwrap_or(0.0);
-            left_score
-                .partial_cmp(&right_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+    })
+}
 
-    Ok(candidate)
+pub fn fetch_arxiv_metadata_by_title(
+    title: &str,
+    authors: Option<&str>,
+    year: Option<&str>,
+) -> Result<Option<ParsedPdfMetadata>, String> {
+    let search_query = format!("ti:\"{}\"", title);
+    let cache_query = format!("{} | {} | {}", title, authors.unwrap_or(""), year.unwrap_or(""));
+    execute_metadata_request(MetadataProvider::ArxivTitle, &cache_query, || {
+        retry_metadata_request(|| {
+            let xml = http_client()
+                .get("https://export.arxiv.org/api/query")
+                .query(&[
+                    ("search_query", search_query.as_str()),
+                    ("start", "0"),
+                    ("max_results", "5"),
+                ])
+                .send()
+                .map_err(|e| format!("arXiv title search failed: {}", e))?
+                .error_for_status()
+                .map_err(|e| format!("arXiv title search failed: {}", e))?
+                .text()
+                .map_err(|e| format!("Failed to read arXiv search response: {}", e))?;
+
+            let candidate = parse_arxiv_feed_entries(&xml)
+                .into_iter()
+                .map(|parsed| {
+                    let score = metadata_candidate_match_score(title, authors, year, &parsed);
+                    (score, parsed)
+                })
+                .filter(|(score, _)| *score >= FUZZY_METADATA_MATCH_THRESHOLD)
+                .max_by(|(left_score, _), (right_score, _)| {
+                    left_score
+                        .partial_cmp(right_score)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|(_, parsed)| parsed);
+
+            Ok(candidate)
+        })
+    })
+}
+
+fn metadata_option_changed(left: &Option<String>, right: &Option<String>) -> bool {
+    let left_value = left
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let right_value = right
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    left_value != right_value
+}
+
+fn metadata_fields_changed(before: &ParsedPdfMetadata, after: &ParsedPdfMetadata) -> Vec<String> {
+    let mut changed = Vec::new();
+
+    if metadata_option_changed(&before.title, &after.title) {
+        changed.push("title".to_string());
+    }
+    if metadata_option_changed(&before.authors, &after.authors) {
+        changed.push("authors".to_string());
+    }
+    if metadata_option_changed(&before.year, &after.year) {
+        changed.push("year".to_string());
+    }
+    if metadata_option_changed(&before.r#abstract, &after.r#abstract) {
+        changed.push("abstract".to_string());
+    }
+    if metadata_option_changed(&before.doi, &after.doi) {
+        changed.push("doi".to_string());
+    }
+    if metadata_option_changed(&before.arxiv_id, &after.arxiv_id) {
+        changed.push("arxiv_id".to_string());
+    }
+    if metadata_option_changed(&before.publication, &after.publication) {
+        changed.push("publication".to_string());
+    }
+    if metadata_option_changed(&before.volume, &after.volume) {
+        changed.push("volume".to_string());
+    }
+    if metadata_option_changed(&before.issue, &after.issue) {
+        changed.push("issue".to_string());
+    }
+    if metadata_option_changed(&before.pages, &after.pages) {
+        changed.push("pages".to_string());
+    }
+    if metadata_option_changed(&before.publisher, &after.publisher) {
+        changed.push("publisher".to_string());
+    }
+    if metadata_option_changed(&before.isbn, &after.isbn) {
+        changed.push("isbn".to_string());
+    }
+    if metadata_option_changed(&before.url, &after.url) {
+        changed.push("url".to_string());
+    }
+    if metadata_option_changed(&before.language, &after.language) {
+        changed.push("language".to_string());
+    }
+
+    changed
+}
+
+fn update_report_state(report: &mut MetadataFetchReport, resolved: &ParsedPdfMetadata, network_complete: bool) {
+    report.network_complete = network_complete;
+    report.metadata_completed = is_metadata_completed(resolved);
+    report.is_preprint = is_preprint_metadata(resolved);
+}
+
+fn build_report_summary(report: &MetadataFetchReport) -> String {
+    let last_useful_step = report
+        .steps
+        .iter()
+        .rev()
+        .find(|step| matches!(step.status.as_str(), "hit" | "redundant"));
+
+    let state = if report.metadata_completed {
+        "complete"
+    } else if report.is_preprint {
+        "preprint"
+    } else {
+        "partial"
+    };
+
+    match last_useful_step {
+        Some(step) if !step.fields_changed.is_empty() => format!(
+            "{} metadata after {} via {} ({})",
+            state,
+            step.stage,
+            step.provider,
+            step.fields_changed.join(", ")
+        ),
+        Some(step) => format!("{} metadata confirmed via {}", state, step.provider),
+        None if report.network_complete => format!("{} metadata with no remote matches", state),
+        None => format!("{} metadata with network gaps", state),
+    }
+}
+
+fn merge_metadata_field(
+    current: &mut Option<String>,
+    incoming: Option<String>,
+    priority_slot: &mut usize,
+    incoming_priority: usize,
+) {
+    let incoming_value = incoming
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+    let current_value = current
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string());
+
+    let Some(incoming_value) = incoming_value else {
+        return;
+    };
+
+    if current_value.as_deref() == Some(incoming_value.as_str()) {
+        return;
+    }
+
+    if current_value.is_none() || incoming_priority < *priority_slot {
+        *current = Some(incoming_value);
+        *priority_slot = incoming_priority;
+    }
+}
+
+fn merge_provider_metadata(
+    target: &mut ParsedPdfMetadata,
+    priorities: &mut MetadataMergePriority,
+    incoming: ParsedPdfMetadata,
+    provider: MetadataProvider,
+) {
+    let provider_priority = provider.priority();
+    let target_is_preprint = is_preprint_metadata(target);
+    let incoming_is_preprint = is_preprint_metadata(&incoming);
+    let can_override_bibliographic_fields = !incoming_is_preprint || target_is_preprint;
+
+    merge_metadata_field(
+        &mut target.title,
+        incoming.title,
+        &mut priorities.title,
+        provider_priority,
+    );
+    merge_metadata_field(
+        &mut target.authors,
+        incoming.authors,
+        &mut priorities.authors,
+        provider_priority,
+    );
+    merge_metadata_field(
+        &mut target.r#abstract,
+        incoming.r#abstract,
+        &mut priorities.abstract_text,
+        provider_priority,
+    );
+    merge_metadata_field(
+        &mut target.doi,
+        incoming.doi,
+        &mut priorities.doi,
+        provider_priority,
+    );
+    merge_metadata_field(
+        &mut target.arxiv_id,
+        incoming.arxiv_id,
+        &mut priorities.arxiv_id,
+        provider_priority,
+    );
+    merge_metadata_field(
+        &mut target.url,
+        incoming.url,
+        &mut priorities.url,
+        provider_priority,
+    );
+    merge_metadata_field(
+        &mut target.language,
+        incoming.language,
+        &mut priorities.language,
+        provider_priority,
+    );
+
+    if can_override_bibliographic_fields {
+        merge_metadata_field(
+            &mut target.year,
+            incoming.year,
+            &mut priorities.year,
+            provider_priority,
+        );
+        merge_metadata_field(
+            &mut target.publication,
+            incoming.publication,
+            &mut priorities.publication,
+            provider_priority,
+        );
+        merge_metadata_field(
+            &mut target.volume,
+            incoming.volume,
+            &mut priorities.volume,
+            provider_priority,
+        );
+        merge_metadata_field(
+            &mut target.issue,
+            incoming.issue,
+            &mut priorities.issue,
+            provider_priority,
+        );
+        merge_metadata_field(
+            &mut target.pages,
+            incoming.pages,
+            &mut priorities.pages,
+            provider_priority,
+        );
+        merge_metadata_field(
+            &mut target.publisher,
+            incoming.publisher,
+            &mut priorities.publisher,
+            provider_priority,
+        );
+        merge_metadata_field(
+            &mut target.isbn,
+            incoming.isbn,
+            &mut priorities.isbn,
+            provider_priority,
+        );
+    }
+}
+
+fn apply_provider_result(
+    resolved: &mut ParsedPdfMetadata,
+    priorities: &mut MetadataMergePriority,
+    report: &mut MetadataFetchReport,
+    network_complete: &mut bool,
+    stage: MetadataStage,
+    provider: MetadataProvider,
+    query: String,
+    score: Option<f32>,
+    result: Result<Option<ParsedPdfMetadata>, String>,
+) -> bool {
+    match result {
+        Ok(Some(incoming)) => {
+            let before = resolved.clone();
+            merge_provider_metadata(resolved, priorities, incoming, provider);
+            let fields_changed = metadata_fields_changed(&before, resolved);
+            report.steps.push(MetadataFetchStep {
+                stage: stage.name().to_string(),
+                provider: provider.name().to_string(),
+                query,
+                status: if fields_changed.is_empty() {
+                    "redundant".to_string()
+                } else {
+                    "hit".to_string()
+                },
+                score,
+                fields_changed,
+                note: None,
+                metadata_completed: is_metadata_completed(resolved),
+            });
+            update_report_state(report, resolved, *network_complete);
+            true
+        }
+        Ok(None) => {
+            report.steps.push(MetadataFetchStep {
+                stage: stage.name().to_string(),
+                provider: provider.name().to_string(),
+                query,
+                status: "miss".to_string(),
+                score,
+                fields_changed: Vec::new(),
+                note: None,
+                metadata_completed: is_metadata_completed(resolved),
+            });
+            update_report_state(report, resolved, *network_complete);
+            false
+        }
+        Err(error) => {
+            *network_complete = false;
+            report.steps.push(MetadataFetchStep {
+                stage: stage.name().to_string(),
+                provider: provider.name().to_string(),
+                query,
+                status: "error".to_string(),
+                score,
+                fields_changed: Vec::new(),
+                note: Some(error),
+                metadata_completed: is_metadata_completed(resolved),
+            });
+            update_report_state(report, resolved, *network_complete);
+            false
+        }
+    }
+}
+
+fn apply_precise_provider(
+    resolved: &mut ParsedPdfMetadata,
+    priorities: &mut MetadataMergePriority,
+    report: &mut MetadataFetchReport,
+    network_complete: &mut bool,
+    stage: MetadataStage,
+    provider: MetadataProvider,
+    query: String,
+    result: Result<Option<ParsedPdfMetadata>, String>,
+) {
+    let _ = apply_provider_result(
+        resolved,
+        priorities,
+        report,
+        network_complete,
+        stage,
+        provider,
+        query,
+        None,
+        result,
+    );
+}
+
+fn run_precise_provider_lookup(
+    provider: MetadataProvider,
+    query: &str,
+) -> Result<Option<ParsedPdfMetadata>, String> {
+    match provider {
+        MetadataProvider::ArxivId => fetch_arxiv_metadata_by_id(query),
+        MetadataProvider::CrossrefDoi => fetch_crossref_metadata_by_doi(query),
+        MetadataProvider::OpenAlexDoi => fetch_openalex_metadata_by_doi(query),
+        _ => Err(format!(
+            "unsupported precise metadata provider: {}",
+            provider.name()
+        )),
+    }
+}
+
+fn collect_precise_provider_results(
+    mut lookups: Vec<(MetadataProvider, String)>,
+) -> Vec<(MetadataProvider, String, Result<Option<ParsedPdfMetadata>, String>)> {
+    lookups.sort_by_key(|(provider, _)| provider.priority());
+
+    if lookups.len() <= 1 {
+        return lookups
+            .into_iter()
+            .map(|(provider, query)| {
+                let result = run_precise_provider_lookup(provider, &query);
+                (provider, query, result)
+            })
+            .collect();
+    }
+
+    thread::scope(|scope| {
+        let mut handles = Vec::new();
+
+        for (provider, query) in lookups {
+            let query_for_task = query.clone();
+            let handle =
+                scope.spawn(move || run_precise_provider_lookup(provider, &query_for_task));
+            handles.push((provider, query, handle));
+        }
+
+        handles
+            .into_iter()
+            .map(|(provider, query, handle)| {
+                let result = handle
+                    .join()
+                    .unwrap_or_else(|_| Err(format!("{} lookup panicked", provider.name())));
+                (provider, query, result)
+            })
+            .collect()
+    })
+}
+
+fn apply_precise_provider_batch(
+    resolved: &mut ParsedPdfMetadata,
+    priorities: &mut MetadataMergePriority,
+    report: &mut MetadataFetchReport,
+    network_complete: &mut bool,
+    stage: MetadataStage,
+    lookups: Vec<(MetadataProvider, String)>,
+) {
+    for (provider, query, result) in collect_precise_provider_results(lookups) {
+        apply_precise_provider(
+            resolved,
+            priorities,
+            report,
+            network_complete,
+            stage,
+            provider,
+            query,
+            result,
+        );
+    }
+}
+
+fn apply_fuzzy_provider_with_queries(
+    resolved: &mut ParsedPdfMetadata,
+    priorities: &mut MetadataMergePriority,
+    report: &mut MetadataFetchReport,
+    network_complete: &mut bool,
+    provider: MetadataProvider,
+    original_title: &str,
+    queries: &[String],
+) {
+    for query in queries {
+        let authors = resolved.authors.clone();
+        let year = resolved.year.clone();
+        let result = match provider {
+            MetadataProvider::OpenAlexTitle => {
+                fetch_openalex_metadata_by_title(query, authors.as_deref(), year.as_deref())
+            }
+            MetadataProvider::CrossrefTitle => {
+                fetch_crossref_metadata_by_title(query, authors.as_deref(), year.as_deref())
+            }
+            MetadataProvider::ArxivTitle => {
+                fetch_arxiv_metadata_by_title(query, authors.as_deref(), year.as_deref())
+            }
+            _ => continue,
+        };
+
+        let score = match &result {
+            Ok(Some(incoming)) => Some(metadata_candidate_match_score(
+                original_title,
+                authors.as_deref(),
+                year.as_deref(),
+                incoming,
+            )),
+            _ => None,
+        };
+
+        if apply_provider_result(
+            resolved,
+            priorities,
+            report,
+            network_complete,
+            MetadataStage::Fuzzy,
+            provider,
+            query.clone(),
+            score,
+            result,
+        ) {
+            break;
+        }
+    }
+}
+
+pub fn enrich_metadata_with_remote_providers(local: &ParsedPdfMetadata) -> RemoteMetadataEnrichmentResult {
+    let mut resolved = local.clone();
+    let mut priorities = MetadataMergePriority::new();
+    let mut network_complete = true;
+    let original_doi = resolved.doi.clone();
+    let original_arxiv_id = resolved.arxiv_id.clone();
+    let mut report = MetadataFetchReport {
+        network_complete,
+        metadata_completed: is_metadata_completed(&resolved),
+        is_preprint: is_preprint_metadata(&resolved),
+        ..MetadataFetchReport::default()
+    };
+
+    let mut initial_precise_lookups = Vec::new();
+    if let Some(doi) = resolved.doi.clone() {
+        initial_precise_lookups.push((MetadataProvider::OpenAlexDoi, doi.clone()));
+        initial_precise_lookups.push((MetadataProvider::CrossrefDoi, doi));
+    }
+    if let Some(arxiv_id) = resolved.arxiv_id.clone() {
+        initial_precise_lookups.push((MetadataProvider::ArxivId, arxiv_id));
+    }
+    apply_precise_provider_batch(
+        &mut resolved,
+        &mut priorities,
+        &mut report,
+        &mut network_complete,
+        MetadataStage::Precise,
+        initial_precise_lookups,
+    );
+
+    if let Some(title) = resolved.title.clone() {
+        report.title_queries = build_title_query_variants(&title);
+        let title_queries = report.title_queries.clone();
+        if !is_metadata_completed(&resolved) {
+            apply_fuzzy_provider_with_queries(
+                &mut resolved,
+                &mut priorities,
+                &mut report,
+                &mut network_complete,
+                MetadataProvider::OpenAlexTitle,
+                &title,
+                &title_queries,
+            );
+
+            if !is_metadata_completed(&resolved) {
+                apply_fuzzy_provider_with_queries(
+                    &mut resolved,
+                    &mut priorities,
+                    &mut report,
+                    &mut network_complete,
+                    MetadataProvider::CrossrefTitle,
+                    &title,
+                    &title_queries,
+                );
+            }
+
+            if !is_metadata_completed(&resolved) {
+                apply_fuzzy_provider_with_queries(
+                    &mut resolved,
+                    &mut priorities,
+                    &mut report,
+                    &mut network_complete,
+                    MetadataProvider::ArxivTitle,
+                    &title,
+                    &title_queries,
+                );
+            }
+        }
+    }
+
+    if resolved.doi != original_doi {
+        if let Some(doi) = resolved.doi.clone() {
+            apply_precise_provider_batch(
+                &mut resolved,
+                &mut priorities,
+                &mut report,
+                &mut network_complete,
+                MetadataStage::Refresh,
+                vec![
+                    (MetadataProvider::OpenAlexDoi, doi.clone()),
+                    (MetadataProvider::CrossrefDoi, doi),
+                ],
+            );
+        }
+    }
+
+    if resolved.arxiv_id != original_arxiv_id {
+        if let Some(arxiv_id) = resolved.arxiv_id.clone() {
+            apply_precise_provider_batch(
+                &mut resolved,
+                &mut priorities,
+                &mut report,
+                &mut network_complete,
+                MetadataStage::Refresh,
+                vec![(MetadataProvider::ArxivId, arxiv_id)],
+            );
+        }
+    }
+
+    update_report_state(&mut report, &resolved, network_complete);
+    report.summary = build_report_summary(&report);
+
+    RemoteMetadataEnrichmentResult {
+        meta: resolved,
+        network_complete,
+        report,
+    }
 }
 
 #[tauri::command]
@@ -827,22 +2094,71 @@ fn pick_metadata_value(current: &str, incoming: &Option<String>) -> String {
         .to_string()
 }
 
+fn has_meaningful_item_value(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty() && trimmed != "—"
+}
+
+fn pick_metadata_value_with_override(
+    current: &str,
+    incoming: &Option<String>,
+    allow_override: bool,
+) -> String {
+    if !allow_override && has_meaningful_item_value(current) {
+        return current.to_string();
+    }
+
+    pick_metadata_value(current, incoming)
+}
+
 fn merge_item_with_parsed_metadata(current: &LibraryItem, parsed: &ParsedPdfMetadata) -> LibraryItem {
+    let current_is_preprint = is_preprint_publication(&current.publication);
+    let incoming_is_preprint = is_preprint_metadata(parsed);
+    let can_override_bibliographic_fields = !incoming_is_preprint || current_is_preprint;
+
     LibraryItem {
         id: current.id.clone(),
         item_type: current.item_type.clone(),
         title: pick_metadata_value(&current.title, &parsed.title),
         authors: pick_metadata_value(&current.authors, &parsed.authors),
-        year: pick_metadata_value(&current.year, &parsed.year),
+        year: pick_metadata_value_with_override(
+            &current.year,
+            &parsed.year,
+            can_override_bibliographic_fields,
+        ),
         r#abstract: pick_metadata_value(&current.r#abstract, &parsed.r#abstract),
         doi: pick_metadata_value(&current.doi, &parsed.doi),
         arxiv_id: pick_metadata_value(&current.arxiv_id, &parsed.arxiv_id),
-        publication: pick_metadata_value(&current.publication, &parsed.publication),
-        volume: pick_metadata_value(&current.volume, &parsed.volume),
-        issue: pick_metadata_value(&current.issue, &parsed.issue),
-        pages: pick_metadata_value(&current.pages, &parsed.pages),
-        publisher: pick_metadata_value(&current.publisher, &parsed.publisher),
-        isbn: pick_metadata_value(&current.isbn, &parsed.isbn),
+        publication: pick_metadata_value_with_override(
+            &current.publication,
+            &parsed.publication,
+            can_override_bibliographic_fields,
+        ),
+        volume: pick_metadata_value_with_override(
+            &current.volume,
+            &parsed.volume,
+            can_override_bibliographic_fields,
+        ),
+        issue: pick_metadata_value_with_override(
+            &current.issue,
+            &parsed.issue,
+            can_override_bibliographic_fields,
+        ),
+        pages: pick_metadata_value_with_override(
+            &current.pages,
+            &parsed.pages,
+            can_override_bibliographic_fields,
+        ),
+        publisher: pick_metadata_value_with_override(
+            &current.publisher,
+            &parsed.publisher,
+            can_override_bibliographic_fields,
+        ),
+        isbn: pick_metadata_value_with_override(
+            &current.isbn,
+            &parsed.isbn,
+            can_override_bibliographic_fields,
+        ),
         url: pick_metadata_value(&current.url, &parsed.url),
         language: pick_metadata_value(&current.language, &parsed.language),
         date_added: current.date_added.clone(),
@@ -857,7 +2173,7 @@ fn merge_item_with_parsed_metadata(current: &LibraryItem, parsed: &ParsedPdfMeta
 pub fn retrieve_item_metadata(
     item_id: String,
     state: tauri::State<'_, crate::models::AppState>,
-) -> Result<LibraryItem, String> {
+) -> Result<RetrieveMetadataResult, String> {
     let conn = state
         .db
         .lock()
@@ -880,12 +2196,12 @@ pub fn retrieve_item_metadata(
     }
 
     crate::library_commands::remove_cached_pdf_metadata(&pdf_path_buf);
-    let parsed = crate::library_commands::resolve_pdf_metadata(&pdf_path_buf);
-    if !has_meaningful_metadata(&parsed) {
+    let resolved = crate::library_commands::resolve_pdf_metadata_with_report(&pdf_path_buf);
+    if !has_meaningful_metadata(&resolved.meta) {
         return Err("No metadata could be identified for this PDF".to_string());
     }
 
-    let merged = merge_item_with_parsed_metadata(&current_item, &parsed);
+    let merged = merge_item_with_parsed_metadata(&current_item, &resolved.meta);
 
     conn.execute(
         "UPDATE items SET title = ?1, authors = ?2, year = ?3, abstract = ?4, doi = ?5, arxiv_id = ?6, publication = ?7, volume = ?8, issue = ?9, pages = ?10, publisher = ?11, isbn = ?12, url = ?13, language = ?14, date_modified = datetime('now') WHERE id = ?15",
@@ -909,15 +2225,27 @@ pub fn retrieve_item_metadata(
     )
     .map_err(|e| format!("Failed to update item metadata: {}", e))?;
 
-    crate::library_commands::fetch_item_from_db(&conn, &item_id)
+    let item = crate::library_commands::fetch_item_from_db(&conn, &item_id)
         .map_err(|e| format!("Failed to reload item metadata: {}", e))?
-        .ok_or("Updated item not found".to_string())
+        .ok_or("Updated item not found".to_string())?;
+
+    Ok(RetrieveMetadataResult {
+        item,
+        report: resolved.report,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{crossref_message_to_metadata, merge_item_with_parsed_metadata};
-    use crate::models::{CrossrefWorkMessage, LibraryAttachment, LibraryItem, ParsedPdfMetadata};
+    use super::{
+        author_match_score, build_title_query_variants, crossref_message_to_metadata,
+        is_metadata_completed, is_preprint_metadata, merge_item_with_parsed_metadata,
+        merge_provider_metadata, metadata_candidate_match_score, metadata_request_cache_key,
+        openalex_work_to_metadata, MetadataMergePriority, MetadataProvider, OpenAlexAuthorship,
+        OpenAlexAuthor, OpenAlexBiblio, OpenAlexPrimaryLocation, OpenAlexWork,
+        ParsedPdfMetadata,
+    };
+    use crate::models::{CrossrefWorkMessage, LibraryAttachment, LibraryItem};
 
     fn sample_item() -> LibraryItem {
         LibraryItem {
@@ -1010,5 +2338,189 @@ mod tests {
         assert_eq!(merged.publication, "Journal of Testing");
         assert_eq!(merged.url, "https://example.com");
         assert_eq!(merged.tags, vec!["ml".to_string()]);
+    }
+
+    #[test]
+    fn merge_item_with_parsed_metadata_preserves_formal_publication_against_preprint() {
+        let mut item = sample_item();
+        item.year = "2018".to_string();
+        item.publication = "NeurIPS".to_string();
+        item.volume = "31".to_string();
+        item.pages = "6000-6010".to_string();
+
+        let parsed = ParsedPdfMetadata {
+            year: Some("2017".to_string()),
+            publication: Some("arXiv".to_string()),
+            volume: Some("1".to_string()),
+            pages: Some("1-10".to_string()),
+            arxiv_id: Some("1706.03762".to_string()),
+            ..ParsedPdfMetadata::default()
+        };
+
+        let merged = merge_item_with_parsed_metadata(&item, &parsed);
+
+        assert_eq!(merged.publication, "NeurIPS");
+        assert_eq!(merged.year, "2018");
+        assert_eq!(merged.volume, "31");
+        assert_eq!(merged.pages, "6000-6010");
+        assert_eq!(merged.arxiv_id, "1706.03762");
+    }
+
+    #[test]
+    fn openalex_work_to_metadata_extracts_extended_fields() {
+        let work = OpenAlexWork {
+            display_name: "Attention Is All You Need".to_string(),
+            doi: Some("https://doi.org/10.48550/arxiv.1706.03762".to_string()),
+            publication_year: Some(2017),
+            r#type: "preprint".to_string(),
+            language: Some("en".to_string()),
+            primary_location: Some(OpenAlexPrimaryLocation {
+                landing_page_url: Some("https://arxiv.org/abs/1706.03762".to_string()),
+                pdf_url: None,
+                source: None,
+                raw_source_name: None,
+            }),
+            authorships: vec![OpenAlexAuthorship {
+                author: Some(OpenAlexAuthor {
+                    display_name: Some("Ashish Vaswani".to_string()),
+                }),
+                raw_author_name: None,
+            }],
+            biblio: Some(OpenAlexBiblio {
+                volume: Some("30".to_string()),
+                issue: Some("1".to_string()),
+                first_page: Some("5998".to_string()),
+                last_page: Some("6008".to_string()),
+            }),
+            abstract_inverted_index: Some(std::collections::HashMap::from([
+                ("Attention".to_string(), vec![0]),
+                ("is".to_string(), vec![1]),
+                ("all".to_string(), vec![2]),
+                ("you".to_string(), vec![3]),
+                ("need".to_string(), vec![4]),
+            ])),
+        };
+
+        let parsed = openalex_work_to_metadata(work);
+
+        assert_eq!(parsed.title.as_deref(), Some("Attention Is All You Need"));
+        assert_eq!(parsed.authors.as_deref(), Some("Ashish Vaswani"));
+        assert_eq!(parsed.publication.as_deref(), Some("arXiv"));
+        assert_eq!(parsed.arxiv_id.as_deref(), Some("1706.03762"));
+        assert_eq!(parsed.pages.as_deref(), Some("5998-6008"));
+        assert_eq!(parsed.language.as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn build_title_query_variants_adds_shorter_search_forms() {
+        let variants = build_title_query_variants(
+            "Attention Is All You Need: Revisiting Sequence Transduction (Preprint)",
+        );
+
+        assert_eq!(
+            variants.first().map(String::as_str),
+            Some("Attention Is All You Need: Revisiting Sequence Transduction (Preprint)")
+        );
+        assert!(variants
+            .iter()
+            .any(|variant| variant == "Attention Is All You Need: Revisiting Sequence Transduction"));
+        assert!(variants
+            .iter()
+            .any(|variant| variant == "Attention Is All You Need"));
+    }
+
+    #[test]
+    fn metadata_request_cache_key_for_title_search_includes_match_context() {
+        let first = metadata_request_cache_key(
+            MetadataProvider::CrossrefTitle,
+            "Attention Is All You Need | Ashish Vaswani | 2017",
+        );
+        let second = metadata_request_cache_key(
+            MetadataProvider::CrossrefTitle,
+            "Attention Is All You Need | Different Author | 2024",
+        );
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn metadata_candidate_match_score_uses_authors_and_year() {
+        let strong = ParsedPdfMetadata {
+            title: Some("Attention Is All You Need".to_string()),
+            authors: Some("Ashish Vaswani, Noam Shazeer".to_string()),
+            year: Some("2017".to_string()),
+            ..ParsedPdfMetadata::default()
+        };
+        let weak = ParsedPdfMetadata {
+            title: Some("Attention Is All You Need".to_string()),
+            authors: Some("Completely Different".to_string()),
+            year: Some("2025".to_string()),
+            ..ParsedPdfMetadata::default()
+        };
+
+        let strong_score = metadata_candidate_match_score(
+            "Attention Is All You Need",
+            Some("Ashish Vaswani, Noam Shazeer"),
+            Some("2017"),
+            &strong,
+        );
+        let weak_score = metadata_candidate_match_score(
+            "Attention Is All You Need",
+            Some("Ashish Vaswani, Noam Shazeer"),
+            Some("2017"),
+            &weak,
+        );
+
+        assert!(strong_score > weak_score);
+        assert!(author_match_score("Ashish Vaswani", "Ashish Vaswani, Noam Shazeer") > 0.4);
+    }
+
+    #[test]
+    fn merge_provider_metadata_preserves_non_preprint_publication() {
+        let mut resolved = ParsedPdfMetadata {
+            title: Some("Attention Is All You Need".to_string()),
+            authors: Some("Ashish Vaswani".to_string()),
+            year: Some("2018".to_string()),
+            publication: Some("NeurIPS".to_string()),
+            ..ParsedPdfMetadata::default()
+        };
+        let incoming = ParsedPdfMetadata {
+            title: Some("Attention Is All You Need".to_string()),
+            authors: Some("Ashish Vaswani".to_string()),
+            year: Some("2017".to_string()),
+            publication: Some("arXiv".to_string()),
+            arxiv_id: Some("1706.03762".to_string()),
+            ..ParsedPdfMetadata::default()
+        };
+
+        merge_provider_metadata(
+            &mut resolved,
+            &mut MetadataMergePriority::new(),
+            incoming,
+            MetadataProvider::ArxivTitle,
+        );
+
+        assert_eq!(resolved.publication.as_deref(), Some("NeurIPS"));
+        assert_eq!(resolved.year.as_deref(), Some("2018"));
+        assert_eq!(resolved.arxiv_id.as_deref(), Some("1706.03762"));
+    }
+
+    #[test]
+    fn metadata_completed_treats_preprint_as_incomplete() {
+        let complete = ParsedPdfMetadata {
+            title: Some("Paper".to_string()),
+            authors: Some("Author".to_string()),
+            year: Some("2024".to_string()),
+            publication: Some("Nature".to_string()),
+            ..ParsedPdfMetadata::default()
+        };
+        let preprint = ParsedPdfMetadata {
+            publication: Some("arXiv".to_string()),
+            ..complete.clone()
+        };
+
+        assert!(is_metadata_completed(&complete));
+        assert!(is_preprint_metadata(&preprint));
+        assert!(!is_metadata_completed(&preprint));
     }
 }

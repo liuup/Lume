@@ -115,6 +115,7 @@ pub fn run() {
             library_commands::generate_annotation_digest,
             library_commands::summarize_document,
             library_commands::translate_selection,
+            library_commands::get_item_metadata_fetch_report,
             library_commands::get_settings,
             library_commands::save_setting,
             metadata_fetch::update_item_metadata,

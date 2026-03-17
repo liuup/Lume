@@ -407,7 +407,15 @@ export function PdfViewer({
         error: t("textLayer.translation.error"),
       });
     }
-  }, [getActiveSelectionSnapshot, settings.aiApiKey, settings.aiCompletionUrl, settings.aiModel, settings.aiTranslateEngine, settings.aiTranslateTargetLanguage, t]);
+  }, [
+    getActiveSelectionSnapshot,
+    settings.aiApiKey,
+    settings.aiCompletionUrl,
+    settings.aiModel,
+    settings.aiTranslateEngine,
+    settings.aiTranslateTargetLanguage,
+    t,
+  ]);
 
   const prefetchPages = useMemo(() => {
     if (totalPages === 0) return new Set<number>();

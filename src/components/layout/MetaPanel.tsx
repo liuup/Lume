@@ -1,5 +1,11 @@
 import { Tag, Calendar, User, AlignLeft, X, FileText, Fingerprint, Orbit, Edit2, Check, Book, Building, Link2, Copy, Quote, StickyNote, Wand2, Highlighter, Search, Download, Loader2 } from "lucide-react";
-import { AiAnnotationDigest, LibraryItem, SavedPdfAnnotationsDocument } from "../../types";
+import {
+  AiAnnotationDigest,
+  LibraryItem,
+  MetadataFetchReport,
+  RetrieveMetadataResult,
+  SavedPdfAnnotationsDocument,
+} from "../../types";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CitationFormat } from "./ExportModal";
@@ -222,6 +228,8 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
   const [annotationDigest, setAnnotationDigest] = useState<AiAnnotationDigest | null>(null);
   const [isGeneratingAnnotationDigest, setIsGeneratingAnnotationDigest] = useState(false);
   const [isApplyingAnnotationDigest, setIsApplyingAnnotationDigest] = useState(false);
+  const [metadataFetchReport, setMetadataFetchReport] = useState<MetadataFetchReport | null>(null);
+  const [isLoadingMetadataFetchReport, setIsLoadingMetadataFetchReport] = useState(false);
 
   // ── Annotations list state ───────────────────────────────────────────────────
   const [pdfAnnotations, setPdfAnnotations] = useState<SavedPdfAnnotationsDocument | null>(null);
@@ -254,6 +262,30 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
       setCiteText("");
     }
   }, [selectedItem?.id, citeFormat, isEditing, generateCite]);
+
+  useEffect(() => {
+    const loadMetadataFetchReport = async () => {
+      if (!selectedItem || !isOpen) {
+        setMetadataFetchReport(null);
+        return;
+      }
+
+      setIsLoadingMetadataFetchReport(true);
+      try {
+        const result = await invoke<MetadataFetchReport | null>("get_item_metadata_fetch_report", {
+          itemId: selectedItem.id,
+        });
+        setMetadataFetchReport(result);
+      } catch (error) {
+        console.error("Failed to load metadata fetch report", error);
+        setMetadataFetchReport(null);
+      } finally {
+        setIsLoadingMetadataFetchReport(false);
+      }
+    };
+
+    loadMetadataFetchReport();
+  }, [selectedItem?.id, isOpen]);
 
   // Sync form data when selection changes or editing toggles
   useEffect(() => {
@@ -301,6 +333,49 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
     setIsGeneratingAnnotationDigest(false);
     setIsApplyingAnnotationDigest(false);
   }, [selectedItem?.id]);
+
+  const metadataReportStateLabel = metadataFetchReport?.metadataCompleted
+    ? t("metaPanel.metadataFlow.states.complete")
+    : metadataFetchReport?.isPreprint
+      ? t("metaPanel.metadataFlow.states.preprint")
+      : t("metaPanel.metadataFlow.states.partial");
+
+  const metadataReportStateClassName = metadataFetchReport?.metadataCompleted
+    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+    : metadataFetchReport?.isPreprint
+      ? "border-amber-200 bg-amber-50 text-amber-700"
+      : "border-zinc-200 bg-zinc-100 text-zinc-700";
+
+  const metadataStepStatusClassName = (status: string) => {
+    if (status === "hit") {
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    }
+    if (status === "error") {
+      return "border-rose-200 bg-rose-50 text-rose-700";
+    }
+    if (status === "redundant") {
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    }
+    return "border-zinc-200 bg-zinc-100 text-zinc-600";
+  };
+
+  const metadataStepStatusLabel = (status: string) => {
+    const key = `metaPanel.metadataFlow.statuses.${status}`;
+    const translated = t(key);
+    return translated === key ? status : translated;
+  };
+
+  const metadataStepStageLabel = (stage: string) => {
+    const key = `metaPanel.metadataFlow.stages.${stage}`;
+    const translated = t(key);
+    return translated === key ? stage : translated;
+  };
+
+  const metadataStepProviderLabel = (provider: string) => {
+    const key = `metaPanel.metadataFlow.providers.${provider}`;
+    const translated = t(key);
+    return translated === key ? provider : translated;
+  };
 
   // Load note when selection changes
   useEffect(() => {
@@ -411,15 +486,18 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
 
     setIsRetrievingMetadata(true);
     try {
-      await invoke<LibraryItem>("retrieve_item_metadata", {
+      const result = await invoke<RetrieveMetadataResult>("retrieve_item_metadata", {
         itemId: selectedItem.id,
       });
+      setMetadataFetchReport(result.report);
       if (onItemUpdated) {
         onItemUpdated();
       }
       feedback.success({
         title: t("feedback.meta.retrieveSuccess.title"),
-        description: t("feedback.meta.retrieveSuccess.description"),
+        description: result.report.summary
+          ? `${t("feedback.meta.retrieveSuccess.description")}\n${result.report.summary}`
+          : t("feedback.meta.retrieveSuccess.description"),
       });
     } catch (error) {
       console.error("Failed to retrieve item metadata", error);
@@ -870,6 +948,104 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                 <span className="text-zinc-500 text-xs font-mono break-all line-clamp-2" title={selectedItem.attachments?.[0]?.name}>{selectedItem.attachments?.[0]?.name || t("metaPanel.none")}</span>
               </MetaRow>
             </div>
+            {(isLoadingMetadataFetchReport || metadataFetchReport) && (
+              <div className="border border-zinc-200 rounded-xl bg-zinc-50/80 p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <Search size={14} className="text-zinc-500" />
+                    <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">
+                      {t("metaPanel.metadataFlow.title")}
+                    </span>
+                  </div>
+                  {metadataFetchReport ? (
+                    <span className={`px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase tracking-wide ${metadataReportStateClassName}`}>
+                      {metadataReportStateLabel}
+                    </span>
+                  ) : null}
+                </div>
+
+                {isLoadingMetadataFetchReport && !metadataFetchReport ? (
+                  <p className="text-xs text-zinc-500">{t("metaPanel.metadataFlow.loading")}</p>
+                ) : null}
+
+                {metadataFetchReport ? (
+                  <>
+                    {metadataFetchReport.summary ? (
+                      <p className="text-xs text-zinc-600 leading-relaxed">
+                        {metadataFetchReport.summary}
+                      </p>
+                    ) : null}
+
+                    {!metadataFetchReport.networkComplete ? (
+                      <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-2">
+                        {t("metaPanel.metadataFlow.networkGaps")}
+                      </p>
+                    ) : null}
+
+                    {metadataFetchReport.titleQueries.length > 0 ? (
+                      <div className="space-y-1.5">
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                          {t("metaPanel.metadataFlow.titleQueries")}
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {metadataFetchReport.titleQueries.map((query) => (
+                            <span
+                              key={query}
+                              className="px-2 py-0.5 rounded-full bg-white border border-zinc-200 text-[10px] text-zinc-600 max-w-full truncate"
+                              title={query}
+                            >
+                              {query}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {metadataFetchReport.steps.length > 0 ? (
+                      <div className="space-y-2">
+                        {metadataFetchReport.steps.map((step, index) => (
+                          <div key={`${step.provider}-${step.query}-${index}`} className="rounded-lg border border-zinc-200 bg-white px-3 py-2 space-y-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-[11px] font-semibold text-zinc-700">
+                                {metadataStepProviderLabel(step.provider)}
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded border border-zinc-200 bg-zinc-50 text-[10px] uppercase tracking-wide text-zinc-500">
+                                {metadataStepStageLabel(step.stage)}
+                              </span>
+                              <span className={`px-1.5 py-0.5 rounded border text-[10px] uppercase tracking-wide ${metadataStepStatusClassName(step.status)}`}>
+                                {metadataStepStatusLabel(step.status)}
+                              </span>
+                              {typeof step.score === "number" ? (
+                                <span className="text-[10px] text-zinc-400">
+                                  {t("metaPanel.metadataFlow.score", { value: step.score.toFixed(2) })}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="text-[11px] text-zinc-500 font-mono break-all">
+                              {step.query}
+                            </div>
+                            {step.fieldsChanged.length > 0 ? (
+                              <div className="text-[11px] text-zinc-600">
+                                {t("metaPanel.metadataFlow.fieldsChanged", {
+                                  fields: step.fieldsChanged.join(", "),
+                                })}
+                              </div>
+                            ) : null}
+                            {step.note ? (
+                              <div className="text-[11px] text-rose-600 break-words">
+                                {t("metaPanel.metadataFlow.note", { note: step.note })}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-zinc-500">{t("metaPanel.metadataFlow.empty")}</p>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            )}
             {/* ── Notes section ───────────────────────────────────────── */}
             <div className="border-t border-zinc-100 pt-5 space-y-2">
               <div className="flex items-center justify-between gap-1.5">

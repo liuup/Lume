@@ -1,6 +1,7 @@
-import { Suspense, lazy, useState, useRef, useEffect, useCallback } from "react";
+import { Suspense, lazy, useState, useRef, useEffect, useCallback, useEffectEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { FolderSidebar } from "./components/layout/FolderSidebar";
 import { LibraryView } from "./components/layout/LibraryView";
 import { SettingsModal } from "./components/modals/SettingsModal";
@@ -16,7 +17,7 @@ import {
 } from "./components/pdfRuntime";
 import { X } from "lucide-react";
 
-import { CliLibraryChangedPayload, LibraryItem, PdfSearchMatch, TagInfo, ToolType, TRASH_FOLDER_ID } from "./types";
+import { CliLibraryChangedPayload, DEFAULT_FOLDER, LibraryItem, PdfSearchMatch, TagInfo, ToolType, TRASH_FOLDER_ID } from "./types";
 import { useLibrary } from "./hooks/useLibrary";
 import { useSettings } from "./hooks/useSettings";
 import { useI18n } from "./hooks/useI18n";
@@ -74,7 +75,9 @@ function App() {
     selectedItemId,
     setSelectedItemId,
     findItem,
+    findFolder,
     handleAddItem,
+    importPdfPaths,
     handleOpenItem,
     handleCloseTab,
     handlePageJump,
@@ -110,8 +113,13 @@ function App() {
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [dragState, setDragState] = useState<LibraryDragState | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+  const [isFileDropActive, setIsFileDropActive] = useState(false);
+  const [fileDropPaths, setFileDropPaths] = useState<string[]>([]);
+  const [fileDropFolderId, setFileDropFolderId] = useState<string | null>(null);
   const draggedItemIdRef = useRef<string | null>(null);
   const dragOverFolderIdRef = useRef<string | null>(null);
+  const isFileDropActiveRef = useRef(false);
+  const fileDropFolderIdRef = useRef<string | null>(null);
   const searchCacheRef = useRef<Map<string, PdfSearchMatch[]>>(new Map());
   const searchRequestIdRef = useRef(0);
   const activePdfScrollRef = useRef<HTMLDivElement | null>(null);
@@ -159,6 +167,28 @@ function App() {
     document.body.style.userSelect = "";
     document.body.style.webkitUserSelect = "";
     document.body.style.cursor = "";
+  }, []);
+
+  const resolveImportFolderId = useCallback((folderId: string | null) => {
+    const preferredFolderId = folderId && folderId !== TRASH_FOLDER_ID
+      ? folderId
+      : selectedFolderId !== TRASH_FOLDER_ID
+        ? selectedFolderId
+        : folderTree[0]?.id ?? DEFAULT_FOLDER.id;
+
+    if (findFolder(folderTree, preferredFolderId)) {
+      return preferredFolderId;
+    }
+
+    return folderTree[0]?.id ?? DEFAULT_FOLDER.id;
+  }, [findFolder, folderTree, selectedFolderId]);
+
+  const clearFileDropState = useCallback(() => {
+    isFileDropActiveRef.current = false;
+    fileDropFolderIdRef.current = null;
+    setIsFileDropActive(false);
+    setFileDropPaths([]);
+    setFileDropFolderId(null);
   }, []);
 
   // ── Tag system state ─────────────────────────────────────────────────────
@@ -362,6 +392,11 @@ function App() {
     : null;
   const isTrashSelected = selectedFolderId === TRASH_FOLDER_ID;
   const isLibrary = activeTabId === 'library' || activeTabId === null;
+  const activeFileDropFolderId = resolveImportFolderId(fileDropFolderId);
+  const activeFileDropFolder = findFolder(folderTree, activeFileDropFolderId) ?? folderTree[0] ?? null;
+  const fileDropLabel = fileDropPaths.length === 1
+    ? fileDropPaths[0].split(/[/\\]/).pop()?.replace(/\.pdf$/i, "") || fileDropPaths[0]
+    : t("app.drag.importPdfCount", { count: fileDropPaths.length });
 
   const updateDragOverFolder = useCallback((clientX: number, clientY: number) => {
     const target = document.elementFromPoint(clientX, clientY) as HTMLElement | null;
@@ -380,6 +415,78 @@ function App() {
       setDragOverFolderId(folderId);
     }
   }, []);
+
+  const updateFileDropFolder = useCallback((physicalX: number, physicalY: number) => {
+    const scale = window.devicePixelRatio || 1;
+    const target = document.elementFromPoint(physicalX / scale, physicalY / scale) as HTMLElement | null;
+    const folderTarget = target?.closest("[data-folder-drop-id]") as HTMLElement | null;
+    const hoveredFolderId = folderTarget?.dataset.folderDropId ?? null;
+    const nextFolderId = resolveImportFolderId(hoveredFolderId);
+
+    if (fileDropFolderIdRef.current !== nextFolderId) {
+      fileDropFolderIdRef.current = nextFolderId;
+      setFileDropFolderId(nextFolderId);
+    }
+  }, [resolveImportFolderId]);
+
+  const handleExternalPdfDrop = useEffectEvent((paths: string[], folderId: string | null) => {
+    const pdfPaths = paths.filter((path) => /\.pdf$/i.test(path));
+    if (pdfPaths.length === 0) {
+      return;
+    }
+
+    void importPdfPaths(pdfPaths, resolveImportFolderId(folderId));
+  });
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    getCurrentWindow()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "enter") {
+          const pdfPaths = event.payload.paths.filter((path) => /\.pdf$/i.test(path));
+          if (pdfPaths.length === 0) {
+            return;
+          }
+
+          isFileDropActiveRef.current = true;
+          setIsFileDropActive(true);
+          setFileDropPaths(pdfPaths);
+          updateFileDropFolder(event.payload.position.x, event.payload.position.y);
+          return;
+        }
+
+        if (event.payload.type === "over") {
+          if (!isFileDropActiveRef.current) {
+            return;
+          }
+          updateFileDropFolder(event.payload.position.x, event.payload.position.y);
+          return;
+        }
+
+        if (event.payload.type === "leave") {
+          clearFileDropState();
+          return;
+        }
+
+        const targetFolderId = fileDropFolderIdRef.current;
+        const droppedPaths = event.payload.paths;
+        clearFileDropState();
+        handleExternalPdfDrop(droppedPaths, targetFolderId);
+      })
+      .then((fn) => {
+        unlisten = fn;
+      })
+      .catch((error) => {
+        console.error("Failed to register drag-drop listener", error);
+      });
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, [clearFileDropState, handleExternalPdfDrop, updateFileDropFolder]);
 
   const handleItemPointerDown = useCallback((item: { id: string; title: string }, event: React.MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -709,8 +816,8 @@ function App() {
               onAddFolder={handleAddFolder}
               onRenameFolder={handleRenameFolder}
               onDeleteFolder={handleDeleteFolder}
-              draggedItemId={draggedItemId}
-              dragOverFolderId={dragOverFolderId}
+              draggedItemId={isFileDropActive ? "__external-file-drop__" : draggedItemId}
+              dragOverFolderId={isFileDropActive ? activeFileDropFolderId : dragOverFolderId}
               onFolderHover={handleFolderHover}
               allTags={allTags}
               selectedTagFilter={selectedTagFilter}
@@ -869,6 +976,25 @@ function App() {
           </Suspense>
         )}
       </div>
+
+      {isFileDropActive && (
+        <div className="pointer-events-none fixed inset-0 z-[95]">
+          <div className="absolute inset-4 rounded-[28px] border-2 border-dashed border-indigo-300 bg-indigo-100/40 backdrop-blur-[2px]" />
+          <div className="absolute inset-0 flex items-center justify-center px-6">
+            <div className="w-[min(520px,calc(100vw-3rem))] rounded-[24px] border border-indigo-200 bg-white/92 px-6 py-5 shadow-[0_26px_70px_-30px_rgba(79,70,229,0.45)] backdrop-blur-sm">
+              <div className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">
+                {t("app.drag.importPdf")}
+              </div>
+              <div className="mt-2 text-lg font-semibold text-zinc-900 break-words">
+                {fileDropLabel}
+              </div>
+              <div className="mt-2 text-sm text-zinc-600">
+                {t("app.drag.importToFolder", { folder: activeFileDropFolder?.name || "My Library" })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* ── Settings Modal ── */}
       <SettingsModal 

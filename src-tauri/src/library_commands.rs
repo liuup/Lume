@@ -1,14 +1,11 @@
-use crate::metadata_fetch::{
-    fetch_arxiv_metadata_by_id, fetch_arxiv_metadata_by_title, fetch_crossref_metadata_by_doi,
-    fetch_crossref_metadata_by_title, merge_arxiv_metadata, merge_crossref_metadata,
-};
+use crate::metadata_fetch::enrich_metadata_with_remote_providers;
 /// Module: src-tauri/src/library_commands.rs
 /// Purpose: Encapsulates all general file/directory manipulation commands.
 /// Capabilities: Moving, renaming, deleting, parsing library structure, managing annotations cache sidecars.
 use crate::models::{
     AiAnnotationDigest, AiAnnotationDigestStats, AiDigestEntry, AiDigestSection, AiPaperSummary,
-    AiTranslationResult, CachedPdfMetadataRecord, LibraryItem, Note, ParsedPdfMetadata,
-    SavedPdfAnnotationsDocument, SavedPdfPageAnnotations,
+    AiTranslationResult, CachedPdfMetadataRecord, LibraryItem, MetadataFetchReport, Note,
+    ParsedPdfMetadata, SavedPdfAnnotationsDocument, SavedPdfPageAnnotations,
 };
 use crate::pdf_handlers::{extract_document_text_from_path, extract_pdf_metadata};
 
@@ -16,7 +13,8 @@ use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 use tauri::Manager;
 
 #[derive(Clone)]
@@ -42,6 +40,40 @@ struct ChatCompletionMessage {
     content: serde_json::Value,
 }
 
+#[derive(Clone)]
+struct BingWebAuthState {
+    ig: String,
+    iid: String,
+    key: String,
+    token: String,
+    expires_at: Instant,
+}
+
+#[derive(Deserialize)]
+struct BingWebDetectedLanguage {
+    language: String,
+}
+
+#[derive(Deserialize)]
+struct BingWebTranslation {
+    text: String,
+}
+
+#[derive(Deserialize)]
+struct BingWebTranslateResponseItem {
+    #[serde(rename = "detectedLanguage")]
+    detected_language: Option<BingWebDetectedLanguage>,
+    translations: Vec<BingWebTranslation>,
+}
+
+#[derive(Deserialize)]
+struct BingWebTranslateErrorResponse {
+    #[serde(rename = "statusCode")]
+    status_code: Option<i64>,
+    #[serde(rename = "errorMessage")]
+    error_message: Option<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 struct CachedPaperSummaryRecord {
     file_size: u64,
@@ -49,6 +81,11 @@ struct CachedPaperSummaryRecord {
     summary: AiPaperSummary,
     updated_at: String,
 }
+
+static BING_WEB_AUTH_CACHE: OnceLock<Mutex<Option<BingWebAuthState>>> = OnceLock::new();
+const BING_WEB_TRANSLATOR_URL: &str = "https://www.bing.com/translator";
+const BING_WEB_TRANSLATE_ENDPOINT: &str = "https://www.bing.com/ttranslatev3";
+const BING_WEB_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0";
 
 pub fn library_root_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let root = app
@@ -148,7 +185,10 @@ fn now_unix_timestamp_string() -> String {
 
 fn file_timestamp_string(path: &Path) -> Option<String> {
     let metadata = fs::metadata(path).ok()?;
-    let system_time = metadata.created().ok().or_else(|| metadata.modified().ok())?;
+    let system_time = metadata
+        .created()
+        .ok()
+        .or_else(|| metadata.modified().ok())?;
     let timestamp = system_time.duration_since(UNIX_EPOCH).ok()?.as_secs();
     Some(timestamp.to_string())
 }
@@ -263,10 +303,18 @@ pub fn should_try_remote_metadata(meta: &ParsedPdfMetadata) -> bool {
     meta.doi.is_some() || meta.arxiv_id.is_some() || meta.title.is_some()
 }
 
-pub fn resolve_pdf_metadata(path: &Path) -> ParsedPdfMetadata {
+pub struct ResolvedPdfMetadata {
+    pub meta: ParsedPdfMetadata,
+    pub report: MetadataFetchReport,
+}
+
+pub fn resolve_pdf_metadata_with_report(path: &Path) -> ResolvedPdfMetadata {
     let local = extract_pdf_metadata(path).unwrap_or_default();
     let Some((file_size, modified_unix_ms)) = file_signature(path) else {
-        return local;
+        return ResolvedPdfMetadata {
+            meta: local,
+            report: MetadataFetchReport::default(),
+        };
     };
 
     if let Some(cached) = read_cached_pdf_metadata(path) {
@@ -274,59 +322,22 @@ pub fn resolve_pdf_metadata(path: &Path) -> ParsedPdfMetadata {
             && cached.modified_unix_ms == modified_unix_ms
             && cached.network_complete
         {
-            return cached.meta;
+            return ResolvedPdfMetadata {
+                meta: cached.meta,
+                report: cached.report.unwrap_or_default(),
+            };
         }
     }
 
     let mut resolved = local.clone();
     let mut network_complete = true;
+    let mut report = MetadataFetchReport::default();
 
     if should_try_remote_metadata(&resolved) {
-        let title_for_search = resolved.title.clone();
-
-        if let Some(arxiv_id) = resolved.arxiv_id.clone() {
-            match fetch_arxiv_metadata_by_id(&arxiv_id) {
-                Ok(Some(remote)) => merge_arxiv_metadata(&mut resolved, remote),
-                Ok(None) => {}
-                Err(_) => network_complete = false,
-            }
-        }
-
-        if let Some(doi) = resolved.doi.clone() {
-            match fetch_crossref_metadata_by_doi(&doi) {
-                Ok(Some(remote)) => merge_crossref_metadata(&mut resolved, remote),
-                Ok(None) => {}
-                Err(_) => network_complete = false,
-            }
-        }
-
-        if let Some(title) = title_for_search.as_deref() {
-            if resolved.doi.is_none() || resolved.authors.is_none() || resolved.year.is_none() {
-                match fetch_crossref_metadata_by_title(title) {
-                    Ok(Some(remote)) => merge_crossref_metadata(&mut resolved, remote),
-                    Ok(None) => {}
-                    Err(_) => network_complete = false,
-                }
-            }
-
-            if resolved.arxiv_id.is_none() || resolved.r#abstract.is_none() {
-                match fetch_arxiv_metadata_by_title(title) {
-                    Ok(Some(remote)) => merge_arxiv_metadata(&mut resolved, remote),
-                    Ok(None) => {}
-                    Err(_) => network_complete = false,
-                }
-            }
-
-            if let Some(doi) = resolved.doi.clone() {
-                if local.doi.as_ref() != Some(&doi) {
-                    match fetch_crossref_metadata_by_doi(&doi) {
-                        Ok(Some(remote)) => merge_crossref_metadata(&mut resolved, remote),
-                        Ok(None) => {}
-                        Err(_) => network_complete = false,
-                    }
-                }
-            }
-        }
+        let enriched = enrich_metadata_with_remote_providers(&resolved);
+        resolved = enriched.meta;
+        network_complete = enriched.network_complete;
+        report = enriched.report;
     }
 
     write_cached_pdf_metadata(
@@ -336,10 +347,51 @@ pub fn resolve_pdf_metadata(path: &Path) -> ParsedPdfMetadata {
             modified_unix_ms,
             network_complete,
             meta: resolved.clone(),
+            report: Some(report.clone()),
         },
     );
 
-    resolved
+    ResolvedPdfMetadata {
+        meta: resolved,
+        report,
+    }
+}
+
+pub fn resolve_pdf_metadata(path: &Path) -> ParsedPdfMetadata {
+    resolve_pdf_metadata_with_report(path).meta
+}
+
+#[tauri::command]
+pub fn get_item_metadata_fetch_report(
+    item_id: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<Option<MetadataFetchReport>, String> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| format!("Database lock error: {}", e))?;
+
+    let item = fetch_item_from_db(&conn, &item_id)
+        .map_err(|e| format!("Failed to load item: {}", e))?
+        .ok_or("Item not found".to_string())?;
+
+    let pdf_path = item
+        .attachments
+        .iter()
+        .find(|attachment| attachment.attachment_type.eq_ignore_ascii_case("PDF"))
+        .map(|attachment| attachment.path.clone())
+        .unwrap_or_else(|| item.id.clone());
+
+    let path = PathBuf::from(pdf_path);
+    let Some((file_size, modified_unix_ms)) = file_signature(&path) else {
+        return Ok(None);
+    };
+
+    Ok(read_cached_pdf_metadata(&path)
+        .filter(|cached| {
+            cached.file_size == file_size && cached.modified_unix_ms == modified_unix_ms
+        })
+        .and_then(|cached| cached.report))
 }
 
 pub fn build_library_item(path: &Path) -> LibraryItem {
@@ -983,7 +1035,8 @@ pub fn delete_library_pdf(
         docs.remove(&path);
     }
 
-    fs::rename(&target, &trash_target).map_err(|e| format!("Failed to move PDF to trash: {}", e))?;
+    fs::rename(&target, &trash_target)
+        .map_err(|e| format!("Failed to move PDF to trash: {}", e))?;
 
     rename_cached_pdf_metadata(&target, &trash_target);
     rename_annotation_sidecar(&target, &trash_target);
@@ -1029,7 +1082,10 @@ pub fn restore_library_pdf(
 
     let restore_target = PathBuf::from(&original_path);
     let restore_parent = if original_folder_path.trim().is_empty() {
-        restore_target.parent().map(Path::to_path_buf).ok_or("Invalid restore path")?
+        restore_target
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or("Invalid restore path")?
     } else {
         PathBuf::from(&original_folder_path)
     };
@@ -1073,9 +1129,7 @@ pub fn restore_library_pdf(
 }
 
 #[tauri::command]
-pub fn empty_trash(
-    state: tauri::State<'_, crate::models::AppState>,
-) -> Result<(), String> {
+pub fn empty_trash(state: tauri::State<'_, crate::models::AppState>) -> Result<(), String> {
     let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
     let trashed_items = fetch_trashed_items_from_db(&conn)
         .map_err(|e| format!("Failed to load trash items: {}", e))?;
@@ -1467,7 +1521,10 @@ pub fn search_library_db(
          WHERE {} \
          ORDER BY i.title ASC \
          LIMIT 200",
-        format!("COALESCE(i.is_trashed, 0) = 0 AND {}", conditions.join(" AND "))
+        format!(
+            "COALESCE(i.is_trashed, 0) = 0 AND {}",
+            conditions.join(" AND ")
+        )
     );
 
     let mut stmt = conn
@@ -1793,7 +1850,10 @@ fn google_translate_text(text: &str, target_language: &str) -> Result<(String, S
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().unwrap_or_default();
-        return Err(format!("Google Translate request failed with {}: {}", status, body));
+        return Err(format!(
+            "Google Translate request failed with {}: {}",
+            status, body
+        ));
     }
 
     let payload: serde_json::Value = response
@@ -1824,6 +1884,213 @@ fn google_translate_text(text: &str, target_language: &str) -> Result<(String, S
         .to_string();
 
     Ok((translation, source_language_hint))
+}
+
+fn bing_web_auth_cache() -> &'static Mutex<Option<BingWebAuthState>> {
+    BING_WEB_AUTH_CACHE.get_or_init(|| Mutex::new(None))
+}
+
+fn normalize_bing_web_language_code(target_language: &str) -> String {
+    let trimmed = target_language.trim();
+    if trimmed.is_empty() {
+        return "zh-Hans".to_string();
+    }
+
+    let lowered = trimmed.to_ascii_lowercase();
+    match lowered.as_str() {
+        "zh" | "zh-cn" | "zh-sg" | "zh-hans" => "zh-Hans".to_string(),
+        "zh-tw" | "zh-hk" | "zh-mo" | "zh-hant" => "zh-Hant".to_string(),
+        _ => trimmed.to_string(),
+    }
+}
+
+fn build_bing_web_http_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("Failed to build Bing Translator web client: {}", e))
+}
+
+fn parse_bing_web_auth_state(page_html: &str) -> Result<BingWebAuthState, String> {
+    let ig = page_html
+        .split("IG:\"")
+        .nth(1)
+        .and_then(|value| value.split('"').next())
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| "Failed to extract Bing Translator IG token".to_string())?
+        .to_string();
+    let iid = page_html
+        .split("data-iid=\"")
+        .nth(1)
+        .and_then(|value| value.split('"').next())
+        .filter(|value| value.starts_with("translator."))
+        .ok_or_else(|| "Failed to extract Bing Translator IID".to_string())?
+        .to_string();
+    let abuse_values = page_html
+        .split("params_AbusePreventionHelper = [")
+        .nth(1)
+        .and_then(|value| value.split(']').next())
+        .ok_or_else(|| "Failed to extract Bing Translator abuse-prevention token".to_string())?;
+    let mut parts = abuse_values.splitn(3, ',');
+    let key = parts
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Failed to extract Bing Translator request key".to_string())?
+        .to_string();
+    let token = parts
+        .next()
+        .map(str::trim)
+        .map(|value| value.trim_matches('"'))
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Failed to extract Bing Translator request token".to_string())?
+        .to_string();
+    let ttl_ms = parts
+        .next()
+        .map(str::trim)
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(3_600_000);
+    let refresh_ttl_ms = ttl_ms.saturating_sub(60_000).max(60_000);
+
+    Ok(BingWebAuthState {
+        ig,
+        iid,
+        key,
+        token,
+        expires_at: Instant::now() + Duration::from_millis(refresh_ttl_ms),
+    })
+}
+
+fn get_bing_web_auth_state(
+    client: &reqwest::blocking::Client,
+    force_refresh: bool,
+) -> Result<BingWebAuthState, String> {
+    let cache = bing_web_auth_cache();
+    if !force_refresh {
+        let guard = cache
+            .lock()
+            .map_err(|_| "Failed to lock Bing Translator auth cache".to_string())?;
+        if let Some(cached) = guard.as_ref() {
+            if Instant::now() < cached.expires_at {
+                return Ok(cached.clone());
+            }
+        }
+    }
+
+    let response = client
+        .get(BING_WEB_TRANSLATOR_URL)
+        .header("User-Agent", BING_WEB_USER_AGENT)
+        .send()
+        .map_err(|e| format!("Failed to load Bing Translator webpage: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!(
+            "Failed to load Bing Translator webpage with {}: {}",
+            status, body
+        ));
+    }
+
+    let page_html = response
+        .text()
+        .map_err(|e| format!("Failed to read Bing Translator webpage: {}", e))?;
+    let auth_state = parse_bing_web_auth_state(&page_html)?;
+
+    let mut guard = cache
+        .lock()
+        .map_err(|_| "Failed to lock Bing Translator auth cache".to_string())?;
+    *guard = Some(auth_state.clone());
+
+    Ok(auth_state)
+}
+
+fn send_bing_web_translate_request(
+    client: &reqwest::blocking::Client,
+    text: &str,
+    target_language: &str,
+    auth_state: &BingWebAuthState,
+) -> Result<(String, String), String> {
+    let normalized_target_language = normalize_bing_web_language_code(target_language);
+    let response = client
+        .post(BING_WEB_TRANSLATE_ENDPOINT)
+        .query(&[
+            ("isVertical", "1"),
+            ("IG", auth_state.ig.as_str()),
+            ("IID", auth_state.iid.as_str()),
+            ("SFX", "0"),
+        ])
+        .header("User-Agent", BING_WEB_USER_AGENT)
+        .header("Origin", "https://www.bing.com")
+        .header("Referer", BING_WEB_TRANSLATOR_URL)
+        .form(&[
+            ("fromLang", "auto-detect"),
+            ("to", normalized_target_language.as_str()),
+            ("text", text),
+            ("tryFetchingGenderDebiasedTranslations", "true"),
+            ("token", auth_state.token.as_str()),
+            ("key", auth_state.key.as_str()),
+        ])
+        .send()
+        .map_err(|e| format!("Bing Translator web request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!(
+            "Bing Translator web request failed with {}: {}",
+            status, body
+        ));
+    }
+
+    let raw_body = response
+        .text()
+        .map_err(|e| format!("Failed to read Bing Translator web response: {}", e))?;
+
+    if let Ok(error_payload) = serde_json::from_str::<BingWebTranslateErrorResponse>(&raw_body) {
+        if error_payload.status_code.unwrap_or_default() >= 400 {
+            return Err(format!(
+                "Bing Translator web request was rejected with {}: {}",
+                error_payload.status_code.unwrap_or_default(),
+                error_payload.error_message.unwrap_or_default()
+            ));
+        }
+    }
+
+    let payload: Vec<BingWebTranslateResponseItem> = serde_json::from_str(&raw_body)
+        .map_err(|e| format!("Failed to parse Bing Translator web response: {}", e))?;
+
+    let first_item = payload
+        .first()
+        .ok_or_else(|| "Bing Translator web response was empty".to_string())?;
+    let translation = first_item
+        .translations
+        .first()
+        .map(|item| item.text.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Bing Translator web response was empty".to_string())?;
+    let source_language_hint = first_item
+        .detected_language
+        .as_ref()
+        .map(|value| value.language.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    Ok((translation, source_language_hint))
+}
+
+fn bing_web_translate_text(text: &str, target_language: &str) -> Result<(String, String), String> {
+    let client = build_bing_web_http_client()?;
+
+    for force_refresh in [false, true] {
+        let auth_state = get_bing_web_auth_state(&client, force_refresh)?;
+        match send_bing_web_translate_request(&client, text, target_language, &auth_state) {
+            Ok(result) => return Ok(result),
+            Err(_) if !force_refresh => continue,
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err("Bing Translator web request failed".to_string())
 }
 
 fn quote_markdown_block(text: &str) -> String {
@@ -2413,13 +2680,9 @@ pub fn summarize_document(
     let force_refresh = force_refresh.unwrap_or(false);
 
     if !force_refresh {
-        if let Some(cached) = read_cached_paper_summary(
-            &conn,
-            &item_id,
-            &output_language,
-            &model,
-            &prompt_key,
-        )? {
+        if let Some(cached) =
+            read_cached_paper_summary(&conn, &item_id, &output_language, &model, &prompt_key)?
+        {
             if let Some((file_size, modified_unix_ms)) = file_signature(path) {
                 if cached.file_size == file_size && cached.modified_unix_ms == modified_unix_ms {
                     return Ok(cached.summary);
@@ -2540,44 +2803,51 @@ pub fn translate_selection(
         .unwrap_or_else(|| "zh-CN".to_string());
     let translate_engine = translate_engine.trim().to_lowercase();
 
-    let (translation, source_language_hint) = if translate_engine == "llm" {
-        let (api_key, completion_url, model) = get_required_ai_settings(&conn)?;
-        let system_prompt = get_ai_translate_system_prompt(&conn)?;
-        drop(conn);
+    let (translation, source_language_hint) = match translate_engine.as_str() {
+        "llm" => {
+            let (api_key, completion_url, model) = get_required_ai_settings(&conn)?;
+            let system_prompt = get_ai_translate_system_prompt(&conn)?;
+            drop(conn);
 
-        let user_prompt = format!(
-            "Translate the following paper excerpt into {}. Preserve technical meaning and notation. Selected text:\n{}",
-            resolved_target_language,
-            trimmed
-        );
+            let user_prompt = format!(
+                "Translate the following paper excerpt into {}. Preserve technical meaning and notation. Selected text:\n{}",
+                resolved_target_language,
+                trimmed
+            );
 
-        let content = call_openai_compatible_chat(
-            &completion_url,
-            &api_key,
-            &model,
-            &system_prompt,
-            &user_prompt,
-        )?;
+            let content = call_openai_compatible_chat(
+                &completion_url,
+                &api_key,
+                &model,
+                &system_prompt,
+                &user_prompt,
+            )?;
 
-        let source_language_hint = parse_tagged_output(&content, "SOURCE_LANGUAGE_HINT:")
-            .unwrap_or_else(|| "unknown".to_string());
+            let source_language_hint = parse_tagged_output(&content, "SOURCE_LANGUAGE_HINT:")
+                .unwrap_or_else(|| "unknown".to_string());
 
-        let translation = content
-            .lines()
-            .filter(|line| !line.trim_start().starts_with("SOURCE_LANGUAGE_HINT:"))
-            .collect::<Vec<_>>()
-            .join("\n")
-            .trim()
-            .to_string();
+            let translation = content
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("SOURCE_LANGUAGE_HINT:"))
+                .collect::<Vec<_>>()
+                .join("\n")
+                .trim()
+                .to_string();
 
-        if translation.is_empty() {
-            return Err("AI translation response was empty".to_string());
+            if translation.is_empty() {
+                return Err("AI translation response was empty".to_string());
+            }
+
+            (translation, source_language_hint)
         }
-
-        (translation, source_language_hint)
-    } else {
-        drop(conn);
-        google_translate_text(trimmed, &resolved_target_language)?
+        "bing" => {
+            drop(conn);
+            bing_web_translate_text(trimmed, &resolved_target_language)?
+        }
+        _ => {
+            drop(conn);
+            google_translate_text(trimmed, &resolved_target_language)?
+        }
     };
 
     Ok(AiTranslationResult {
@@ -3400,8 +3670,8 @@ pub fn save_setting(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_ai_annotation_digest, build_library_item, render_annotations_markdown,
-        sync_item_to_db,
+        build_ai_annotation_digest, build_library_item, normalize_bing_web_language_code,
+        parse_bing_web_auth_state, render_annotations_markdown, sync_item_to_db,
     };
     use crate::db::ensure_schema;
     use crate::models::{
@@ -3632,15 +3902,43 @@ mod tests {
 
         sync_item_to_db(&conn, &item).unwrap();
 
-        let stored: (String, String) = conn.query_row(
-            "SELECT date_added, date_modified FROM items WHERE id = ?1",
-            rusqlite::params![item.id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        ).unwrap();
+        let stored: (String, String) = conn
+            .query_row(
+                "SELECT date_added, date_modified FROM items WHERE id = ?1",
+                rusqlite::params![item.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
 
         assert!(!stored.0.trim().is_empty());
         assert_eq!(stored.0, stored.1);
 
         let _ = fs::remove_file(pdf_path);
+    }
+
+    #[test]
+    fn normalize_bing_web_language_code_maps_chinese_variants() {
+        assert_eq!(normalize_bing_web_language_code("zh-CN"), "zh-Hans");
+        assert_eq!(normalize_bing_web_language_code("zh-TW"), "zh-Hant");
+        assert_eq!(normalize_bing_web_language_code("ja"), "ja");
+    }
+
+    #[test]
+    fn parse_bing_web_auth_state_reads_live_page_markers() {
+        let html = r#"
+            <script>
+              _G={IG:"ABCDEF123456"};
+            </script>
+            <div id="rich_tta" data-iid="translator.5023"></div>
+            <script>
+              var params_AbusePreventionHelper = [1773776417014,"token-value",3600000];
+            </script>
+        "#;
+
+        let parsed = parse_bing_web_auth_state(html).unwrap();
+        assert_eq!(parsed.ig, "ABCDEF123456");
+        assert_eq!(parsed.iid, "translator.5023");
+        assert_eq!(parsed.key, "1773776417014");
+        assert_eq!(parsed.token, "token-value");
     }
 }

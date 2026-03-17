@@ -39,7 +39,10 @@
       "switchingDocument": "Switching document..."
     },
     "drag": {
-      "movePdf": "Move PDF"
+      "movePdf": "Move PDF",
+      "importPdf": "Import PDF",
+      "importPdfCount": "{count} PDFs",
+      "importToFolder": "Import to {folder}"
     }
   },
   "feedback": {
@@ -61,7 +64,8 @@
       "import": {
         "success": {
           "title": "PDF imported",
-          "description": "{title} was added to your library."
+          "description": "{title} was added to your library.",
+          "multipleDescription": "{count} PDFs were added to your library."
         },
         "error": {
           "title": "Import failed",
@@ -313,8 +317,9 @@
       },
       "translateEngine": {
         "label": "Translation engine",
-        "description": "Use Google Translate by default, or switch to your configured LLM",
+        "description": "Choose Google Translate, Microsoft Bing webpage translation, or your configured LLM",
         "google": "Google Translate",
+        "bing": "Microsoft Bing",
         "llm": "LLM"
       },
       "translateLanguage": {
@@ -606,6 +611,40 @@
       "placeholder": "Write your thoughts, summaries, or quotes in Markdown...",
       "save": "Save Note"
     },
+    "metadataFlow": {
+      "title": "Metadata Trace",
+      "loading": "Loading the latest retrieval trace...",
+      "empty": "No retrieval steps are available yet.",
+      "networkGaps": "Some provider requests failed or timed out, so this result may still be incomplete.",
+      "titleQueries": "Title query variants",
+      "score": "score {value}",
+      "fieldsChanged": "Updated fields: {fields}",
+      "note": "Note: {note}",
+      "states": {
+        "complete": "Complete",
+        "partial": "Partial",
+        "preprint": "Preprint"
+      },
+      "stages": {
+        "precise": "Precise",
+        "fuzzy": "Fuzzy",
+        "refresh": "Refresh"
+      },
+      "statuses": {
+        "hit": "Hit",
+        "miss": "Miss",
+        "redundant": "Redundant",
+        "error": "Error"
+      },
+      "providers": {
+        "arxiv_id": "arXiv ID",
+        "crossref_doi": "Crossref DOI",
+        "openalex_doi": "OpenAlex DOI",
+        "openalex_title": "OpenAlex title search",
+        "crossref_title": "Crossref title search",
+        "arxiv_title": "arXiv title search"
+      }
+    },
     "aiSummary": {
       "title": "AI Summary",
       "refresh": "Refresh",
@@ -676,8 +715,8 @@
     "translation": {
       "title": "Translation · {language}",
       "loading": "Translating selection...",
-      "error": "Translation failed. Check your AI settings or completion endpoint.",
-      "notConfigured": "Configure AI settings first to enable automatic selection translation."
+      "error": "Translation failed. Check the selected translation engine settings or endpoint.",
+      "notConfigured": "Configure the selected translation engine first. Only the LLM option requires AI API settings."
     }
   },
   "errorBoundary": {

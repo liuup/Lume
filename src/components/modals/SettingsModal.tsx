@@ -306,6 +306,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-indigo-500 min-w-44"
                       >
                         <option value="google">{t("settings.ai.translateEngine.google")}</option>
+                        <option value="bing">{t("settings.ai.translateEngine.bing")}</option>
                         <option value="llm">{t("settings.ai.translateEngine.llm")}</option>
                       </select>
                     </SettingCard>
@@ -320,14 +321,16 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       />
                     </SettingCard>
 
-                    <SettingCard title={t("settings.ai.translateSystemPrompt.label")} description={t("settings.ai.translateSystemPrompt.description")}>
-                      <textarea
-                        value={settings.aiTranslateSystemPrompt}
-                        onChange={(e) => updateSetting("aiTranslateSystemPrompt", e.target.value)}
-                        className="text-sm border border-zinc-200 rounded-lg px-3 py-2 w-full max-w-[620px] min-h-28 focus:ring-1 focus:ring-indigo-500 outline-none resize-y"
-                        placeholder={t("settings.ai.translateSystemPrompt.placeholder")}
-                      />
-                    </SettingCard>
+                    {settings.aiTranslateEngine === "llm" && (
+                      <SettingCard title={t("settings.ai.translateSystemPrompt.label")} description={t("settings.ai.translateSystemPrompt.description")}>
+                        <textarea
+                          value={settings.aiTranslateSystemPrompt}
+                          onChange={(e) => updateSetting("aiTranslateSystemPrompt", e.target.value)}
+                          className="text-sm border border-zinc-200 rounded-lg px-3 py-2 w-full max-w-[620px] min-h-28 focus:ring-1 focus:ring-indigo-500 outline-none resize-y"
+                          placeholder={t("settings.ai.translateSystemPrompt.placeholder")}
+                        />
+                      </SettingCard>
+                    )}
                   </>
                 )}
 

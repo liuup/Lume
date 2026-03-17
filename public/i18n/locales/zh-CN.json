@@ -39,7 +39,10 @@
       "switchingDocument": "正在切换文档..."
     },
     "drag": {
-      "movePdf": "移动 PDF"
+      "movePdf": "移动 PDF",
+      "importPdf": "导入 PDF",
+      "importPdfCount": "{count} 个 PDF",
+      "importToFolder": "导入到 {folder}"
     }
   },
   "feedback": {
@@ -61,7 +64,8 @@
       "import": {
         "success": {
           "title": "PDF 已导入",
-          "description": "{title} 已添加到资料库。"
+          "description": "{title} 已添加到资料库。",
+          "multipleDescription": "{count} 个 PDF 已添加到资料库。"
         },
         "error": {
           "title": "导入失败",
@@ -313,8 +317,9 @@
       },
       "translateEngine": {
         "label": "翻译引擎",
-        "description": "默认使用 Google 翻译，也可以切换到你配置的 LLM",
+        "description": "可选择 Google 翻译、Microsoft Bing 网页翻译，或你配置的 LLM",
         "google": "Google 翻译",
+        "bing": "Microsoft Bing",
         "llm": "LLM"
       },
       "translateLanguage": {
@@ -606,6 +611,40 @@
       "placeholder": "以 Markdown 记录你的想法、总结或摘录...",
       "save": "保存笔记"
     },
+    "metadataFlow": {
+      "title": "元数据抓取轨迹",
+      "loading": "正在读取最近一次抓取记录...",
+      "empty": "当前还没有可展示的抓取步骤。",
+      "networkGaps": "部分 provider 请求失败或超时，本次结果可能仍不完整。",
+      "titleQueries": "标题查询变体",
+      "score": "匹配分数 {value}",
+      "fieldsChanged": "更新字段：{fields}",
+      "note": "备注：{note}",
+      "states": {
+        "complete": "完整",
+        "partial": "部分",
+        "preprint": "预印本"
+      },
+      "stages": {
+        "precise": "精确",
+        "fuzzy": "模糊",
+        "refresh": "回填"
+      },
+      "statuses": {
+        "hit": "命中",
+        "miss": "未命中",
+        "redundant": "重复",
+        "error": "错误"
+      },
+      "providers": {
+        "arxiv_id": "arXiv ID",
+        "crossref_doi": "Crossref DOI",
+        "openalex_doi": "OpenAlex DOI",
+        "openalex_title": "OpenAlex 标题搜索",
+        "crossref_title": "Crossref 标题搜索",
+        "arxiv_title": "arXiv 标题搜索"
+      }
+    },
     "aiSummary": {
       "title": "AI 总结",
       "refresh": "刷新",
@@ -676,8 +715,8 @@
     "translation": {
       "title": "翻译 · {language}",
       "loading": "正在翻译选中文本...",
-      "error": "翻译失败，请检查 AI 设置或 completion 接口。",
-      "notConfigured": "请先配置 AI 设置，再使用划词自动翻译。"
+      "error": "翻译失败，请检查当前翻译引擎的配置或接口地址。",
+      "notConfigured": "请先配置当前翻译引擎。只有 LLM 选项需要填写 AI 接口信息。"
     }
   },
   "errorBoundary": {
