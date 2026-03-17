@@ -95,7 +95,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Portable CLI smoke test failed with exit code $LASTEXITCODE"
           }
-          if ($output -notmatch "No saved papers found\.") {
+          if ($output -notmatch "No papers found\.") {
             throw "Portable CLI smoke test did not produce the expected output. Actual output: $output"
           }
           Write-Host $output
@@ -125,7 +125,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Installed CLI smoke test failed with exit code $LASTEXITCODE"
           }
-          if ($output -notmatch "No saved papers found\.") {
+          if ($output -notmatch "No papers found\.") {
             throw "Installed CLI smoke test did not produce the expected output. Actual output: $output"
           }
           Write-Host $output
@@ -199,11 +199,12 @@ jobs:
           fi
 
           DEB_PATH="${DEB_FILES[0]}"
+          PACKAGE_NAME=$(dpkg-deb -f "$DEB_PATH" Package)
           sudo dpkg -i "$DEB_PATH"
 
-          BINARY_PATH=$(dpkg-deb -c "$DEB_PATH" | awk '/\.\/usr\/bin\// { sub(/^\./, "", $NF); print $NF; exit }')
+          BINARY_PATH=$(dpkg -L "$PACKAGE_NAME" | awk '/^\/usr\/bin\// { print; exit }')
           if [ -z "$BINARY_PATH" ]; then
-            echo "Could not determine installed binary path from $DEB_PATH" >&2
+            echo "Could not determine installed binary path for package $PACKAGE_NAME from $DEB_PATH" >&2
             exit 1
           fi
 
@@ -217,7 +218,7 @@ jobs:
 
           echo "$OUTPUT"
 
-          if ! grep -Fq "No saved papers found." <<< "$OUTPUT"; then
+          if ! grep -Fq "No papers found." <<< "$OUTPUT"; then
             echo "Installed deb CLI smoke test did not produce the expected output." >&2
             exit 1
           fi
