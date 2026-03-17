@@ -1,8 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { AiTranslationResult } from "../types";
-import { useSettings } from "../hooks/useSettings";
-import { useI18n } from "../hooks/useI18n";
 
 export interface TextNode {
   text: string;
@@ -20,15 +17,18 @@ interface TextLayerProps {
   height: number;
   isVisible: boolean;
   shouldLoad: boolean;
+  onSelectionRequest?: (pageIndex: number, snapshot: TextLayerSelectionSnapshot) => void;
+  registerSelectionController?: (pageIndex: number, controller: TextLayerSelectionController | null) => void;
 }
 
-interface TranslationPopupState {
+export interface TextLayerSelectionSnapshot {
   selectedText: string;
   x: number;
   y: number;
-  result: AiTranslationResult | null;
-  isLoading: boolean;
-  error: string | null;
+}
+
+export interface TextLayerSelectionController {
+  getSelectionSnapshot: () => TextLayerSelectionSnapshot | null;
 }
 
 const textLayerCache = new Map<string, TextNode[]>();
@@ -37,14 +37,129 @@ function getTextLayerCacheKey(pdfPath: string, pageIndex: number) {
   return `${pdfPath}::${pageIndex}`;
 }
 
-export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible, shouldLoad }: TextLayerProps) {
-  const { settings } = useSettings();
-  const { t } = useI18n();
+function normalizeSelectedText(value: string) {
+  return value
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function TextLayer({
+  pdfPath,
+  pageIndex,
+  scale,
+  width,
+  height,
+  isVisible,
+  shouldLoad,
+  onSelectionRequest,
+  registerSelectionController,
+}: TextLayerProps) {
   const [textNodes, setTextNodes] = useState<TextNode[]>([]);
-  const [translationPopup, setTranslationPopup] = useState<TranslationPopupState | null>(null);
   const cacheKey = getTextLayerCacheKey(pdfPath, pageIndex);
-  const requestIdRef = useRef(0);
   const layerRef = useRef<HTMLDivElement>(null);
+  const spanRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const naturalWidthsRef = useRef<number[]>([]);
+  const selectionSnapshotGetterRef = useRef<() => TextLayerSelectionSnapshot | null>(() => null);
+
+  const extractSelectedTextFromLayer = () => {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      return "";
+    }
+
+    const range = selection.getRangeAt(0);
+    const layerElement = layerRef.current;
+    if (!layerElement) {
+      return "";
+    }
+
+    const selectedSegments: Array<{ index: number; text: string; node: TextNode }> = [];
+
+    spanRefs.current.forEach((span, index) => {
+      if (!span || !range.intersectsNode(span)) {
+        return;
+      }
+
+      const textNode = span.firstChild;
+      const nodeMeta = textNodes[index];
+      if (!textNode || textNode.nodeType !== Node.TEXT_NODE || !nodeMeta) {
+        return;
+      }
+
+      const fullText = textNode.textContent ?? "";
+      let start = 0;
+      let end = fullText.length;
+
+      if (textNode === range.startContainer) {
+        start = range.startOffset;
+      }
+      if (textNode === range.endContainer) {
+        end = range.endOffset;
+      }
+
+      const slice = fullText.slice(start, end);
+      if (!slice) {
+        return;
+      }
+
+      selectedSegments.push({
+        index,
+        text: slice,
+        node: nodeMeta,
+      });
+    });
+
+    if (selectedSegments.length === 0) {
+      return "";
+    }
+
+    selectedSegments.sort((left, right) => left.index - right.index);
+
+    let rebuilt = "";
+    let previous: { text: string; node: TextNode } | null = null;
+
+    for (const segment of selectedSegments) {
+      if (previous) {
+        const sameLine = Math.abs(previous.node.y - segment.node.y) < Math.max(previous.node.height, segment.node.height) * 0.45;
+        const horizontalGap = segment.node.x - (previous.node.x + previous.node.width);
+        const shouldInsertLineBreak = !sameLine;
+        const shouldInsertSpace = sameLine
+          && horizontalGap > Math.max(previous.node.height, segment.node.height) * 0.25
+          && !rebuilt.endsWith(" ")
+          && !segment.text.startsWith(" ");
+
+        if (shouldInsertLineBreak && !rebuilt.endsWith("\n")) {
+          rebuilt += "\n";
+        } else if (shouldInsertSpace) {
+          rebuilt += " ";
+        }
+      }
+
+      rebuilt += segment.text;
+      previous = segment;
+    }
+
+    return normalizeSelectedText(rebuilt);
+  };
+
+  const isSelectionInsideLayer = () => {
+    const selection = window.getSelection();
+    const layerElement = layerRef.current;
+
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !layerElement) {
+      return false;
+    }
+
+    const anchorNode = selection.anchorNode;
+    const focusNode = selection.focusNode;
+
+    return Boolean(
+      anchorNode
+        && focusNode
+        && layerElement.contains(anchorNode)
+        && layerElement.contains(focusNode)
+    );
+  };
 
   const getSelectionRect = () => {
     const selection = window.getSelection();
@@ -52,10 +167,7 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
       return null;
     }
 
-    const anchorNode = selection.anchorNode;
-    const focusNode = selection.focusNode;
-    const layerElement = layerRef.current;
-    if (!layerElement || !(anchorNode && layerElement.contains(anchorNode)) || !(focusNode && layerElement.contains(focusNode))) {
+    if (!isSelectionInsideLayer()) {
       return null;
     }
 
@@ -66,11 +178,13 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
     }
 
     return {
-      selectedText: selection.toString().trim(),
+      selectedText: normalizeSelectedText(extractSelectedTextFromLayer() || selection.toString()),
       x: rect.left + rect.width / 2,
       y: rect.bottom + 10,
     };
   };
+
+  selectionSnapshotGetterRef.current = getSelectionRect;
 
   useEffect(() => {
     if (textLayerCache.has(cacheKey)) {
@@ -81,7 +195,7 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
 
     setTextNodes([]);
 
-    if (!shouldLoad) return;
+    if (!shouldLoad || !isVisible) return;
     let isMounted = true;
 
     const loadTextLayer = async () => {
@@ -96,149 +210,65 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
       }
     };
 
-    if (isVisible) {
-      loadTextLayer();
-      return () => {
-        isMounted = false;
-      };
-    }
-
-    const scheduler = window.requestIdleCallback
-      ? window.requestIdleCallback
-      : (callback: IdleRequestCallback) => window.setTimeout(() => callback({
-          didTimeout: false,
-          timeRemaining: () => 0,
-        } as IdleDeadline), 180);
-    const cancelScheduler = window.cancelIdleCallback
-      ? window.cancelIdleCallback
-      : (handle: number) => window.clearTimeout(handle);
-
-    const taskId = scheduler(loadTextLayer);
+    loadTextLayer();
 
     return () => {
       isMounted = false;
-      cancelScheduler(taskId);
     };
   }, [cacheKey, isVisible, pageIndex, pdfPath, shouldLoad]);
 
-  useEffect(() => {
-    const hidePopup = () => {
-      setTranslationPopup(null);
-    };
+  useLayoutEffect(() => {
+    if (textNodes.length === 0) {
+      naturalWidthsRef.current = [];
+      return;
+    }
 
-    const handleSelectionChange = () => {
-      const selection = window.getSelection();
-      if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
-        setTranslationPopup((current) => (current?.isLoading ? current : null));
-      }
-    };
-
-    const syncPopupPosition = () => {
-      setTranslationPopup((current) => {
-        if (!current) return null;
-
-        const nextRect = getSelectionRect();
-        if (!nextRect || !nextRect.selectedText) {
-          return current.isLoading ? current : null;
+    const frameId = window.requestAnimationFrame(() => {
+      spanRefs.current.forEach((span, index) => {
+        if (!span) {
+          return;
         }
 
-        return {
-          ...current,
-          selectedText: nextRect.selectedText,
-          x: nextRect.x,
-          y: nextRect.y,
-        };
+        span.style.transform = "none";
+        const naturalWidth = span.scrollWidth || span.getBoundingClientRect().width;
+        naturalWidthsRef.current[index] = naturalWidth > 0 && Number.isFinite(naturalWidth) ? naturalWidth : 0;
       });
-    };
-
-    document.addEventListener("mousedown", hidePopup);
-    document.addEventListener("selectionchange", handleSelectionChange);
-    window.addEventListener("scroll", syncPopupPosition, true);
-    window.addEventListener("resize", syncPopupPosition);
-
-    return () => {
-      document.removeEventListener("mousedown", hidePopup);
-      document.removeEventListener("selectionchange", handleSelectionChange);
-      window.removeEventListener("scroll", syncPopupPosition, true);
-      window.removeEventListener("resize", syncPopupPosition);
-    };
-  }, []);
-
-  const handleMouseUp = async () => {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
-
-    const selectedText = selection.toString().trim();
-    if (!selectedText) return;
-
-    const anchorNode = selection.anchorNode;
-    const focusNode = selection.focusNode;
-    const layerElement = layerRef.current;
-    if (!layerElement || !(anchorNode && layerElement.contains(anchorNode)) || !(focusNode && layerElement.contains(focusNode))) {
-      return;
-    }
-    const selectionRect = getSelectionRect();
-    if (!selectionRect || !selectionRect.selectedText) {
-      return;
-    }
-
-    const aiIsConfigured = Boolean(settings.aiApiKey.trim() && settings.aiCompletionUrl.trim() && settings.aiModel.trim());
-
-    if (!aiIsConfigured) {
-      setTranslationPopup({
-        selectedText,
-        x: selectionRect.x,
-        y: selectionRect.y,
-        result: null,
-        isLoading: false,
-        error: t("textLayer.translation.notConfigured"),
-      });
-      return;
-    }
-
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
-
-    setTranslationPopup({
-      selectedText,
-      x: selectionRect.x,
-      y: selectionRect.y,
-      result: null,
-      isLoading: true,
-      error: null,
     });
 
-    try {
-      const result = await invoke<AiTranslationResult>("translate_selection", {
-        text: selectedText,
-        targetLanguage: settings.aiTranslateTargetLanguage,
-      });
+    return () => window.cancelAnimationFrame(frameId);
+  }, [textNodes]);
 
-      if (requestIdRef.current !== requestId) return;
-
-      setTranslationPopup({
-        selectedText,
-        x: selectionRect.x,
-        y: selectionRect.y,
-        result,
-        isLoading: false,
-        error: null,
-      });
-    } catch (error) {
-      if (requestIdRef.current !== requestId) return;
-      console.error("Failed to translate selection", error);
-      setTranslationPopup({
-        selectedText,
-        x: selectionRect.x,
-        y: selectionRect.y,
-        result: null,
-        isLoading: false,
-        error: t("textLayer.translation.error"),
-      });
+  useLayoutEffect(() => {
+    if (textNodes.length === 0) {
+      return;
     }
-  };
 
-  // We render if we have data, regardless of visibility, so native Cmd+F works
+    const frameId = window.requestAnimationFrame(() => {
+      spanRefs.current.forEach((span, index) => {
+        const node = textNodes[index];
+        const naturalWidth = naturalWidthsRef.current[index];
+        if (!span || !node || !naturalWidth) {
+          return;
+        }
+
+        const targetWidth = Math.max(node.width * scale, 1);
+        const scaleX = Math.max(0.01, targetWidth / naturalWidth);
+        span.style.transform = `scaleX(${scaleX})`;
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [scale, textNodes]);
+
+  useEffect(() => {
+    registerSelectionController?.(pageIndex, {
+      getSelectionSnapshot: () => selectionSnapshotGetterRef.current(),
+    });
+    return () => {
+      registerSelectionController?.(pageIndex, null);
+    };
+  }, [pageIndex, registerSelectionController]);
+
   if (textNodes.length === 0) return null;
 
   return (
@@ -249,13 +279,30 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
         width,
         height,
       }}
-      onMouseUp={() => { void handleMouseUp(); }}
+      onCopy={(event) => {
+        if (!isSelectionInsideLayer()) {
+          return;
+        }
+
+        const selectedText = extractSelectedTextFromLayer();
+        if (!selectedText) {
+          return;
+        }
+
+        event.preventDefault();
+        event.clipboardData.setData("text/plain", selectedText);
+      }}
+      onMouseUp={() => {
+        const selectionRect = getSelectionRect();
+        if (selectionRect?.selectedText) {
+          onSelectionRequest?.(pageIndex, selectionRect);
+        }
+      }}
     >
       {textNodes.map((node, i) => {
         // We scale the raw PDF coordinates by the current display scale
         const scaledX = node.x * scale;
         const scaledY = node.y * scale;
-        const scaledWidth = node.width * scale;
         const scaledHeight = node.height * scale;
         
         // Font size approx based on rect height, typically slightly smaller to fit baseline well
@@ -264,12 +311,14 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
         return (
           <span
             key={`t-${pageIndex}-${i}`}
+            ref={(element) => {
+              spanRefs.current[i] = element;
+            }}
             // Reactivate pointer events on the actual text nodes so they can be selected
             className="absolute text-transparent select-text cursor-text origin-bottom-left selection:bg-blue-400/40 selection:text-transparent"
             style={{
               left: scaledX,
               top: scaledY,
-              width: scaledWidth,
               height: scaledHeight,
               fontSize: `${fontSize}px`,
               lineHeight: `${scaledHeight}px`,
@@ -277,37 +326,13 @@ export function TextLayer({ pdfPath, pageIndex, scale, width, height, isVisible,
               whiteSpace: 'pre',
               pointerEvents: 'auto',
               display: 'inline-block',
-              overflow: 'hidden', // prevent text spillage from confusing the browser's selection bounds
+              transformOrigin: 'top left',
             }}
           >
             {node.text}
           </span>
         );
       })}
-      {translationPopup && (
-        <div
-          className="fixed z-[70] w-[min(360px,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-[0_18px_45px_-18px_rgba(0,0,0,0.28)] backdrop-blur-sm"
-          style={{
-            left: translationPopup.x,
-            top: translationPopup.y,
-          }}
-          onMouseDown={(event) => event.stopPropagation()}
-        >
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600">
-            {t("textLayer.translation.title", { language: settings.aiTranslateTargetLanguage || "zh-CN" })}
-          </div>
-          <div className="mt-1 text-xs leading-relaxed text-zinc-500 line-clamp-3">
-            {translationPopup.selectedText}
-          </div>
-          <div className="mt-2 text-sm leading-relaxed text-zinc-700 whitespace-pre-wrap">
-            {translationPopup.isLoading
-              ? t("textLayer.translation.loading")
-              : translationPopup.error
-                ? translationPopup.error
-                : translationPopup.result?.translation}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

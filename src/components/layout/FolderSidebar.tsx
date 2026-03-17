@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, FilePenLine, Folder, FolderOpen, FolderPlus, Hash, Plus, Settings, Trash2 } from "lucide-react";
-import { FolderNode, TagInfo } from "../../types";
+import { FolderNode, TagInfo, TRASH_FOLDER_ID } from "../../types";
 import { useI18n } from "../../hooks/useI18n";
 
 // ── Preset tag palette ──────────────────────────────────────────────────────
@@ -23,6 +23,7 @@ interface FolderSidebarProps {
   onToggleCollapse: () => void;
   selectedFolderId: string;
   onSelectFolder: (id: string) => void;
+  trashCount: number;
   onAddFolder: (parentId: string, name: string) => Promise<void>;
   onRenameFolder: (folder: FolderNode, nextName: string) => Promise<void> | void;
   onDeleteFolder: (folder: FolderNode) => Promise<void> | void;
@@ -44,6 +45,7 @@ export function FolderSidebar({
   onToggleCollapse,
   selectedFolderId,
   onSelectFolder,
+  trashCount,
   onAddFolder,
   onRenameFolder,
   onDeleteFolder,
@@ -57,7 +59,9 @@ export function FolderSidebar({
   onOpenSettings
 }: FolderSidebarProps) {
   const { t } = useI18n();
+  const rootFolderId = folderTree[0]?.id ?? null;
   const selectedFolder = findFolderNode(folderTree, selectedFolderId);
+  const isTrashSelected = selectedFolderId === TRASH_FOLDER_ID;
   const [contextMenu, setContextMenu] = useState<{
     folder: FolderNode;
     x: number;
@@ -228,6 +232,18 @@ export function FolderSidebar({
                 <Hash size={16} />
               </button>
             )}
+
+            <button
+              onClick={() => onSelectFolder(TRASH_FOLDER_ID)}
+              className={`inline-flex items-center justify-center w-10 h-10 rounded-xl border transition-colors ${
+                isTrashSelected
+                  ? "border-rose-200 bg-rose-50 text-rose-600"
+                  : "border-zinc-200 bg-white text-zinc-500"
+              }`}
+              title={t("folderSidebar.labels.trash")}
+            >
+              <Trash2 size={16} />
+            </button>
           </div>
 
         </>
@@ -247,6 +263,8 @@ export function FolderSidebar({
                 key={node.id}
                 node={node}
                 depth={0}
+                rootFolderId={rootFolderId}
+                trashCount={trashCount}
                 selectedFolderId={selectedFolderId}
                 draggedItemId={draggedItemId}
                 dragOverFolderId={dragOverFolderId}
@@ -521,10 +539,16 @@ function findFolderNode(nodes: FolderNode[], id: string): FolderNode | null {
   return null;
 }
 
+function countFolderItems(node: FolderNode): number {
+  return node.items.length + node.children.reduce((sum, child) => sum + countFolderItems(child), 0);
+}
+
 /* ── Folder tree item (recursive) ── */
 function FolderTreeItem({
   node,
   depth,
+  rootFolderId,
+  trashCount,
   selectedFolderId,
   draggedItemId,
   dragOverFolderId,
@@ -536,6 +560,8 @@ function FolderTreeItem({
 }: {
   node: FolderNode;
   depth: number;
+  rootFolderId: string | null;
+  trashCount: number;
   selectedFolderId: string;
   draggedItemId: string | null;
   dragOverFolderId: string | null;
@@ -548,14 +574,18 @@ function FolderTreeItem({
   const { t } = useI18n();
   const [open, setOpen] = useState(true);
   const isSelected = node.id === selectedFolderId;
+  const isTrashSelected = selectedFolderId === TRASH_FOLDER_ID;
   const hasChildren = node.children.length > 0;
+  const showsTrashChild = node.id === rootFolderId;
+  const hasVisibleChildren = hasChildren || showsTrashChild;
   const isDropTarget = Boolean(draggedItemId) && dragOverFolderId === node.id;
+  const itemCount = countFolderItems(node);
 
   useEffect(() => {
-    if (isDropTarget && hasChildren && !open) {
+    if (isDropTarget && hasVisibleChildren && !open) {
       setOpen(true);
     }
-  }, [isDropTarget, hasChildren, open]);
+  }, [hasVisibleChildren, isDropTarget, open]);
 
   return (
     <div>
@@ -591,18 +621,22 @@ function FolderTreeItem({
         <button
           className={`shrink-0 text-zinc-400 hover:text-zinc-600 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
           onClick={e => { e.stopPropagation(); setOpen(v => !v); }}
-          style={{ visibility: hasChildren ? "visible" : "hidden" }}
+          style={{ visibility: hasVisibleChildren ? "visible" : "hidden" }}
         >
           <ChevronRight size={13} />
         </button>
 
-        {open && hasChildren ? (
+        {open && hasVisibleChildren ? (
           <FolderOpen size={14} className="shrink-0 text-indigo-400" />
         ) : (
           <Folder size={14} className={`shrink-0 ${isSelected ? "text-indigo-500" : "text-zinc-400"}`} />
         )}
 
         <span className="text-[13px] font-medium flex-1 truncate">{node.name}</span>
+
+        <span className="shrink-0 rounded-full bg-zinc-200/70 px-2 py-0.5 text-[11px] text-zinc-500">
+          {itemCount}
+        </span>
 
         {/* Add sub-folder button shown on hover */}
         <button
@@ -614,13 +648,15 @@ function FolderTreeItem({
         </button>
       </div>
 
-      {open && hasChildren && (
+      {open && hasVisibleChildren && (
         <div>
           {node.children.map(child => (
             <FolderTreeItem
               key={child.id}
               node={child}
               depth={depth + 1}
+              rootFolderId={rootFolderId}
+              trashCount={trashCount}
               selectedFolderId={selectedFolderId}
               draggedItemId={draggedItemId}
               dragOverFolderId={dragOverFolderId}
@@ -631,6 +667,28 @@ function FolderTreeItem({
               onOpenContextMenu={onOpenContextMenu}
             />
           ))}
+          {showsTrashChild && (
+            <button
+              type="button"
+              onClick={() => onSelectFolder(TRASH_FOLDER_ID)}
+              className={`group flex w-full items-center space-x-1.5 rounded-md px-2 py-1.5 transition-colors ${
+                isTrashSelected
+                  ? "bg-rose-50 text-rose-700"
+                  : "text-zinc-600 hover:bg-zinc-100"
+              }`}
+              style={{ paddingLeft: `${8 + (depth + 1) * 14}px` }}
+            >
+              <div className="w-[13px] shrink-0" />
+              <Trash2 size={14} className={`shrink-0 ${isTrashSelected ? "text-rose-500" : "text-zinc-400"}`} />
+              <span className="flex-1 truncate text-left text-[13px] font-medium">{t("folderSidebar.labels.trash")}</span>
+              <span className="shrink-0 rounded-full bg-zinc-200/70 px-2 py-0.5 text-[11px] text-zinc-500">
+                {trashCount}
+              </span>
+              <span className="w-3 shrink-0 opacity-0" aria-hidden="true">
+                +
+              </span>
+            </button>
+          )}
         </div>
       )}
     </div>

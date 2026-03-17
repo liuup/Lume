@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type, PanelRight, PanelLeft, ChevronDown, Eraser } from "lucide-react";
 import { ToolType } from "../types";
 import { useI18n } from "../hooks/useI18n";
@@ -41,6 +42,9 @@ export function Toolbar({
   const { t } = useI18n();
   const [showZoomMenu, setShowZoomMenu] = useState(false);
   const zoomMenuRef = useRef<HTMLDivElement>(null);
+  const zoomMenuPortalRef = useRef<HTMLDivElement>(null);
+  const zoomTriggerRef = useRef<HTMLButtonElement>(null);
+  const [zoomMenuPosition, setZoomMenuPosition] = useState<{ left: number; top: number } | null>(null);
   
   const [pageInput, setPageInput] = useState(currentPage.toString());
 
@@ -50,12 +54,43 @@ export function Toolbar({
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      if (zoomMenuRef.current && !zoomMenuRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const clickedTrigger = zoomMenuRef.current?.contains(target);
+      const clickedMenu = zoomMenuPortalRef.current?.contains(target);
+
+      if (!clickedTrigger && !clickedMenu) {
         setShowZoomMenu(false);
       }
     };
     if (showZoomMenu) window.addEventListener("click", handleClick);
     return () => window.removeEventListener("click", handleClick);
+  }, [showZoomMenu]);
+
+  useEffect(() => {
+    if (!showZoomMenu) {
+      return;
+    }
+
+    const updateZoomMenuPosition = () => {
+      const rect = zoomTriggerRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+
+      setZoomMenuPosition({
+        left: rect.left + rect.width / 2,
+        top: rect.bottom + 6,
+      });
+    };
+
+    updateZoomMenuPosition();
+    window.addEventListener("scroll", updateZoomMenuPosition, true);
+    window.addEventListener("resize", updateZoomMenuPosition);
+
+    return () => {
+      window.removeEventListener("scroll", updateZoomMenuPosition, true);
+      window.removeEventListener("resize", updateZoomMenuPosition);
+    };
   }, [showZoomMenu]);
   
   if (!hasPdf) return null;
@@ -69,7 +104,7 @@ export function Toolbar({
   };
 
   return (
-    <header className="h-14 bg-white/80 backdrop-blur-md border-b border-zinc-200 flex items-center justify-between gap-2 px-3 z-20 shrink-0 sticky top-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)] min-w-0">
+    <header className="relative h-14 bg-white/90 backdrop-blur-sm border-b border-zinc-200 flex items-center justify-between gap-2 px-3 z-[70] shrink-0 sticky top-0 shadow-[0_1px_2px_rgba(0,0,0,0.02)] min-w-0">
       {/* Left controls / draggable space */}
       <div className="flex-1 min-w-0 h-full flex items-center cursor-default" data-tauri-drag-region>
         <TooltipButton
@@ -120,6 +155,7 @@ export function Toolbar({
           </TooltipButton>
           <div className="relative" ref={zoomMenuRef}>
             <button 
+              ref={zoomTriggerRef}
               onClick={() => setShowZoomMenu(!showZoomMenu)}
               className="w-12 min-[640px]:w-16 h-8 flex items-center justify-center space-x-1 hover:bg-white rounded-md transition-colors"
               title={t("toolbar.zoomOptions")}
@@ -130,16 +166,26 @@ export function Toolbar({
               <ChevronDown size={11} className="text-zinc-400" />
             </button>
             
-            {showZoomMenu && (
-              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 w-32 bg-white border border-zinc-200 rounded-xl shadow-lg py-1.5 z-50">
+            {showZoomMenu && zoomMenuPosition && typeof document !== "undefined"
+              ? createPortal(
+              <div
+                ref={zoomMenuPortalRef}
+                className="fixed z-[250] w-32 -translate-x-1/2 rounded-xl border border-zinc-200 bg-white py-1.5 shadow-lg"
+                style={{
+                  left: zoomMenuPosition.left,
+                  top: zoomMenuPosition.top,
+                }}
+              >
                 <button className="w-full text-left px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors" onClick={() => { onFitWidth(); setShowZoomMenu(false); }}>
                   {t("toolbar.fitWidth")}
                 </button>
                 <button className="w-full text-left px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition-colors" onClick={() => { onFitHeight(); setShowZoomMenu(false); }}>
                   {t("toolbar.fitHeight")}
                 </button>
-              </div>
-            )}
+              </div>,
+              document.body
+            )
+              : null}
           </div>
           <TooltipButton
             onClick={onZoomIn}
@@ -252,22 +298,62 @@ function TooltipButton({
   className: string;
 }) {
   const [visible, setVisible] = useState(false);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+
+    const updatePosition = () => {
+      const rect = wrapperRef.current?.getBoundingClientRect();
+      if (!rect) {
+        return;
+      }
+
+      setPosition({
+        left: rect.left + rect.width / 2,
+        top: rect.bottom + 8,
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+
+    return () => {
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [visible]);
 
   return (
-    <div className="relative" onMouseEnter={() => setVisible(true)} onMouseLeave={() => setVisible(false)}>
+    <div
+      ref={wrapperRef}
+      className="relative z-[80]"
+      onMouseEnter={() => setVisible(true)}
+      onMouseLeave={() => setVisible(false)}
+    >
       <button onClick={onClick} className={className}>
         {children}
       </button>
-      {/* Tooltip */}
-      <div
-        className={`pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 px-2.5 py-1.5 bg-zinc-900 text-white text-[11px] font-medium rounded-lg shadow-xl whitespace-nowrap z-50 transition-all duration-150 ${
-          visible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-1"
-        }`}
-      >
-        {tooltip}
-        {/* Arrow */}
-        <span className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-zinc-900 rotate-45 rounded-[1px]" />
-      </div>
+      {visible && position && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="pointer-events-none fixed z-[300] px-2.5 py-1.5 bg-zinc-900 text-white text-[11px] font-medium rounded-lg shadow-xl whitespace-nowrap"
+              style={{
+                left: position.left,
+                top: position.top,
+                transform: "translateX(-50%)",
+              }}
+            >
+              {tooltip}
+              <span className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-zinc-900 rotate-45 rounded-[1px]" />
+            </div>,
+            document.body
+          )
+        : null}
     </div>
   );
 }

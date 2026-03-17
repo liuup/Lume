@@ -64,7 +64,7 @@ pub struct AiAnnotationDigest {
     pub markdown: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AiPaperSummary {
     pub title: String,
@@ -96,7 +96,7 @@ pub struct LibraryPdfMeta {
     pub tags: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct LibraryAttachment {
     pub id: String,
     pub item_id: String,
@@ -126,7 +126,7 @@ pub struct UpdateMetadataPayload {
     pub tags: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct LibraryItem {
     pub id: String,
     pub item_type: String,
@@ -169,6 +169,14 @@ pub struct ParsedPdfMetadata {
     pub doi: Option<String>,
     #[serde(rename = "arxivId")]
     pub arxiv_id: Option<String>,
+    pub publication: Option<String>,
+    pub volume: Option<String>,
+    pub issue: Option<String>,
+    pub pages: Option<String>,
+    pub publisher: Option<String>,
+    pub isbn: Option<String>,
+    pub url: Option<String>,
+    pub language: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -244,6 +252,8 @@ pub struct CrossrefSearchMessage {
 pub struct CrossrefWorkMessage {
     #[serde(default)]
     pub title: Vec<String>,
+    #[serde(default, rename = "container-title")]
+    pub container_title: Vec<String>,
     #[serde(default)]
     pub author: Vec<CrossrefAuthor>,
     #[serde(default, rename = "published-print")]
@@ -259,6 +269,18 @@ pub struct CrossrefWorkMessage {
     pub abstract_field: Option<String>,
     #[serde(default, rename = "DOI")]
     pub doi: String,
+    #[serde(default)]
+    pub volume: Option<String>,
+    #[serde(default)]
+    pub issue: Option<String>,
+    #[serde(default)]
+    pub page: Option<String>,
+    #[serde(default)]
+    pub publisher: Option<String>,
+    #[serde(default, rename = "URL")]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub language: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]

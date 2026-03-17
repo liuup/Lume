@@ -1,17 +1,22 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { Suspense, lazy, useState, useRef, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Toolbar } from "./components/Toolbar";
-import { PdfViewer } from "./components/PdfViewer";
 import { FolderSidebar } from "./components/layout/FolderSidebar";
 import { LibraryView } from "./components/layout/LibraryView";
-import { MetaPanel } from "./components/layout/MetaPanel";
-import { AIPanel } from "./components/layout/AIPanel";
-import { SearchBar } from "./components/SearchBar";
 import { SettingsModal } from "./components/modals/SettingsModal";
+import { preloadPdfDocument } from "./components/pdfDocumentRuntime";
+import {
+  loadPdfAIPanelModule,
+  loadPdfMetaPanelModule,
+  loadPdfSearchBarModule,
+  loadPdfToolbarModule,
+  loadPdfViewerModule,
+  preloadPdfCoreRuntime,
+  preloadPdfSidebarRuntime,
+} from "./components/pdfRuntime";
 import { X } from "lucide-react";
 
-import { CliLibraryChangedPayload, LibraryItem, PdfSearchMatch, TagInfo, ToolType } from "./types";
+import { CliLibraryChangedPayload, LibraryItem, PdfSearchMatch, TagInfo, ToolType, TRASH_FOLDER_ID } from "./types";
 import { useLibrary } from "./hooks/useLibrary";
 import { useSettings } from "./hooks/useSettings";
 import { useI18n } from "./hooks/useI18n";
@@ -29,6 +34,27 @@ type SearchRequestOptions = {
   advanceIfSameTerm?: boolean;
 };
 
+const PdfViewer = lazy(async () => {
+  const module = await loadPdfViewerModule();
+  return { default: module.PdfViewer };
+});
+const Toolbar = lazy(async () => {
+  const module = await loadPdfToolbarModule();
+  return { default: module.Toolbar };
+});
+const SearchBar = lazy(async () => {
+  const module = await loadPdfSearchBarModule();
+  return { default: module.SearchBar };
+});
+const AIPanel = lazy(async () => {
+  const module = await loadPdfAIPanelModule();
+  return { default: module.AIPanel };
+});
+const MetaPanel = lazy(async () => {
+  const module = await loadPdfMetaPanelModule();
+  return { default: module.MetaPanel };
+});
+
 function App() {
   const { t } = useI18n();
   const feedback = useFeedback();
@@ -42,6 +68,7 @@ function App() {
     currentPage,
     isLoading,
     folderTree,
+    trashItems,
     selectedFolderId,
     setSelectedFolderId,
     selectedItemId,
@@ -52,13 +79,16 @@ function App() {
     handleCloseTab,
     handlePageJump,
     updateCurrentPage,
+    updatePageDimension,
     handleAddFolder,
     handleDeleteItem,
     handleRenameItem,
     handleMoveItemToFolder,
     handleRenameFolder,
     handleDeleteFolder,
-    handleItemUpdatedLocally
+    handleItemUpdatedLocally,
+    handleRestoreTrashItem,
+    handleEmptyTrash,
   } = useLibrary();
 
   const [scale, setScale] = useState<number>(1.5);
@@ -75,6 +105,7 @@ function App() {
   const [isSearchLoading, setIsSearchLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [arePdfSidebarsReady, setArePdfSidebarsReady] = useState(false);
   const [annotationsRefreshKey, setAnnotationsRefreshKey] = useState(0);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [dragState, setDragState] = useState<LibraryDragState | null>(null);
@@ -85,6 +116,28 @@ function App() {
   const searchRequestIdRef = useRef(0);
   const activePdfScrollRef = useRef<HTMLDivElement | null>(null);
   const { settings, isLoading: isSettingsLoading } = useSettings();
+
+  useEffect(() => {
+    if (!activeTabId || activeTabId === "library") {
+      setArePdfSidebarsReady(false);
+      return undefined;
+    }
+
+    void preloadPdfCoreRuntime();
+    if (arePdfSidebarsReady) {
+      void preloadPdfSidebarRuntime();
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setArePdfSidebarsReady(true);
+      void preloadPdfSidebarRuntime();
+    }, 160);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [activeTabId, arePdfSidebarsReady]);
 
   const clearSearchState = useCallback((keepInput = false) => {
     searchRequestIdRef.current += 1;
@@ -297,47 +350,17 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTabId, isSettingsLoading, dimensions.length, settings?.defaultPdfZoom]);
 
-  const scrollTimeout = useRef<number | null>(null);
+  const handleVisiblePageChange = useCallback((page: number) => {
+    if (!activeTabId || activeTabId === "library" || page === currentPage) {
+      return;
+    }
+    updateCurrentPage(page);
+  }, [activeTabId, currentPage, updateCurrentPage]);
 
-  // Cleanup scroll throttle timer on tab change or unmount
-  useEffect(() => {
-    return () => {
-      if (scrollTimeout.current) {
-        window.clearTimeout(scrollTimeout.current);
-        scrollTimeout.current = null;
-      }
-    };
-  }, [activeTabId]);
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    if (!activeTabId || activeTabId === 'library') return;
-    if (scrollTimeout.current) return;
-    
-    const target = e.currentTarget;
-    scrollTimeout.current = window.setTimeout(() => {
-      scrollTimeout.current = null;
-      const rect = target.getBoundingClientRect();
-      const center = rect.top + rect.height / 2;
-      let closestPage = 1;
-      let minDistance = Infinity;
-      
-      const pageNodes = target.querySelectorAll('[data-page-number]');
-      pageNodes.forEach(node => {
-        const nodeRect = node.getBoundingClientRect();
-        const nodeCenter = nodeRect.top + nodeRect.height / 2;
-        const dist = Math.abs(nodeCenter - center);
-        if (dist < minDistance) {
-          minDistance = dist;
-          closestPage = parseInt(node.getAttribute('data-page-number') || '1', 10);
-        }
-      });
-      
-      if (closestPage !== currentPage) {
-        updateCurrentPage(closestPage);
-      }
-    }, 100);
-  };
-
-  const selectedItem = selectedItemId ? findItem(folderTree, selectedItemId) : null;
+  const selectedItem = selectedItemId
+    ? (findItem(folderTree, selectedItemId) ?? trashItems.find((item) => item.id === selectedItemId) ?? null)
+    : null;
+  const isTrashSelected = selectedFolderId === TRASH_FOLDER_ID;
   const isLibrary = activeTabId === 'library' || activeTabId === null;
 
   const updateDragOverFolder = useCallback((clientX: number, clientY: number) => {
@@ -582,18 +605,23 @@ function App() {
       const pageNode = container.querySelector(
         `[data-page-number="${activeMatch.pageIndex + 1}"]`
       ) as HTMLElement | null;
-      pageNode?.scrollIntoView({ block: "center", behavior: "smooth" });
+      if (pageNode) {
+        pageNode.scrollIntoView({ block: "center", behavior: "smooth" });
+        return;
+      }
+
+      handlePageJump(activeMatch.pageIndex + 1);
     });
 
     return () => window.cancelAnimationFrame(frameId);
-  }, [activeSearchIndex, searchMatches]);
+  }, [activeSearchIndex, handlePageJump, searchMatches]);
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-50">
       {/* ── Top title-bar / tab strip ── */}
-      <div 
+      <div
         data-tauri-drag-region="true"
-        className="h-[36px] flex items-center border-b border-zinc-200 bg-zinc-200/40 shrink-0 select-none"
+        className="h-[36px] flex items-center border-b border-zinc-200 dark:border-zinc-800 bg-zinc-200/40 dark:bg-zinc-900/80 shrink-0 select-none"
       >
         {/* Left: traffic-light gap (draggable) */}
         <div 
@@ -612,8 +640,8 @@ function App() {
               "group flex items-center gap-1.5 px-4 h-[26px] min-w-[80px]",
               "rounded-md text-[12px] font-medium transition-colors relative cursor-default",
               isLibrary
-                ? "bg-white shadow-sm border border-zinc-200/60 text-zinc-900 z-10"
-                : "bg-transparent border border-transparent text-zinc-500 hover:bg-zinc-200/60 hover:text-zinc-700",
+                ? "bg-white dark:bg-zinc-950 shadow-sm border border-zinc-200/60 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 z-10"
+                : "bg-transparent border border-transparent text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800/80 hover:text-zinc-700 dark:hover:text-zinc-100",
             ].join(" ")}
           >
             <span className="truncate flex-1">Library</span>
@@ -624,6 +652,11 @@ function App() {
             return (
               <div
                 key={tab.id}
+                onMouseEnter={() => {
+                  void preloadPdfCoreRuntime();
+                  const nextPdfPath = tab.item.attachments?.[0]?.path || tab.id;
+                  void preloadPdfDocument(nextPdfPath);
+                }}
                 onClick={() => {
                   setActiveTabId(tab.id);
                   setSelectedItemId(tab.id);
@@ -632,8 +665,8 @@ function App() {
                   "group flex items-center gap-1.5 px-3 h-[26px] min-w-[100px] max-w-[180px]",
                   "rounded-md text-[12px] font-medium transition-colors relative cursor-default",
                   isActive
-                    ? "bg-white shadow-sm border border-zinc-200/60 text-zinc-900 z-10"
-                    : "bg-transparent border border-transparent text-zinc-500 hover:bg-zinc-200/60 hover:text-zinc-700",
+                    ? "bg-white dark:bg-zinc-950 shadow-sm border border-zinc-200/60 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 z-10"
+                    : "bg-transparent border border-transparent text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800/80 hover:text-zinc-700 dark:hover:text-zinc-100",
                 ].join(" ")}
               >
                 
@@ -646,7 +679,7 @@ function App() {
                     e.stopPropagation();
                     handleCloseTab(tab.id, e);
                   }}
-                  className="shrink-0 p-0.5 rounded-sm hover:bg-zinc-300 text-zinc-400 hover:text-zinc-600 transition-colors"
+                  className="shrink-0 p-0.5 rounded-sm hover:bg-zinc-300 dark:hover:bg-zinc-800 text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
                 >
                   <X size={12} />
                 </button>
@@ -672,6 +705,7 @@ function App() {
               onToggleCollapse={() => setIsSidebarCollapsed(prev => !prev)}
               selectedFolderId={selectedFolderId}
               onSelectFolder={id => { setSelectedFolderId(id); setSelectedTagFilter(null); }}
+              trashCount={trashItems.length}
               onAddFolder={handleAddFolder}
               onRenameFolder={handleRenameFolder}
               onDeleteFolder={handleDeleteFolder}
@@ -701,12 +735,16 @@ function App() {
             />
             <LibraryView 
               folderTree={folderTree}
+              trashItems={trashItems}
+              isTrashView={isTrashSelected}
               selectedFolderId={selectedFolderId}
               selectedItemId={selectedItemId}
               onSelectItem={setSelectedItemId}
               onOpenItem={handleOpenItem}
               onAddItem={handleAddItem}
               onDeleteItem={handleDeleteItem}
+              onRestoreItem={handleRestoreTrashItem}
+              onEmptyTrash={handleEmptyTrash}
               onRenameItem={handleRenameItem}
               onUpdateItemTags={handleUpdateItemTags}
               onItemPointerDown={handleItemPointerDown}
@@ -716,53 +754,61 @@ function App() {
           </div>
         ) : (
           <div className="flex flex-1 min-w-0 relative view-enter" key="pdf-view">
-            <AIPanel
-              selectedItem={selectedItem}
-              isOpen={isAiPanelOpen}
-              onClose={() => setIsAiPanelOpen(false)}
-              width={aiPanelWidth}
-              onResizeStart={(event) => startPanelResize(event, "left")}
-            />
+            {arePdfSidebarsReady && (
+              <Suspense fallback={null}>
+                <AIPanel
+                  selectedItem={selectedItem}
+                  isOpen={isAiPanelOpen}
+                  onClose={() => setIsAiPanelOpen(false)}
+                  width={aiPanelWidth}
+                  onResizeStart={(event) => startPanelResize(event, "left")}
+                />
+              </Suspense>
+            )}
             <div className="flex flex-col flex-1 min-w-0 relative">
-              <Toolbar
-                onZoomIn={zoomIn}
-                onZoomOut={zoomOut}
-                scale={scale}
-                hasPdf={!!pdfPath}
-                activeTool={activeTool}
-                onToolChange={setActiveTool}
-                isAiPanelOpen={isAiPanelOpen}
-                onToggleAiPanel={() => setIsAiPanelOpen(v => !v)}
-                isRightPanelOpen={isRightPanelOpen}
-                onToggleRightPanel={() => setIsRightPanelOpen(v => !v)}
-                onFitWidth={fitWidth}
-                onFitHeight={fitHeight}
-                currentPage={currentPage}
-                totalPages={totalPages}
-                onPageJump={handlePageJump}
-              />
+              <Suspense fallback={<div className="h-14 shrink-0 border-b border-zinc-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-950/95" />}>
+                <Toolbar
+                  onZoomIn={zoomIn}
+                  onZoomOut={zoomOut}
+                  scale={scale}
+                  hasPdf={!!pdfPath}
+                  activeTool={activeTool}
+                  onToolChange={setActiveTool}
+                  isAiPanelOpen={isAiPanelOpen}
+                  onToggleAiPanel={() => setIsAiPanelOpen(v => !v)}
+                  isRightPanelOpen={isRightPanelOpen}
+                  onToggleRightPanel={() => setIsRightPanelOpen(v => !v)}
+                  onFitWidth={fitWidth}
+                  onFitHeight={fitHeight}
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageJump={handlePageJump}
+                />
+              </Suspense>
 
               <main ref={mainRef} className="flex-1 overflow-y-hidden relative flex justify-center canvas-pattern">
                 {showSearch && (
-                  <SearchBar
-                    value={searchInput}
-                    totalMatches={searchInput.trim() === searchTerm ? searchMatches.length : 0}
-                    activeMatchIndex={searchInput.trim() === searchTerm ? activeSearchIndex : -1}
-                    isSearching={isSearchLoading}
-                    onValueChange={handleSearchInputChange}
-                    onSearch={handleDocumentSearch}
-                    onClose={() => {
-                      clearSearchState();
-                      setShowSearch(false);
-                    }}
-                  />
+                  <Suspense fallback={null}>
+                    <SearchBar
+                      value={searchInput}
+                      totalMatches={searchInput.trim() === searchTerm ? searchMatches.length : 0}
+                      activeMatchIndex={searchInput.trim() === searchTerm ? activeSearchIndex : -1}
+                      isSearching={isSearchLoading}
+                      onValueChange={handleSearchInputChange}
+                      onSearch={handleDocumentSearch}
+                      onClose={() => {
+                        clearSearchState();
+                        setShowSearch(false);
+                      }}
+                    />
+                  </Suspense>
                 )}
                 {/* Main Content Area */}
                 {isLoading && (
-                  <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-200/50 backdrop-blur-sm animate-fade-in">
+                  <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-200/50 dark:bg-zinc-950/70 backdrop-blur-sm animate-fade-in">
                     <div className="flex flex-col items-center space-y-4">
-                      <div className="w-8 h-8 border-2 border-zinc-400 border-t-zinc-600 rounded-full animate-spin" />
-                      <div className="text-sm font-medium text-zinc-600">{t("app.loading.switchingDocument")}</div>
+                      <div className="w-8 h-8 border-2 border-zinc-400 dark:border-zinc-600 border-t-zinc-600 dark:border-t-zinc-200 rounded-full animate-spin" />
+                      <div className="text-sm font-medium text-zinc-600 dark:text-zinc-300">{t("app.loading.switchingDocument")}</div>
                     </div>
                   </div>
                 )}
@@ -770,21 +816,33 @@ function App() {
                   <div 
                     key={tab.id}
                     ref={tab.id === activeTabId ? activePdfScrollRef : null}
-                    className={`flex-1 w-full bg-zinc-200/50 overflow-y-auto min-h-0 absolute inset-0 ${tab.id === activeTabId ? 'block' : 'hidden'}`} 
-                    onScroll={handleScroll}
+                    className={`flex-1 w-full bg-zinc-200/50 dark:bg-zinc-950 overflow-y-auto min-h-0 absolute inset-0 ${tab.id === activeTabId ? 'block' : 'hidden'}`}
                   >
-                    <PdfViewer 
-                      tabId={tab.id}
-                      pdfPath={tab.item.attachments?.[0]?.path || ""}
-                      totalPages={tab.totalPages} 
-                      dimensions={tab.dimensions} 
-                      scale={scale} 
-                      activeTool={activeTool}
-                      currentPage={tab.currentPage}
-                      searchMatches={tab.id === activeTabId ? searchMatches : []}
-                      activeSearchIndex={tab.id === activeTabId ? activeSearchIndex : -1}
-                      onAnnotationsSaved={handleAnnotationsSaved}
-                    />
+                    <Suspense
+                      fallback={
+                        <div className="flex min-h-full items-center justify-center bg-zinc-200/50 dark:bg-zinc-950">
+                          <div className="flex flex-col items-center space-y-3 text-zinc-500 dark:text-zinc-400">
+                            <div className="h-7 w-7 rounded-full border-2 border-zinc-300 dark:border-zinc-700 border-t-zinc-600 dark:border-t-zinc-200 animate-spin" />
+                            <div className="text-sm font-medium">{t("app.loading.switchingDocument")}</div>
+                          </div>
+                        </div>
+                      }
+                    >
+                      <PdfViewer 
+                        tabId={tab.id}
+                        pdfPath={tab.item.attachments?.[0]?.path || ""}
+                        totalPages={tab.totalPages} 
+                        dimensions={tab.dimensions} 
+                        scale={scale} 
+                        activeTool={activeTool}
+                        currentPage={tab.currentPage}
+                        searchMatches={tab.id === activeTabId ? searchMatches : []}
+                        activeSearchIndex={tab.id === activeTabId ? activeSearchIndex : -1}
+                        onDimensionResolved={updatePageDimension}
+                        onCurrentPageChange={tab.id === activeTabId ? handleVisiblePageChange : undefined}
+                        onAnnotationsSaved={handleAnnotationsSaved}
+                      />
+                    </Suspense>
                   </div>
                 ))}
               </main>
@@ -792,21 +850,23 @@ function App() {
           </div>
         )}
 
-        {!isLibrary && (
-          <MetaPanel
-            selectedItem={selectedItem}
-            isOpen={isRightPanelOpen}
-            onClose={() => setIsRightPanelOpen(false)}
-            width={rightPanelWidth}
-            onResizeStart={(event) => startPanelResize(event, "right")}
-            tagColors={tagColors}
-            onItemUpdated={() => {
-              handleItemUpdatedLocally();
-              refreshAllTags();
-            }}
-            onPageJump={handlePageJump}
-            annotationsRefreshKey={annotationsRefreshKey}
-          />
+        {!isLibrary && arePdfSidebarsReady && (
+          <Suspense fallback={null}>
+            <MetaPanel
+              selectedItem={selectedItem}
+              isOpen={isRightPanelOpen}
+              onClose={() => setIsRightPanelOpen(false)}
+              width={rightPanelWidth}
+              onResizeStart={(event) => startPanelResize(event, "right")}
+              tagColors={tagColors}
+              onItemUpdated={() => {
+                handleItemUpdatedLocally();
+                refreshAllTags();
+              }}
+              onPageJump={handlePageJump}
+              annotationsRefreshKey={annotationsRefreshKey}
+            />
+          </Suspense>
         )}
       </div>
       

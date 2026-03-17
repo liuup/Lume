@@ -7,6 +7,21 @@ use rusqlite::{Connection, Result as SqlResult};
 
 use crate::library_commands::library_root_dir;
 
+fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> SqlResult<()> {
+    let pragma = format!("PRAGMA table_info({})", table);
+    let mut stmt = conn.prepare(&pragma)?;
+    let exists = stmt.query_map([], |row| row.get::<_, String>(1))?
+        .filter_map(Result::ok)
+        .any(|name| name == column);
+
+    if !exists {
+        let alter = format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, definition);
+        conn.execute(&alter, [])?;
+    }
+
+    Ok(())
+}
+
 pub fn ensure_schema(conn: &Connection) -> SqlResult<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS items (
@@ -28,10 +43,19 @@ pub fn ensure_schema(conn: &Connection) -> SqlResult<()> {
             language TEXT,
             date_added TEXT,
             date_modified TEXT,
-            folder_path TEXT
+            folder_path TEXT,
+            is_trashed INTEGER NOT NULL DEFAULT 0,
+            original_path TEXT,
+            original_folder_path TEXT,
+            trashed_at TEXT
         )",
         [],
     )?;
+
+    ensure_column(conn, "items", "is_trashed", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_column(conn, "items", "original_path", "TEXT")?;
+    ensure_column(conn, "items", "original_folder_path", "TEXT")?;
+    ensure_column(conn, "items", "trashed_at", "TEXT")?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS attachments (
@@ -79,6 +103,21 @@ pub fn ensure_schema(conn: &Connection) -> SqlResult<()> {
         "CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
+        )",
+        [],
+    )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ai_paper_summary_cache (
+            item_id TEXT NOT NULL,
+            language TEXT NOT NULL,
+            model TEXT NOT NULL,
+            prompt_key TEXT NOT NULL,
+            file_size INTEGER NOT NULL DEFAULT 0,
+            modified_unix_ms INTEGER NOT NULL DEFAULT 0,
+            summary_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (item_id, language, model, prompt_key)
         )",
         [],
     )?;

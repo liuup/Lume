@@ -199,6 +199,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
   const [isEditing, setIsEditing] = useState(false);
   const [editFormData, setEditFormData] = useState<Partial<LibraryItem>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [isRetrievingMetadata, setIsRetrievingMetadata] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const tagInputRef = useRef<HTMLInputElement>(null);
 
@@ -402,6 +403,32 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
       });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleRetrieveMetadata = async () => {
+    if (!selectedItem || isEditing) return;
+
+    setIsRetrievingMetadata(true);
+    try {
+      await invoke<LibraryItem>("retrieve_item_metadata", {
+        itemId: selectedItem.id,
+      });
+      if (onItemUpdated) {
+        onItemUpdated();
+      }
+      feedback.success({
+        title: t("feedback.meta.retrieveSuccess.title"),
+        description: t("feedback.meta.retrieveSuccess.description"),
+      });
+    } catch (error) {
+      console.error("Failed to retrieve item metadata", error);
+      feedback.error({
+        title: t("feedback.meta.retrieveError.title"),
+        description: t("feedback.meta.retrieveError.description"),
+      });
+    } finally {
+      setIsRetrievingMetadata(false);
     }
   };
 
@@ -610,14 +637,25 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                  {isSaving ? t("metaPanel.actions.saving") : t("metaPanel.actions.save")}
                </button>
             ) : (
-               <button
-                 onClick={() => setIsEditing(true)}
-                 className="p-1.5 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 rounded-md transition-colors flex items-center gap-1 text-xs font-medium"
-                 title={t("metaPanel.actions.editMetadata")}
-               >
-                 <Edit2 size={14} />
-                 {t("metaPanel.actions.edit")}
-               </button>
+              <>
+                <button
+                  onClick={handleRetrieveMetadata}
+                  disabled={isRetrievingMetadata}
+                  className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors flex items-center gap-1 text-xs font-medium disabled:cursor-wait disabled:text-indigo-300"
+                  title={t("metaPanel.actions.retrieveMetadata")}
+                >
+                  {isRetrievingMetadata ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+                  {isRetrievingMetadata ? t("metaPanel.actions.retrievingMetadata") : t("metaPanel.actions.retrieve")}
+                </button>
+                <button
+                  onClick={() => setIsEditing(true)}
+                  className="p-1.5 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 rounded-md transition-colors flex items-center gap-1 text-xs font-medium"
+                  title={t("metaPanel.actions.editMetadata")}
+                >
+                  <Edit2 size={14} />
+                  {t("metaPanel.actions.edit")}
+                </button>
+              </>
             )
           )}
           <button

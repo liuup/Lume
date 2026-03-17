@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use crate::models::{
     CrossrefAuthor, CrossrefSearchResponse, CrossrefWorkMessage, CrossrefWorkResponse,
-    ParsedPdfMetadata,
+    LibraryItem, ParsedPdfMetadata,
 };
 
 static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
@@ -382,6 +382,9 @@ pub fn merge_arxiv_metadata(target: &mut ParsedPdfMetadata, incoming: ParsedPdfM
     overwrite_if_present(&mut target.r#abstract, incoming.r#abstract);
     overwrite_if_present(&mut target.arxiv_id, incoming.arxiv_id);
     fill_if_missing(&mut target.doi, incoming.doi);
+    fill_if_missing(&mut target.publication, incoming.publication);
+    fill_if_missing(&mut target.publisher, incoming.publisher);
+    fill_if_missing(&mut target.url, incoming.url);
 }
 
 pub fn merge_crossref_metadata(target: &mut ParsedPdfMetadata, incoming: ParsedPdfMetadata) {
@@ -390,6 +393,13 @@ pub fn merge_crossref_metadata(target: &mut ParsedPdfMetadata, incoming: ParsedP
     overwrite_if_present(&mut target.year, incoming.year);
     overwrite_if_present(&mut target.doi, incoming.doi);
     fill_if_missing(&mut target.r#abstract, incoming.r#abstract);
+    overwrite_if_present(&mut target.publication, incoming.publication);
+    overwrite_if_present(&mut target.volume, incoming.volume);
+    overwrite_if_present(&mut target.issue, incoming.issue);
+    overwrite_if_present(&mut target.pages, incoming.pages);
+    overwrite_if_present(&mut target.publisher, incoming.publisher);
+    overwrite_if_present(&mut target.url, incoming.url);
+    overwrite_if_present(&mut target.language, incoming.language);
 }
 
 pub fn normalize_title_for_match(value: &str) -> String {
@@ -496,6 +506,14 @@ pub fn parse_arxiv_entry(block: &str) -> ParsedPdfMetadata {
         r#abstract: summary,
         doi,
         arxiv_id,
+        publication: Some("arXiv".to_string()),
+        volume: None,
+        issue: None,
+        pages: None,
+        publisher: Some("Cornell University".to_string()),
+        isbn: None,
+        url: extract_xml_tag_value(block, "id"),
+        language: None,
     }
 }
 
@@ -568,6 +586,41 @@ pub fn crossref_message_to_metadata(message: CrossrefWorkMessage) -> ParsedPdfMe
         .map(|value| clean_abstract_text(value))
         .filter(|value| is_plausible_abstract(value));
     let doi = normalize_doi(&message.doi);
+    let publication = message
+        .container_title
+        .iter()
+        .map(|value| clean_title_text(value))
+        .find(|value| !value.is_empty());
+    let volume = message
+        .volume
+        .as_deref()
+        .map(clean_title_text)
+        .filter(|value| !value.is_empty());
+    let issue = message
+        .issue
+        .as_deref()
+        .map(clean_title_text)
+        .filter(|value| !value.is_empty());
+    let pages = message
+        .page
+        .as_deref()
+        .map(clean_title_text)
+        .filter(|value| !value.is_empty());
+    let publisher = message
+        .publisher
+        .as_deref()
+        .map(clean_title_text)
+        .filter(|value| !value.is_empty());
+    let url = message
+        .url
+        .as_deref()
+        .map(clean_title_text)
+        .filter(|value| !value.is_empty());
+    let language = message
+        .language
+        .as_deref()
+        .map(clean_title_text)
+        .filter(|value| !value.is_empty());
 
     ParsedPdfMetadata {
         title,
@@ -576,6 +629,14 @@ pub fn crossref_message_to_metadata(message: CrossrefWorkMessage) -> ParsedPdfMe
         r#abstract: abstract_text,
         doi,
         arxiv_id: None,
+        publication,
+        volume,
+        issue,
+        pages,
+        publisher,
+        isbn: None,
+        url,
+        language,
     }
 }
 
@@ -741,4 +802,213 @@ pub fn update_item_metadata(
     }
 
     Ok(())
+}
+
+fn has_meaningful_metadata(meta: &ParsedPdfMetadata) -> bool {
+    [
+        meta.title.as_deref(),
+        meta.authors.as_deref(),
+        meta.r#abstract.as_deref(),
+        meta.doi.as_deref(),
+        meta.arxiv_id.as_deref(),
+        meta.publication.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| !value.trim().is_empty())
+}
+
+fn pick_metadata_value(current: &str, incoming: &Option<String>) -> String {
+    incoming
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(current)
+        .to_string()
+}
+
+fn merge_item_with_parsed_metadata(current: &LibraryItem, parsed: &ParsedPdfMetadata) -> LibraryItem {
+    LibraryItem {
+        id: current.id.clone(),
+        item_type: current.item_type.clone(),
+        title: pick_metadata_value(&current.title, &parsed.title),
+        authors: pick_metadata_value(&current.authors, &parsed.authors),
+        year: pick_metadata_value(&current.year, &parsed.year),
+        r#abstract: pick_metadata_value(&current.r#abstract, &parsed.r#abstract),
+        doi: pick_metadata_value(&current.doi, &parsed.doi),
+        arxiv_id: pick_metadata_value(&current.arxiv_id, &parsed.arxiv_id),
+        publication: pick_metadata_value(&current.publication, &parsed.publication),
+        volume: pick_metadata_value(&current.volume, &parsed.volume),
+        issue: pick_metadata_value(&current.issue, &parsed.issue),
+        pages: pick_metadata_value(&current.pages, &parsed.pages),
+        publisher: pick_metadata_value(&current.publisher, &parsed.publisher),
+        isbn: pick_metadata_value(&current.isbn, &parsed.isbn),
+        url: pick_metadata_value(&current.url, &parsed.url),
+        language: pick_metadata_value(&current.language, &parsed.language),
+        date_added: current.date_added.clone(),
+        date_modified: current.date_modified.clone(),
+        folder_path: current.folder_path.clone(),
+        tags: current.tags.clone(),
+        attachments: current.attachments.clone(),
+    }
+}
+
+#[tauri::command]
+pub fn retrieve_item_metadata(
+    item_id: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<LibraryItem, String> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|e| format!("Database lock error: {}", e))?;
+
+    let current_item = crate::library_commands::fetch_item_from_db(&conn, &item_id)
+        .map_err(|e| format!("Failed to load current item: {}", e))?
+        .ok_or("Item not found".to_string())?;
+
+    let pdf_path = current_item
+        .attachments
+        .iter()
+        .find(|attachment| attachment.attachment_type.eq_ignore_ascii_case("PDF"))
+        .map(|attachment| attachment.path.clone())
+        .unwrap_or_else(|| current_item.id.clone());
+
+    let pdf_path_buf = std::path::PathBuf::from(&pdf_path);
+    if !pdf_path_buf.exists() {
+        return Err("PDF file does not exist".to_string());
+    }
+
+    crate::library_commands::remove_cached_pdf_metadata(&pdf_path_buf);
+    let parsed = crate::library_commands::resolve_pdf_metadata(&pdf_path_buf);
+    if !has_meaningful_metadata(&parsed) {
+        return Err("No metadata could be identified for this PDF".to_string());
+    }
+
+    let merged = merge_item_with_parsed_metadata(&current_item, &parsed);
+
+    conn.execute(
+        "UPDATE items SET title = ?1, authors = ?2, year = ?3, abstract = ?4, doi = ?5, arxiv_id = ?6, publication = ?7, volume = ?8, issue = ?9, pages = ?10, publisher = ?11, isbn = ?12, url = ?13, language = ?14, date_modified = datetime('now') WHERE id = ?15",
+        rusqlite::params![
+            merged.title,
+            merged.authors,
+            merged.year,
+            merged.r#abstract,
+            merged.doi,
+            merged.arxiv_id,
+            merged.publication,
+            merged.volume,
+            merged.issue,
+            merged.pages,
+            merged.publisher,
+            merged.isbn,
+            merged.url,
+            merged.language,
+            merged.id,
+        ],
+    )
+    .map_err(|e| format!("Failed to update item metadata: {}", e))?;
+
+    crate::library_commands::fetch_item_from_db(&conn, &item_id)
+        .map_err(|e| format!("Failed to reload item metadata: {}", e))?
+        .ok_or("Updated item not found".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{crossref_message_to_metadata, merge_item_with_parsed_metadata};
+    use crate::models::{CrossrefWorkMessage, LibraryAttachment, LibraryItem, ParsedPdfMetadata};
+
+    fn sample_item() -> LibraryItem {
+        LibraryItem {
+            id: "paper-1".to_string(),
+            item_type: "Journal Article".to_string(),
+            title: "Fallback Title".to_string(),
+            authors: "Existing Author".to_string(),
+            year: "2023".to_string(),
+            r#abstract: "".to_string(),
+            doi: "".to_string(),
+            arxiv_id: "".to_string(),
+            publication: "".to_string(),
+            volume: "".to_string(),
+            issue: "".to_string(),
+            pages: "".to_string(),
+            publisher: "".to_string(),
+            isbn: "".to_string(),
+            url: "".to_string(),
+            language: "".to_string(),
+            date_added: "1710000000".to_string(),
+            date_modified: "1710000000".to_string(),
+            folder_path: "root".to_string(),
+            tags: vec!["ml".to_string()],
+            attachments: vec![LibraryAttachment {
+                id: "att-paper-1".to_string(),
+                item_id: "paper-1".to_string(),
+                name: "paper".to_string(),
+                path: "/tmp/paper.pdf".to_string(),
+                attachment_type: "PDF".to_string(),
+            }],
+        }
+    }
+
+    #[test]
+    fn crossref_message_to_metadata_extracts_extended_fields() {
+        let message = CrossrefWorkMessage {
+            title: vec!["Attention Is All You Need".to_string()],
+            container_title: vec!["NeurIPS".to_string()],
+            author: vec![],
+            published_print: None,
+            published_online: None,
+            created: None,
+            issued: None,
+            abstract_field: Some("<jats:p>Sequence models are powerful.</jats:p>".to_string()),
+            doi: "10.5555/test-doi".to_string(),
+            volume: Some("30".to_string()),
+            issue: Some("1".to_string()),
+            page: Some("100-110".to_string()),
+            publisher: Some("Curran Associates".to_string()),
+            url: Some("https://example.com/paper".to_string()),
+            language: Some("en".to_string()),
+        };
+
+        let parsed = crossref_message_to_metadata(message);
+
+        assert_eq!(parsed.publication.as_deref(), Some("NeurIPS"));
+        assert_eq!(parsed.volume.as_deref(), Some("30"));
+        assert_eq!(parsed.issue.as_deref(), Some("1"));
+        assert_eq!(parsed.pages.as_deref(), Some("100-110"));
+        assert_eq!(parsed.publisher.as_deref(), Some("Curran Associates"));
+        assert_eq!(parsed.url.as_deref(), Some("https://example.com/paper"));
+        assert_eq!(parsed.language.as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn merge_item_with_parsed_metadata_preserves_existing_values_when_missing() {
+        let item = sample_item();
+        let parsed = ParsedPdfMetadata {
+            title: Some("Updated Title".to_string()),
+            authors: None,
+            year: Some("2024".to_string()),
+            r#abstract: Some("New abstract".to_string()),
+            doi: Some("10.1000/example".to_string()),
+            arxiv_id: None,
+            publication: Some("Journal of Testing".to_string()),
+            volume: None,
+            issue: None,
+            pages: None,
+            publisher: None,
+            isbn: None,
+            url: Some("https://example.com".to_string()),
+            language: None,
+        };
+
+        let merged = merge_item_with_parsed_metadata(&item, &parsed);
+
+        assert_eq!(merged.title, "Updated Title");
+        assert_eq!(merged.authors, "Existing Author");
+        assert_eq!(merged.year, "2024");
+        assert_eq!(merged.publication, "Journal of Testing");
+        assert_eq!(merged.url, "https://example.com");
+        assert_eq!(merged.tags, vec!["ml".to_string()]);
+    }
 }

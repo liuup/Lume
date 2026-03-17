@@ -92,12 +92,30 @@
       },
       "item": {
         "deleteSuccess": {
-          "title": "Item deleted",
-          "description": "Removed {title} from the library."
+          "title": "Moved to trash",
+          "description": "{title} was moved to the trash."
         },
         "deleteError": {
           "title": "Failed to delete item",
           "description": "The selected item could not be deleted."
+        },
+        "trash": {
+          "restoreSuccess": {
+            "title": "Item restored",
+            "description": "{title} was restored from the trash."
+          },
+          "restoreError": {
+            "title": "Failed to restore item",
+            "description": "The selected item could not be restored from the trash."
+          },
+          "emptySuccess": {
+            "title": "Trash emptied",
+            "description": "All trashed items were permanently removed."
+          },
+          "emptyError": {
+            "title": "Failed to empty trash",
+            "description": "The trash could not be emptied."
+          }
         },
         "renameSuccess": {
           "title": "Item renamed",
@@ -147,6 +165,14 @@
       "saveError": {
         "title": "Failed to save metadata",
         "description": "Your metadata changes could not be saved."
+      },
+      "retrieveSuccess": {
+        "title": "Metadata updated",
+        "description": "The latest metadata was retrieved for this PDF."
+      },
+      "retrieveError": {
+        "title": "Metadata lookup failed",
+        "description": "No new metadata could be retrieved for this PDF."
       },
       "noteSaveSuccess": {
         "title": "Note saved",
@@ -212,7 +238,8 @@
       "language": "Language & Region",
       "library": "Library & File Management",
       "export": "Export & Integrations",
-      "ai": "AI"
+      "ai": "AI",
+      "about": "About"
     },
     "theme": {
       "label": "Theme",
@@ -221,6 +248,14 @@
       "light": "Light",
       "dark": "Dark",
       "auto": "Auto"
+    },
+    "fontScale": {
+      "label": "Interface font size",
+      "description": "Adjust the overall text and component scale across the app",
+      "small": "Small",
+      "medium": "Medium",
+      "large": "Large",
+      "extraLarge": "XL"
     },
     "defaultPdfZoom": {
       "label": "Default PDF Zoom",
@@ -271,11 +306,33 @@
         "description": "Language used for generated paper summaries",
         "placeholder": "zh-CN"
       },
+      "summarySystemPrompt": {
+        "label": "Summary system prompt",
+        "description": "Controls the instruction template used for paper summary generation and cache invalidation",
+        "placeholder": "You summarize academic papers..."
+      },
+      "translateEngine": {
+        "label": "Translation engine",
+        "description": "Use Google Translate by default, or switch to your configured LLM",
+        "google": "Google Translate",
+        "llm": "LLM"
+      },
       "translateLanguage": {
         "label": "Translation target",
         "description": "Target language for automatic selection translation",
         "placeholder": "zh-CN"
+      },
+      "translateSystemPrompt": {
+        "label": "Translation system prompt",
+        "description": "Only used when the translation engine is set to LLM",
+        "placeholder": "You are a precise academic translator..."
       }
+    },
+    "about": {
+      "tagline": "AI-native, lighting-fast academic paper organizer",
+      "version": "App Version",
+      "repository": "Open-source Repository",
+      "openRepository": "Open on GitHub"
     },
     "citationFormats": {
       "apa": "APA",
@@ -324,7 +381,9 @@
     "actions": {
       "export": "Export",
       "exportTitle": "Export references",
-      "addItem": "Add Library Item"
+      "addItem": "Add Library Item",
+      "emptyTrash": "Empty Trash",
+      "emptyTrashTitle": "Permanently remove all trashed items"
     },
     "scope": {
       "searching": "Searching entire library…",
@@ -346,7 +405,8 @@
     "context": {
       "rename": "Rename Item",
       "editTags": "Edit Tags",
-      "delete": "Delete Item"
+      "delete": "Delete Item",
+      "restore": "Restore"
     },
     "tagDialog": {
       "title": "Edit Item Tags",
@@ -393,7 +453,8 @@
       "violet": "Violet"
     },
     "labels": {
-      "currentFolder": "Current folder"
+      "currentFolder": "Current folder",
+      "trash": "Trash"
     },
     "actions": {
       "newFolder": "New Folder",
@@ -518,6 +579,9 @@
       "saving": "Saving",
       "savingWithDots": "Saving...",
       "save": "Save",
+      "retrieve": "Retrieve",
+      "retrieveMetadata": "Retrieve metadata",
+      "retrievingMetadata": "Retrieving...",
       "edit": "Edit",
       "editMetadata": "Edit metadata",
       "cancelEdit": "Cancel edit",

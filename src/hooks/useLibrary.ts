@@ -13,16 +13,28 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useFeedback } from "./useFeedback";
 import { useI18n } from "./useI18n";
-import { 
+import {
   CliLibraryChangedPayload,
   CliOpenRequest,
   FolderNode, 
   LibraryItem, 
   OpenTab, 
   PageDimension, 
-  DEFAULT_FOLDER 
+  DEFAULT_FOLDER,
+  TRASH_FOLDER_ID,
 } from "../types";
-import { clearCacheForPdf } from "../components/PdfViewer";
+import { clearCacheForPdf } from "../components/pdfCacheRegistry";
+import { preloadPdfDocument } from "../components/pdfDocumentRuntime";
+import { preloadPdfCoreRuntime } from "../components/pdfRuntime";
+
+const DEFAULT_PAGE_DIMENSION: PageDimension = {
+  width: 612,
+  height: 792,
+};
+
+function createPlaceholderDimensions(totalPages: number): PageDimension[] {
+  return Array.from({ length: Math.max(totalPages, 0) }, () => ({ ...DEFAULT_PAGE_DIMENSION }));
+}
 
 export function useLibrary() {
   const feedback = useFeedback();
@@ -31,6 +43,7 @@ export function useLibrary() {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
 
   const [folderTree, setFolderTree] = useState<FolderNode[]>([DEFAULT_FOLDER]);
+  const [trashItems, setTrashItems] = useState<LibraryItem[]>([]);
   const [selectedFolderId, setSelectedFolderId] = useState<string>(DEFAULT_FOLDER.id);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -43,42 +56,16 @@ export function useLibrary() {
   const currentPage = activeTab?.currentPage || 1;
 
   // Sync background Rust PDF context when switching tabs.
-  // Also re-fetch dimensions if they are somehow missing (guards against white screen).
+  // Keep the Rust-side document loaded for commands that still depend on backend PDF context.
   useEffect(() => {
     if (!pdfPath) return;
     let isMounted = true;
     (async () => {
       try {
-        setIsLoading(true);
         await invoke("load_pdf", { path: pdfPath });
         if (!isMounted) return;
-
-        // If the active tab has no dimensions (e.g. data was lost), re-fetch them now.
-        // Use functional setState to read latest tabs without needing openTabs in deps.
-        let needsDimRecovery = false;
-        setOpenTabs(tabs => {
-          const tab = tabs.find(t => t.item.attachments?.[0]?.path === pdfPath || t.item.id === pdfPath);
-          needsDimRecovery = !!tab && tab.dimensions.length === 0;
-          return tabs; // no mutation
-        });
-        if (needsDimRecovery) {
-          try {
-            const dims = await invoke<PageDimension[]>("get_pdf_dimensions", { path: pdfPath });
-            if (!isMounted) return;
-            setOpenTabs(tabs => tabs.map(t =>
-              (t.item.attachments?.[0]?.path === pdfPath || t.item.id === pdfPath)
-                ? { ...t, dimensions: dims }
-                : t
-            ));
-          } catch (err) {
-            console.error("Failed to recover PDF dimensions", err);
-          }
-        }
-
-        if (isMounted) setIsLoading(false);
       } catch (err) {
         console.error("Failed to switch PDF context", err);
-        if (isMounted) setIsLoading(false);
       }
     })();
     return () => { isMounted = false; };
@@ -165,12 +152,19 @@ export function useLibrary() {
   }
 
   async function refreshLibrary(preferredFolderId?: string) {
-    const tree = await invoke<FolderNode[]>("load_library_tree");
+    const [tree, nextTrashItems] = await Promise.all([
+      invoke<FolderNode[]>("load_library_tree"),
+      invoke<LibraryItem[]>("load_trash_items"),
+    ]);
     setFolderTree(tree);
+    setTrashItems(nextTrashItems);
 
     const rootId = tree[0]?.id ?? DEFAULT_FOLDER.id;
     setSelectedFolderId(prev => {
       const nextId = preferredFolderId ?? prev;
+      if (nextId === TRASH_FOLDER_ID) {
+        return TRASH_FOLDER_ID;
+      }
       return nextId && findFolder(tree, nextId) ? nextId : rootId;
     });
     return tree;
@@ -263,12 +257,13 @@ export function useLibrary() {
       });
       if (selected && typeof selected === "string") {
         setIsLoading(true);
+        void preloadPdfCoreRuntime();
         const importedPath: string = await invoke("import_pdf_to_folder", {
           sourcePath: selected,
           folderPath: targetFolder.path,
         });
+        void preloadPdfDocument(importedPath);
         const pages: number = await invoke("load_pdf", { path: importedPath });
-        const dims: PageDimension[] = await invoke("get_pdf_dimensions", { path: importedPath });
         const refreshedTree = await refreshLibrary(targetFolder.id);
         const newItem = findItem(refreshedTree, importedPath) ?? createLibraryItem(importedPath);
         
@@ -278,7 +273,7 @@ export function useLibrary() {
             id: newItem.id,
             item: newItem,
             totalPages: pages,
-            dimensions: dims,
+            dimensions: createPlaceholderDimensions(pages),
             currentPage: 1
           }];
         });
@@ -308,14 +303,15 @@ export function useLibrary() {
     try {
       setIsLoading(true);
       const pdfPath = item.attachments?.[0]?.path || item.id;
+      void preloadPdfCoreRuntime();
+      void preloadPdfDocument(pdfPath);
       const pages: number = await invoke("load_pdf", { path: pdfPath });
-      const dims: PageDimension[] = await invoke("get_pdf_dimensions", { path: pdfPath });
       
       setOpenTabs(prev => [...prev, {
         id: item.id,
         item,
         totalPages: pages,
-        dimensions: dims,
+        dimensions: createPlaceholderDimensions(pages),
         currentPage: 1
       }]);
       setActiveTabId(item.id);
@@ -349,16 +345,48 @@ export function useLibrary() {
 
   const handlePageJump = (page: number) => {
     if (!activeTabId || activeTabId === "library") return;
+    setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, currentPage: page } : t));
+
     const pageElementId = `pdf-page-${encodeURIComponent(activeTabId)}-${page}`;
-    const el = document.getElementById(pageElementId);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-      setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, currentPage: page } : t));
-    }
+    const scrollIntoTarget = (retriesLeft: number) => {
+      const el = document.getElementById(pageElementId);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+
+      if (retriesLeft > 0) {
+        window.requestAnimationFrame(() => {
+          scrollIntoTarget(retriesLeft - 1);
+        });
+      }
+    };
+
+    scrollIntoTarget(6);
   };
   
   const updateCurrentPage = (page: number) => {
       setOpenTabs(prev => prev.map(t => t.id === activeTabId ? { ...t, currentPage: page } : t));
+  };
+
+  const updatePageDimension = (tabId: string, pageIndex: number, dimension: PageDimension) => {
+    setOpenTabs((tabs) => tabs.map((tab) => {
+      if (tab.id !== tabId) {
+        return tab;
+      }
+
+      const current = tab.dimensions[pageIndex];
+      if (current && current.width === dimension.width && current.height === dimension.height) {
+        return tab;
+      }
+
+      const nextDimensions = tab.dimensions.length === tab.totalPages
+        ? [...tab.dimensions]
+        : createPlaceholderDimensions(tab.totalPages);
+
+      nextDimensions[pageIndex] = dimension;
+      return { ...tab, dimensions: nextDimensions };
+    }));
   };
 
 
@@ -387,7 +415,7 @@ export function useLibrary() {
   const handleDeleteItem = async (item: LibraryItem) => {
     try {
       await invoke("delete_library_pdf", { path: item.id });
-      await refreshLibrary(selectedFolderId);
+      await refreshLibrary(selectedFolderId === TRASH_FOLDER_ID ? TRASH_FOLDER_ID : selectedFolderId);
 
       setOpenTabs(prev => {
         const next = prev.filter(tab => tab.id !== item.id);
@@ -561,7 +589,7 @@ export function useLibrary() {
   const handleItemUpdatedLocally = async () => {
        const tree = await refreshLibrary(selectedFolderId);
        if (selectedItemId) {
-          const updatedItem = findItem(tree, selectedItemId);
+          const updatedItem = findItem(tree, selectedItemId) ?? trashItems.find(item => item.id === selectedItemId) ?? null;
           if (updatedItem) {
             setOpenTabs(prevTabs => 
               prevTabs.map(tab => tab.id === selectedItemId ? { ...tab, item: updatedItem } : tab)
@@ -569,6 +597,55 @@ export function useLibrary() {
           }
        }
   }
+
+  const handleRestoreTrashItem = async (item: LibraryItem) => {
+    try {
+      setIsLoading(true);
+      const restoredPath: string = await invoke("restore_library_pdf", { path: item.id });
+      const refreshedTree = await refreshLibrary(TRASH_FOLDER_ID);
+      const restoredItem = findItem(refreshedTree, restoredPath) ?? createLibraryItem(restoredPath);
+      setOpenTabs((prev) => prev.map((tab) => tab.id === item.id ? { ...tab, id: restoredItem.id, item: restoredItem } : tab));
+      setSelectedItemId(prev => prev === item.id ? restoredItem.id : prev);
+      setActiveTabId(prev => prev === item.id ? restoredItem.id : prev);
+      feedback.success({
+        title: t("feedback.library.trash.restoreSuccess.title"),
+        description: t("feedback.library.trash.restoreSuccess.description", { title: item.title || item.attachments[0]?.name || pathBaseName(item.id) }),
+      });
+    } catch (err) {
+      console.error("Failed to restore item from trash", err);
+      feedback.error({
+        title: t("feedback.library.trash.restoreError.title"),
+        description: t("feedback.library.trash.restoreError.description"),
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEmptyTrash = async () => {
+    try {
+      setIsLoading(true);
+      await invoke("empty_trash");
+      await refreshLibrary(TRASH_FOLDER_ID);
+      setSelectedItemId((prev) => trashItems.some((item) => item.id === prev) ? null : prev);
+      setOpenTabs((prev) => prev.filter((tab) => !trashItems.some((item) => item.id === tab.id)));
+      if (activeTabId && trashItems.some((item) => item.id === activeTabId)) {
+        setActiveTabId("library");
+      }
+      feedback.success({
+        title: t("feedback.library.trash.emptySuccess.title"),
+        description: t("feedback.library.trash.emptySuccess.description"),
+      });
+    } catch (err) {
+      console.error("Failed to empty trash", err);
+      feedback.error({
+        title: t("feedback.library.trash.emptyError.title"),
+        description: t("feedback.library.trash.emptyError.description"),
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return {
     openTabs,
@@ -581,6 +658,7 @@ export function useLibrary() {
     currentPage,
     isLoading,
     folderTree,
+    trashItems,
     selectedFolderId,
     setSelectedFolderId,
     selectedItemId,
@@ -592,13 +670,16 @@ export function useLibrary() {
     handleCloseTab,
     handlePageJump,
     updateCurrentPage,
+    updatePageDimension,
     handleAddFolder,
     handleDeleteItem,
     handleRenameItem,
     handleMoveItemToFolder,
     handleRenameFolder,
     handleDeleteFolder,
-    handleItemUpdatedLocally
+    handleItemUpdatedLocally,
+    handleRestoreTrashItem,
+    handleEmptyTrash,
   };
 }
 

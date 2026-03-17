@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowDown, ArrowUp, Download, FilePenLine, FileText, FileUp, Globe, Hash, Loader2, Search, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, FilePenLine, FileText, FileUp, Hash, Loader2, RotateCcw, Search, Trash2, Trash } from "lucide-react";
 import { FolderNode, LibraryItem } from "../../types";
 import { ExportModal } from "./ExportModal";
+import { preloadPdfDocument } from "../pdfDocumentRuntime";
+import { preloadPdfCoreRuntime } from "../pdfRuntime";
 import { useI18n } from "../../hooks/useI18n";
 import {
   clampColumnWidth,
@@ -41,12 +43,16 @@ function highlightText(text: string, query: string): React.ReactNode {
 
 interface LibraryViewProps {
   folderTree: FolderNode[];
+  trashItems: LibraryItem[];
+  isTrashView: boolean;
   selectedFolderId: string;
   selectedItemId: string | null;
   onSelectItem: (id: string) => void;
   onOpenItem: (item: LibraryItem) => void;
   onAddItem: () => void;
   onDeleteItem: (item: LibraryItem) => void;
+  onRestoreItem: (item: LibraryItem) => Promise<void> | void;
+  onEmptyTrash: () => Promise<void> | void;
   onRenameItem: (item: LibraryItem, nextName: string) => Promise<void> | void;
   onUpdateItemTags: (item: LibraryItem, tags: string[]) => Promise<void> | void;
   onItemPointerDown: (item: LibraryItem, event: React.MouseEvent<HTMLDivElement>) => void;
@@ -57,12 +63,16 @@ interface LibraryViewProps {
 
 export function LibraryView({
   folderTree,
+  trashItems,
+  isTrashView,
   selectedFolderId,
   selectedItemId,
   onSelectItem,
   onOpenItem,
   onAddItem,
   onDeleteItem,
+  onRestoreItem,
+  onEmptyTrash,
   onRenameItem,
   onUpdateItemTags,
   onItemPointerDown,
@@ -136,7 +146,9 @@ export function LibraryView({
   const rootFolder    = folderTree[0] ?? null;
   const selectedFolder = findFolderById(folderTree, selectedFolderId);
 
-  const folderItems: LibraryItem[] = selectedFolder
+  const folderItems: LibraryItem[] = isTrashView
+    ? trashItems
+    : selectedFolder
     ? rootFolder && selectedFolder.id === rootFolder.id
       ? collectAllItems(selectedFolder)
       : selectedFolder.items
@@ -144,10 +156,15 @@ export function LibraryView({
 
   // ── Global search via Tauri backend ─────────────────────────────────────
 
-  const isGlobalSearch = query.trim().length > 0 || yearFilter.trim().length > 0 || !!tagFilter;
+  const isGlobalSearch = !isTrashView && (query.trim().length > 0 || yearFilter.trim().length > 0 || !!tagFilter);
 
   const runGlobalSearch = useCallback(
     (q: string, year: string, sidebarTag: string | null) => {
+      if (isTrashView) {
+        setGlobalResults([]);
+        setIsSearching(false);
+        return;
+      }
       if (!q.trim() && !year.trim() && !sidebarTag) {
         setGlobalResults([]);
         setIsSearching(false);
@@ -161,7 +178,7 @@ export function LibraryView({
         .then(results => { setGlobalResults(results); setIsSearching(false); })
         .catch(err   => { console.error("search_library error:", err); setIsSearching(false); });
     },
-    []
+    [isTrashView]
   );
 
   // Debounced search trigger — re-runs on any filter change, including sidebar tag
@@ -213,7 +230,17 @@ export function LibraryView({
 
   const displayItems = useMemo(() => {
     const sourceItems = isGlobalSearch ? globalResults : folderItems;
-    const items = [...sourceItems];
+    const items = [...sourceItems].filter((item) => {
+      if (!isTrashView) return true;
+      const matchesQuery = !query.trim()
+        || item.title.toLowerCase().includes(query.trim().toLowerCase())
+        || item.authors.toLowerCase().includes(query.trim().toLowerCase())
+        || item.publication.toLowerCase().includes(query.trim().toLowerCase())
+        || item.doi.toLowerCase().includes(query.trim().toLowerCase())
+        || item.arxiv_id.toLowerCase().includes(query.trim().toLowerCase());
+      const matchesYear = !yearFilter.trim() || item.year === yearFilter.trim();
+      return matchesQuery && matchesYear;
+    });
     const getTimestamp = (value: string) => {
       const numeric = Number(value);
       if (!Number.isNaN(numeric) && numeric > 0) {
@@ -260,7 +287,7 @@ export function LibraryView({
     });
 
     return items;
-  }, [folderItems, globalResults, isGlobalSearch, sortColumn, sortDirection]);
+  }, [folderItems, globalResults, isGlobalSearch, isTrashView, query, sortColumn, sortDirection, yearFilter]);
 
   const responsiveColumns = useMemo(() => getResponsiveColumns(listViewportWidth), [listViewportWidth]);
   const visibleColumns = useMemo(
@@ -389,13 +416,7 @@ export function LibraryView({
     }
   };
 
-  const folderLabel = selectedFolder?.name ?? t("libraryView.myLibrary");
-  const resultCountLabel = displayItems.length === 1
-    ? t("libraryView.scope.results.one", { count: displayItems.length })
-    : t("libraryView.scope.results.other", { count: displayItems.length });
-  const paperCountLabel = folderItems.length === 1
-    ? t("libraryView.scope.papers.one", { count: folderItems.length })
-    : t("libraryView.scope.papers.other", { count: folderItems.length });
+  const folderLabel = isTrashView ? t("folderSidebar.labels.trash") : selectedFolder?.name ?? t("libraryView.myLibrary");
   const exportScopeLabel = isGlobalSearch
     ? (displayItems.length === 1
       ? t("libraryView.export.searchScope.one", { count: displayItems.length })
@@ -497,10 +518,10 @@ export function LibraryView({
   }, [displayItems, t]);
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col h-full bg-white relative">
+    <div className="flex-1 min-w-0 flex flex-col h-full bg-white dark:bg-zinc-950 relative">
 
       {/* ── Search header ───────────────────────────────────── */}
-      <div className="border-b border-zinc-200 flex flex-col shrink-0 bg-white/80 backdrop-blur-md sticky top-0 z-10 min-w-0">
+      <div className="border-b border-zinc-200 dark:border-zinc-800 flex flex-col shrink-0 bg-white/90 dark:bg-zinc-950/95 backdrop-blur-sm sticky top-0 z-10 min-w-0">
 
         {/* Row 1 – search input + add button */}
         <div className="flex flex-wrap items-center gap-3 px-4 md:px-6 py-3">
@@ -517,28 +538,40 @@ export function LibraryView({
               className="w-full pl-10 pr-4 py-2 bg-zinc-100 border-transparent focus:bg-white border focus:border-indigo-400 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-400/20 transition-all placeholder:text-zinc-400 shadow-sm"
             />
           </div>
-          <button
-            onClick={() => setShowExport(true)}
-            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
-            title={t("libraryView.actions.exportTitle")}
-          >
-            <Download size={15} />
-            <span className="hidden min-[900px]:inline">{t("libraryView.actions.export")}</span>
-          </button>
-          <button
-            onClick={onAddItem}
-            className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
-          >
-            <FileUp size={15} />
-            <span className="hidden min-[900px]:inline">{t("libraryView.actions.addItem")}</span>
-          </button>
+          {isTrashView ? (
+            <button
+              onClick={() => { void onEmptyTrash(); }}
+              className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors shadow-sm active:scale-[0.98]"
+              title={t("libraryView.actions.emptyTrashTitle")}
+            >
+              <Trash size={15} />
+              <span className="hidden min-[900px]:inline">{t("libraryView.actions.emptyTrash")}</span>
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => setShowExport(true)}
+                className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
+                title={t("libraryView.actions.exportTitle")}
+              >
+                <Download size={15} />
+                <span className="hidden min-[900px]:inline">{t("libraryView.actions.export")}</span>
+              </button>
+              <button
+                onClick={onAddItem}
+                className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
+              >
+                <FileUp size={15} />
+                <span className="hidden min-[900px]:inline">{t("libraryView.actions.addItem")}</span>
+              </button>
+            </>
+          )}
         </div>
 
-        {/* Row 2 – sort + year input + scope indicator */}
+        {/* Row 2 – year input + filters */}
         <div className="flex items-center gap-2 px-4 md:px-6 pb-3 flex-wrap min-w-0">
           {/* Year filter */}
-          <div className="flex items-center gap-1.5 ml-1">
-            <span className="text-xs text-zinc-400">{t("libraryView.search.yearLabel")}</span>
+          <div className="flex items-center ml-1">
             <input
               type="text"
               value={yearFilter}
@@ -550,7 +583,7 @@ export function LibraryView({
           </div>
 
           {/* Active sidebar tag chip */}
-          {tagFilter && (
+          {tagFilter && !isTrashView && (
             <div className="flex items-center gap-1.5 ml-1 px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-medium border border-indigo-200">
               <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
               <span>#{tagFilter}</span>
@@ -564,32 +597,14 @@ export function LibraryView({
             </div>
           )}
 
-          {/* Right-aligned scope indicator */}
-          <div className="w-full min-[980px]:w-auto min-[980px]:ml-auto flex items-center gap-1.5 text-xs text-zinc-400 shrink-0">
-            {isGlobalSearch ? (
-              <>
-                <Globe size={13} className="text-indigo-400 shrink-0" />
-                <span className="text-indigo-500 font-medium">
-                  {isSearching
-                    ? t("libraryView.scope.searching")
-                    : resultCountLabel}
-                </span>
-              </>
-            ) : (
-              <span>
-                {paperCountLabel}{" "}
-                <strong className="text-zinc-600">{folderLabel}</strong>
-              </span>
-            )}
-          </div>
         </div>
       </div>
 
       {/* ── Item list ───────────────────────────────────────── */}
       <div ref={listViewportRef} className="flex-1 overflow-y-auto">
         {displayItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-zinc-400 space-y-4 mt-10 px-6">
-            <div className="w-16 h-16 bg-zinc-50 rounded-2xl flex items-center justify-center border border-zinc-200/60 shadow-sm">
+          <div className="flex flex-col items-center justify-center h-64 text-zinc-400 dark:text-zinc-500 space-y-4 mt-10 px-6">
+            <div className="w-16 h-16 bg-zinc-50 dark:bg-zinc-900 rounded-2xl flex items-center justify-center border border-zinc-200/60 dark:border-zinc-800 shadow-sm">
               <FileText size={32} className="opacity-40" />
             </div>
             {isGlobalSearch ? (
@@ -602,10 +617,10 @@ export function LibraryView({
             )}
           </div>
         ) : (
-          <div className="border-b border-zinc-200 bg-white overflow-x-auto">
+          <div className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-x-auto">
             <div style={{ minWidth: visibleTableMinWidth }}>
               <div
-                className="grid gap-3 border-b border-zinc-200 bg-zinc-50/80 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500"
+                className="grid gap-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/80 px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400"
                 style={{ gridTemplateColumns: visibleGridTemplateColumns }}
                 onContextMenu={(event) => {
                   event.preventDefault();
@@ -659,39 +674,66 @@ export function LibraryView({
           style={{ left: menuX, top: menuY }}
           onClick={e => e.stopPropagation()}
         >
-          <button
-            onClick={() => {
-              setRenameTarget(contextMenu.item);
-              setRenameValue(contextMenu.item.title || contextMenu.item.attachments[0]?.name || t("libraryView.item.untitled"));
-              setContextMenu(null);
-            }}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
-          >
-            <FilePenLine size={15} />
-            <span>{t("libraryView.context.rename")}</span>
-          </button>
-          <button
-            onClick={() => {
-              setTagEditorTarget(contextMenu.item);
-              setTagEditorTags(contextMenu.item.tags ?? []);
-              setTagEditorValue("");
-              setContextMenu(null);
-            }}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
-          >
-            <Hash size={15} />
-            <span>{t("libraryView.context.editTags", undefined, "Edit Tags")}</span>
-          </button>
-          <button
-            onClick={() => {
-              onDeleteItem(contextMenu.item);
-              setContextMenu(null);
-            }}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
-          >
-            <Trash2 size={15} />
-            <span>{t("libraryView.context.delete")}</span>
-          </button>
+          {isTrashView ? (
+            <>
+              <button
+                onClick={() => {
+                  void onRestoreItem(contextMenu.item);
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+              >
+                <RotateCcw size={15} />
+                <span>{t("libraryView.context.restore")}</span>
+              </button>
+              <button
+                onClick={() => {
+                  void onEmptyTrash();
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+              >
+                <Trash2 size={15} />
+                <span>{t("libraryView.actions.emptyTrash")}</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => {
+                  setRenameTarget(contextMenu.item);
+                  setRenameValue(contextMenu.item.title || contextMenu.item.attachments[0]?.name || t("libraryView.item.untitled"));
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+              >
+                <FilePenLine size={15} />
+                <span>{t("libraryView.context.rename")}</span>
+              </button>
+              <button
+                onClick={() => {
+                  setTagEditorTarget(contextMenu.item);
+                  setTagEditorTags(contextMenu.item.tags ?? []);
+                  setTagEditorValue("");
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+              >
+                <Hash size={15} />
+                <span>{t("libraryView.context.editTags", undefined, "Edit Tags")}</span>
+              </button>
+              <button
+                onClick={() => {
+                  onDeleteItem(contextMenu.item);
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+              >
+                <Trash2 size={15} />
+                <span>{t("libraryView.context.delete")}</span>
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -893,7 +935,7 @@ export function LibraryView({
     {/* Export modal — uses fixed positioning, renders correctly inside any container */}
     <ExportModal
       items={displayItems}
-      isOpen={showExport}
+      isOpen={!isTrashView && showExport}
       onClose={() => setShowExport(false)}
       scopeLabel={exportScopeLabel}
     />
@@ -930,43 +972,51 @@ function LibraryItemRow({
   const displayYear = item.year || "—";
   const displayPublication = item.publication || item.publisher || "—";
   const displayDateAdded = formatDateLabel(item.date_added);
+  const warmPdfRuntime = () => {
+    void preloadPdfCoreRuntime();
+    const pdfPath = item.attachments?.[0]?.path || item.id;
+    void preloadPdfDocument(pdfPath);
+  };
 
   return (
     <div
-      className={`library-item-row group grid items-center gap-3 px-3 py-2.5 cursor-pointer transition-colors select-none border-b border-zinc-100 ${
-        isSelected ? "bg-indigo-50" : "bg-white hover:bg-zinc-50"
+      className={`library-item-row group grid items-center gap-3 px-3 py-2 cursor-pointer transition-colors select-none border-b border-zinc-100 dark:border-zinc-900 ${
+        isSelected ? "bg-indigo-50 dark:bg-indigo-950/40" : "bg-white dark:bg-zinc-950 hover:bg-zinc-50 dark:hover:bg-zinc-900/70"
       }`}
       data-selected={isSelected ? "true" : "false"}
       style={{ cursor: "grab", gridTemplateColumns }}
       onClick={onSelect}
       onDoubleClick={onOpen}
+      onMouseEnter={warmPdfRuntime}
+      onFocus={warmPdfRuntime}
       onMouseDown={onPointerDown}
       onContextMenu={e => { e.preventDefault(); e.stopPropagation(); onContextMenu(e); }}
       title={t("libraryView.item.openHint")}
+      tabIndex={0}
     >
       {visibleColumns.includes("title") && (
         <div className="min-w-0 flex items-center gap-2">
-          <div className={`p-1.5 rounded-lg shrink-0 ${
-            isSelected ? "bg-indigo-100 text-indigo-600" : "bg-zinc-100 text-zinc-500 group-hover:text-indigo-500 transition-colors"
+          <div className={`p-1.25 rounded-lg shrink-0 ${
+            isSelected ? "bg-indigo-100 dark:bg-indigo-950/70 text-indigo-600 dark:text-indigo-300" : "bg-zinc-100 dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 group-hover:text-indigo-500 dark:group-hover:text-indigo-300 transition-colors"
           }`}>
             <FileText size={14} />
           </div>
-          <h3 className="library-item-title text-sm font-semibold text-zinc-800 truncate group-hover:text-indigo-900 transition-colors">
+          <h3 className="library-item-title text-[13px] font-semibold text-zinc-800 dark:text-zinc-100 truncate group-hover:text-indigo-900 dark:group-hover:text-indigo-200 transition-colors">
             {highlight ? highlightText(displayTitle, highlight) : displayTitle}
           </h3>
         </div>
       )}
       {visibleColumns.includes("authors") && (
-        <div className="truncate text-sm text-zinc-600">{highlight ? highlightText(displayAuthors, highlight) : displayAuthors}</div>
+        <div className="truncate text-sm text-zinc-600 dark:text-zinc-300">{highlight ? highlightText(displayAuthors, highlight) : displayAuthors}</div>
       )}
       {visibleColumns.includes("year") && (
-        <div className="truncate text-sm text-zinc-500">{displayYear}</div>
+        <div className="truncate text-sm text-zinc-500 dark:text-zinc-400">{displayYear}</div>
       )}
       {visibleColumns.includes("publication") && (
-        <div className="truncate text-sm text-zinc-500">{highlight ? highlightText(displayPublication, highlight) : displayPublication}</div>
+        <div className="truncate text-sm text-zinc-500 dark:text-zinc-400">{highlight ? highlightText(displayPublication, highlight) : displayPublication}</div>
       )}
       {visibleColumns.includes("dateAdded") && (
-        <div className="truncate text-sm text-zinc-500">{displayDateAdded}</div>
+        <div className="truncate text-sm text-zinc-500 dark:text-zinc-400">{displayDateAdded}</div>
       )}
     </div>
   );
@@ -992,7 +1042,7 @@ function SortableHeader({
       <button
         type="button"
         onClick={onClick}
-        className={`flex w-full min-w-0 items-center gap-1 pr-3 text-left transition-colors ${active ? "text-zinc-700" : "text-zinc-500 hover:text-zinc-700"}`}
+        className={`flex w-full min-w-0 items-center gap-1 pr-3 text-left transition-colors ${active ? "text-zinc-700 dark:text-zinc-100" : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-100"}`}
       >
         <span className="truncate">{label}</span>
         {active ? (
@@ -1008,7 +1058,7 @@ function SortableHeader({
         }}
         title="Resize column"
       >
-        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-zinc-200 hover:bg-indigo-400" />
+        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-zinc-200 dark:bg-zinc-700 hover:bg-indigo-400" />
       </div>
     </div>
   );

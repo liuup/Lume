@@ -12,17 +12,18 @@
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| **F1 论文速览卡** | 部分完成 | 已有 AI 设置项（API Key / Completion URL / Model）、后端 `summarize_document` 命令、MetaPanel 自动总结区；尚未做到结构化 JSON、页码回链和结果缓存 |
+| **F1 论文速览卡** | 部分完成 | 已有 AI 设置项（API Key / Completion URL / Model）、后端 `summarize_document` 命令、左侧 AI 面板自动总结区、本地 summary cache；尚未做到结构化 JSON、页码回链与可追溯引用 |
 | **F2 选中文本解释 / 翻译** | 部分完成 | 已有 `translate_selection` 命令与 PDF 划词自动翻译弹层；尚未实现术语解释、公式解释、追问对话和上下文关联 |
 | **F3 批注→结构化笔记** | 部分完成 | 已新增本地规则版 `generate_annotation_digest` 命令、Notes 区 AI 草稿预览、追加/替换写入笔记；当前仅能可靠整理文字批注，无法从高亮轨迹反推原文 |
-| **AI 基础设施** | 部分完成 | 已支持用户在设置中配置 OpenAI-compatible API Key / Completion URL / Model，并打通远端 completion 调用；尚无 provider 抽象、缓存和失败重试体系 |
+| **AI 基础设施** | 部分完成 | 已支持用户在设置中配置 OpenAI-compatible API Key / Completion URL / Model、summary/translation system prompt、翻译引擎切换（Google / LLM），并打通本地缓存；尚无 provider 抽象、失败重试和统一任务调度体系 |
 
 ### 本轮新增落地（2026-03-16）
 
 - 设置页新增 AI 配置项：API Key、Completion URL、Model、自动总结开关、总结语言、翻译目标语言
-- MetaPanel 新增自动论文总结区，打开论文后可自动请求大模型总结并支持手动刷新
+- 左侧 AI 面板新增自动论文总结区，打开论文后可自动请求大模型总结并支持手动刷新
 - `TextLayer.tsx` 新增 PDF 划词自动翻译弹层
 - 后端新增 `summarize_document(item_id)` 与 `translate_selection(text)` 命令
+- `summarize_document` 已支持本地缓存与手动强制刷新
 - MetaPanel Notes 区新增「AI 整理」按钮，生成结构化批注草稿预览
 - 后端新增 `generate_annotation_digest(item_id)` Tauri 命令
 - 草稿支持「追加到笔记」和「替换笔记」
@@ -119,17 +120,19 @@ P2（生态，v0.4+）：建立研究工作台护城河
 ```
 
 **交互设计**
-- 位置：MetaPanel 新增「AI 速览」Tab（与 Info / Notes / Annotations / Cite 并列）
-- 触发：首次打开论文时后台静默生成；生成完毕后右侧角标提示
+- 当前已实现：左侧 AI 侧边栏展示论文总结，并支持手动刷新
+- 未来目标位置：可演进为独立的「AI 速览」视图或卡片化总结面板
+- 触发：首次打开论文时后台静默生成；生成完毕后以缓存优先展示
 - 每条结论点击→PDF 滚动到对应页码（复用现有 `PdfViewer` 跳页能力）
 - 支持"简版（5条）/ 详版（15条）"切换
-- 缓存策略：生成结果写入 `ai_briefs` 表，含模型版本与生成时间；内容更新可手动刷新
+- 当前缓存策略：已写入 `ai_paper_summary_cache` 表，按 `item_id + language + model + prompt_key + 文件签名` 命中；手动刷新可跳过缓存
+- 后续若升级为结构化 brief，可再演进为独立 `ai_briefs` 表
 
 **与现有代码的结合点**
 - `src-tauri/src/pdf_handlers.rs`：新增 `extract_text_for_ai(item_id)` 命令，按段落结构提取全文
-- `src-tauri/src/library_commands.rs`：新增 `generate_paper_brief(item_id, model_config)` Tauri 命令
-- `src/components/meta-panel/`：新增 `AIBriefTab.tsx` 组件
-- `src-tauri/src/db.rs`：新增 `ai_briefs` 表迁移
+- 当前已实现：`src-tauri/src/library_commands.rs` 中 `summarize_document(item_id, language, force_refresh)` 命令
+- 当前已实现：`src-tauri/src/db.rs` 中 `ai_paper_summary_cache` 表迁移
+- 后续目标：`generate_paper_brief(item_id, model_config)` + 独立 Brief UI + 页码级回链
 
 ---
 

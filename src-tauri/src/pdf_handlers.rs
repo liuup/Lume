@@ -35,13 +35,22 @@ pub struct SearchMatch {
     pub rects: Vec<TextRect>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct TextNode {
     pub text: String,
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub height: f32,
+}
+
+#[derive(Clone, Debug)]
+struct TextFragment {
+    text: String,
+    x: Option<f32>,
+    y: Option<f32>,
+    width: Option<f32>,
+    height: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -132,74 +141,7 @@ pub fn get_page_text(
         .get(page_index)
         .map_err(|e: PdfiumError| e.to_string())?;
 
-    let page_height = page.height().value;
-    let text_obj = page.text().map_err(|e: PdfiumError| e.to_string())?;
-    let chars = text_obj.chars();
-
-    let mut nodes: Vec<TextNode> = Vec::new();
-    let mut current_node: Option<TextNode> = None;
-
-    for ch in chars.iter() {
-        if let Ok(bounds) = ch.loose_bounds() {
-            let ch_str = ch.unicode_string().unwrap_or_default();
-            let x: f32 = bounds.left().value;
-            let y = page_height - bounds.top().value;
-            let w = bounds.right().value - bounds.left().value;
-            let h = bounds.top().value - bounds.bottom().value;
-
-            if w <= 0.0 || h <= 0.0 {
-                continue;
-            }
-
-            if let Some(mut node) = current_node.take() {
-                let y_tolerance = f32::max(node.height, h) * 0.3;
-                let horizontal_gap = x - (node.x + node.width);
-
-                if (node.y - y).abs() < y_tolerance
-                    && x >= node.x
-                    && horizontal_gap < node.height * 3.0
-                {
-                    if horizontal_gap > node.height * 0.25
-                        && !node.text.ends_with(' ')
-                        && !ch_str.starts_with(' ')
-                    {
-                        node.text.push(' ');
-                    }
-                    node.text.push_str(&ch_str);
-
-                    let new_right = f32::max(node.x + node.width, x + w);
-                    node.y = f32::min(node.y, y);
-                    let new_bottom = f32::max(node.y + node.height, y + h);
-                    node.width = new_right - node.x;
-                    node.height = new_bottom - node.y;
-                    current_node = Some(node);
-                } else {
-                    nodes.push(node);
-                    current_node = Some(TextNode {
-                        text: ch_str,
-                        x,
-                        y,
-                        width: w,
-                        height: h,
-                    });
-                }
-            } else {
-                current_node = Some(TextNode {
-                    text: ch_str,
-                    x,
-                    y,
-                    width: w,
-                    height: h,
-                });
-            }
-        }
-    }
-
-    if let Some(node) = current_node {
-        nodes.push(node);
-    }
-
-    Ok(nodes)
+    Ok(build_page_text_nodes(&page)?)
 }
 
 #[tauri::command]
@@ -207,6 +149,7 @@ pub async fn render_page(
     path: String,
     page_index: u16,
     scale: f32,
+    profile: Option<String>,
     state: tauri::State<'_, crate::models::AppState>,
 ) -> Result<String, String> {
     let doc_arc = {
@@ -215,6 +158,7 @@ pub async fn render_page(
     };
 
     let base64_str = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let render_profile = profile.unwrap_or_else(|| "preview".to_string());
         let image = {
             let doc_lock = doc_arc.lock().unwrap();
             let doc = &doc_lock.0;
@@ -236,7 +180,7 @@ pub async fn render_page(
             let mut target_w: i32 = (base_w * scale).round() as i32;
             let mut target_h: i32 = (base_h * scale).round() as i32;
 
-            let max_dim = 3200;
+            let max_dim = if render_profile == "full" { 5600 } else { 3200 };
             if target_w > max_dim || target_h > max_dim {
                 let scale_factor = max_dim as f32 / target_w.max(target_h) as f32;
                 target_w = (target_w as f32 * scale_factor).round() as i32;
@@ -253,7 +197,8 @@ pub async fn render_page(
         };
 
         let mut cursor = Cursor::new(Vec::new());
-        JpegEncoder::new_with_quality(&mut cursor, 68)
+        let jpeg_quality = if render_profile == "full" { 82 } else { 68 };
+        JpegEncoder::new_with_quality(&mut cursor, jpeg_quality)
             .encode_image(&image)
             .map_err(|e| e.to_string())?;
 
@@ -337,74 +282,158 @@ pub fn is_annotation_payload_empty(payload: &SavedPdfPageAnnotations) -> bool {
 }
 
 pub fn merge_page_text_nodes(page: &PdfPage<'_>) -> Result<Vec<TextNode>, String> {
+    build_page_text_nodes(page)
+}
+
+fn normalize_fragment_text(value: &str) -> String {
+    value
+        .replace('\u{00A0}', " ")
+        .replace('\u{2007}', " ")
+        .replace('\u{202F}', " ")
+        .replace('\u{00AD}', "")
+}
+
+fn build_page_text_fragments(page: &PdfPage<'_>) -> Result<Vec<TextFragment>, String> {
     let page_height = page.height().value;
     let text_obj = page.text().map_err(|e| e.to_string())?;
     let chars = text_obj.chars();
-
-    let mut nodes: Vec<TextNode> = Vec::new();
-    let mut current_node: Option<TextNode> = None;
+    let mut fragments = Vec::new();
 
     for ch in chars.iter() {
+        let text = normalize_fragment_text(&ch.unicode_string().unwrap_or_default());
+        if text.is_empty() {
+            continue;
+        }
+
         if let Ok(bounds) = ch.loose_bounds() {
-            let ch_str = ch.unicode_string().unwrap_or_default();
             let x = bounds.left().value;
             let y = page_height - bounds.top().value;
-            let w = bounds.right().value - bounds.left().value;
-            let h = bounds.top().value - bounds.bottom().value;
+            let width = bounds.right().value - bounds.left().value;
+            let height = bounds.top().value - bounds.bottom().value;
 
-            if w <= 0.0 || h <= 0.0 {
+            if width > 0.0 && height > 0.0 {
+                fragments.push(TextFragment {
+                    text,
+                    x: Some(x),
+                    y: Some(y),
+                    width: Some(width),
+                    height: Some(height),
+                });
                 continue;
             }
+        }
 
-            if let Some(mut node) = current_node.take() {
-                let y_tolerance = f32::max(node.height, h) * 0.3;
-                let horizontal_gap = x - (node.x + node.width);
+        fragments.push(TextFragment {
+            text,
+            x: None,
+            y: None,
+            width: None,
+            height: None,
+        });
+    }
 
-                if (node.y - y).abs() < y_tolerance
-                    && x >= node.x
-                    && horizontal_gap < node.height * 3.0
-                {
-                    if horizontal_gap > node.height * 0.25
-                        && !node.text.ends_with(' ')
-                        && !ch_str.starts_with(' ')
-                    {
+    Ok(fragments)
+}
+
+fn merge_text_fragments(fragments: Vec<TextFragment>) -> Vec<TextNode> {
+    let mut nodes: Vec<TextNode> = Vec::new();
+    let mut current_node: Option<TextNode> = None;
+    let mut pending_space = false;
+    let mut pending_line_break = false;
+
+    for fragment in fragments {
+        if fragment.text.chars().all(char::is_whitespace) {
+            if fragment.text.chars().any(|ch| ch == '\n' || ch == '\r') {
+                if let Some(node) = current_node.take() {
+                    nodes.push(node);
+                }
+                pending_line_break = true;
+                pending_space = false;
+            } else {
+                pending_space = true;
+            }
+            continue;
+        }
+
+        let trimmed_text = fragment.text.trim().to_string();
+        if trimmed_text.is_empty() {
+            continue;
+        }
+
+        let (x, y, width, height) = match (fragment.x, fragment.y, fragment.width, fragment.height) {
+            (Some(x), Some(y), Some(width), Some(height)) if width > 0.0 && height > 0.0 => {
+                (x, y, width, height)
+            }
+            _ => {
+                if let Some(node) = current_node.as_mut() {
+                    if pending_space && !node.text.ends_with(' ') {
                         node.text.push(' ');
                     }
-                    node.text.push_str(&ch_str);
-
-                    let new_right = f32::max(node.x + node.width, x + w);
-                    node.y = f32::min(node.y, y);
-                    let new_bottom = f32::max(node.y + node.height, y + h);
-                    node.width = new_right - node.x;
-                    node.height = new_bottom - node.y;
-                    current_node = Some(node);
-                } else {
-                    nodes.push(node);
-                    current_node = Some(TextNode {
-                        text: ch_str,
-                        x,
-                        y,
-                        width: w,
-                        height: h,
-                    });
+                    node.text.push_str(&trimmed_text);
+                    pending_space = false;
+                    pending_line_break = false;
                 }
-            } else {
+                continue;
+            }
+        };
+
+        if let Some(mut node) = current_node.take() {
+            let old_bottom = node.y + node.height;
+            let y_tolerance = f32::max(node.height, height) * 0.35;
+            let horizontal_gap = x - (node.x + node.width);
+            let same_line = (node.y - y).abs() < y_tolerance;
+            let forward_progress = x >= node.x - f32::max(node.height, height) * 0.2;
+            let close_enough = horizontal_gap < f32::max(node.height, height) * 3.2;
+
+            if pending_line_break || !same_line || !forward_progress || !close_enough {
+                nodes.push(node);
                 current_node = Some(TextNode {
-                    text: ch_str,
+                    text: trimmed_text,
                     x,
                     y,
-                    width: w,
-                    height: h,
+                    width,
+                    height,
                 });
+            } else {
+                if (pending_space || horizontal_gap > f32::max(node.height, height) * 0.18)
+                    && !node.text.ends_with(' ')
+                {
+                    node.text.push(' ');
+                }
+
+                node.text.push_str(&trimmed_text);
+
+                let new_right = f32::max(node.x + node.width, x + width);
+                node.y = f32::min(node.y, y);
+                let new_bottom = f32::max(old_bottom, y + height);
+                node.width = new_right - node.x;
+                node.height = new_bottom - node.y;
+                current_node = Some(node);
             }
+        } else {
+            current_node = Some(TextNode {
+                text: trimmed_text,
+                x,
+                y,
+                width,
+                height,
+            });
         }
+
+        pending_space = false;
+        pending_line_break = false;
     }
 
     if let Some(node) = current_node {
         nodes.push(node);
     }
 
-    Ok(nodes)
+    nodes
+}
+
+fn build_page_text_nodes(page: &PdfPage<'_>) -> Result<Vec<TextNode>, String> {
+    let fragments = build_page_text_fragments(page)?;
+    Ok(merge_text_fragments(fragments))
 }
 
 pub fn extract_document_text_from_path(
@@ -951,5 +980,81 @@ pub fn extract_pdf_metadata(path: &std::path::Path) -> Option<crate::models::Par
         r#abstract: inferred_abstract,
         doi: inferred_doi,
         arxiv_id: inferred_arxiv_id,
+        publication: None,
+        volume: None,
+        issue: None,
+        pages: None,
+        publisher: None,
+        isbn: None,
+        url: None,
+        language: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{merge_text_fragments, TextFragment, TextNode};
+
+    fn positioned_fragment(text: &str, x: f32, y: f32, width: f32, height: f32) -> TextFragment {
+        TextFragment {
+            text: text.to_string(),
+            x: Some(x),
+            y: Some(y),
+            width: Some(width),
+            height: Some(height),
+        }
+    }
+
+    fn whitespace_fragment(text: &str) -> TextFragment {
+        TextFragment {
+            text: text.to_string(),
+            x: None,
+            y: None,
+            width: None,
+            height: None,
+        }
+    }
+
+    #[test]
+    fn merge_text_fragments_preserves_explicit_spaces() {
+        let nodes = merge_text_fragments(vec![
+            positioned_fragment("large", 10.0, 20.0, 30.0, 10.0),
+            whitespace_fragment(" "),
+            positioned_fragment("language", 50.0, 20.0, 45.0, 10.0),
+            whitespace_fragment(" "),
+            positioned_fragment("model", 100.0, 20.0, 28.0, 10.0),
+        ]);
+
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].text, "large language model");
+    }
+
+    #[test]
+    fn merge_text_fragments_breaks_on_newlines() {
+        let nodes = merge_text_fragments(vec![
+            positioned_fragment("first", 10.0, 20.0, 20.0, 10.0),
+            whitespace_fragment("\n"),
+            positioned_fragment("second", 10.0, 40.0, 30.0, 10.0),
+        ]);
+
+        assert_eq!(
+            nodes,
+            vec![
+                TextNode {
+                    text: "first".to_string(),
+                    x: 10.0,
+                    y: 20.0,
+                    width: 20.0,
+                    height: 10.0,
+                },
+                TextNode {
+                    text: "second".to_string(),
+                    x: 10.0,
+                    y: 40.0,
+                    width: 30.0,
+                    height: 10.0,
+                },
+            ]
+        );
+    }
 }

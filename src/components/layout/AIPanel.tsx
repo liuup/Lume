@@ -32,7 +32,7 @@ export function AIPanel({ selectedItem, isOpen, onClose, width, onResizeStart }:
     setIsLoadingPaperSummary(false);
   }, [selectedItem?.id]);
 
-  const handleGeneratePaperSummary = useCallback(async () => {
+  const handleGeneratePaperSummary = useCallback(async (forceRefresh = false) => {
     if (!selectedItem || !aiIsConfigured) return;
 
     setIsLoadingPaperSummary(true);
@@ -40,6 +40,7 @@ export function AIPanel({ selectedItem, isOpen, onClose, width, onResizeStart }:
       const summary = await invoke<AiPaperSummary>("summarize_document", {
         itemId: selectedItem.id,
         language: settings.aiSummaryLanguage,
+        forceRefresh,
       });
       setPaperSummary(summary);
     } catch (error) {
@@ -98,7 +99,7 @@ export function AIPanel({ selectedItem, isOpen, onClose, width, onResizeStart }:
               </span>
             </div>
             <button
-              onClick={() => void handleGeneratePaperSummary()}
+              onClick={() => void handleGeneratePaperSummary(true)}
               disabled={!selectedItem || !aiIsConfigured || isLoadingPaperSummary}
               className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-40"
             >

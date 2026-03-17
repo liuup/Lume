@@ -13,7 +13,7 @@ use crate::models::{
 use crate::pdf_handlers::{extract_document_text_from_path, extract_pdf_metadata};
 
 use rusqlite::OptionalExtension;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -42,6 +42,14 @@ struct ChatCompletionMessage {
     content: serde_json::Value,
 }
 
+#[derive(Serialize, Deserialize)]
+struct CachedPaperSummaryRecord {
+    file_size: u64,
+    modified_unix_ms: u64,
+    summary: AiPaperSummary,
+    updated_at: String,
+}
+
 pub fn library_root_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let root = app
         .path()
@@ -50,6 +58,18 @@ pub fn library_root_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         .join("library");
 
     fs::create_dir_all(&root).map_err(|e| format!("Failed to create library root: {}", e))?;
+
+    Ok(root)
+}
+
+pub fn trash_root_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {:?}", e))?
+        .join("trash");
+
+    fs::create_dir_all(&root).map_err(|e| format!("Failed to create trash root: {}", e))?;
 
     Ok(root)
 }
@@ -336,6 +356,14 @@ pub fn build_library_item(path: &Path) -> LibraryItem {
     let abstract_text = parsed.r#abstract.clone().unwrap_or_default();
     let doi = parsed.doi.clone().unwrap_or_default();
     let arxiv_id = parsed.arxiv_id.clone().unwrap_or_default();
+    let publication = parsed.publication.clone().unwrap_or_default();
+    let volume = parsed.volume.clone().unwrap_or_default();
+    let issue = parsed.issue.clone().unwrap_or_default();
+    let pages = parsed.pages.clone().unwrap_or_default();
+    let publisher = parsed.publisher.clone().unwrap_or_default();
+    let isbn = parsed.isbn.clone().unwrap_or_default();
+    let url = parsed.url.clone().unwrap_or_default();
+    let language = parsed.language.clone().unwrap_or_default();
 
     let attachment = crate::models::LibraryAttachment {
         id: format!("att-{}", path_str),
@@ -356,14 +384,14 @@ pub fn build_library_item(path: &Path) -> LibraryItem {
         r#abstract: abstract_text,
         doi,
         arxiv_id,
-        publication: String::new(),
-        volume: String::new(),
-        issue: String::new(),
-        pages: String::new(),
-        publisher: String::new(),
-        isbn: String::new(),
-        url: String::new(),
-        language: String::new(),
+        publication,
+        volume,
+        issue,
+        pages,
+        publisher,
+        isbn,
+        url,
+        language,
         date_added: timestamp.clone(),
         date_modified: timestamp,
         folder_path: String::new(),
@@ -432,6 +460,7 @@ pub fn fetch_all_items_from_db(conn: &rusqlite::Connection) -> rusqlite::Result<
     let mut stmt = conn.prepare(
         "SELECT id, item_type, title, authors, year, abstract, doi, arxiv_id, publication, volume, issue, pages, publisher, isbn, url, language, date_added, date_modified, folder_path
          FROM items
+         WHERE COALESCE(is_trashed, 0) = 0
          ORDER BY LOWER(title) ASC, LOWER(authors) ASC, LOWER(id) ASC",
     )?;
 
@@ -534,6 +563,68 @@ pub fn sync_item_to_db(conn: &rusqlite::Connection, item: &LibraryItem) -> rusql
     }
 
     Ok(())
+}
+
+pub fn fetch_trashed_items_from_db(
+    conn: &rusqlite::Connection,
+) -> rusqlite::Result<Vec<LibraryItem>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, item_type, title, authors, year, abstract, doi, arxiv_id, publication, volume, issue, pages, publisher, isbn, url, language, date_added, date_modified, folder_path
+         FROM items
+         WHERE COALESCE(is_trashed, 0) = 1
+         ORDER BY COALESCE(trashed_at, date_modified, date_added) DESC, LOWER(title) ASC",
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(LibraryItem {
+            id: row.get(0)?,
+            item_type: row.get(1)?,
+            title: row.get(2)?,
+            authors: row.get(3)?,
+            year: row.get(4)?,
+            r#abstract: row.get(5)?,
+            doi: row.get(6)?,
+            arxiv_id: row.get(7)?,
+            publication: row.get(8)?,
+            volume: row.get(9)?,
+            issue: row.get(10)?,
+            pages: row.get(11)?,
+            publisher: row.get(12)?,
+            isbn: row.get(13)?,
+            url: row.get(14)?,
+            language: row.get(15)?,
+            date_added: row.get(16)?,
+            date_modified: row.get(17)?,
+            folder_path: row.get(18)?,
+            tags: Vec::new(),
+            attachments: Vec::new(),
+        })
+    })?;
+
+    let mut items = Vec::new();
+
+    for row in rows {
+        let mut item = row?;
+        item.tags = fetch_item_tags(conn, &item.id);
+
+        let mut att_stmt = conn.prepare(
+            "SELECT id, item_id, name, path, attachment_type FROM attachments WHERE item_id = ?1",
+        )?;
+        let att_iter = att_stmt.query_map(rusqlite::params![&item.id], |row| {
+            Ok(crate::models::LibraryAttachment {
+                id: row.get(0)?,
+                item_id: row.get(1)?,
+                name: row.get(2)?,
+                path: row.get(3)?,
+                attachment_type: row.get(4)?,
+            })
+        })?;
+
+        item.attachments = att_iter.filter_map(|result| result.ok()).collect();
+        items.push(item);
+    }
+
+    Ok(items)
 }
 
 pub fn rekey_library_item_in_db(
@@ -838,7 +929,29 @@ pub fn import_pdf_to_folder(
 }
 
 #[tauri::command]
+pub fn load_trash_items(
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<Vec<crate::models::LibraryItem>, String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    fetch_trashed_items_from_db(&conn).map_err(|e| format!("Failed to load trash items: {}", e))
+}
+
+fn fetch_trashed_item_restore_info(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+) -> Result<Option<(String, String)>, String> {
+    conn.query_row(
+        "SELECT COALESCE(original_path, ''), COALESCE(original_folder_path, '') FROM items WHERE id = ?1 AND COALESCE(is_trashed, 0) = 1",
+        rusqlite::params![item_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(|e| format!("Failed to load trashed item info: {}", e))
+}
+
+#[tauri::command]
 pub fn delete_library_pdf(
+    app: tauri::AppHandle,
     path: String,
     state: tauri::State<'_, crate::models::AppState>,
 ) -> Result<(), String> {
@@ -852,19 +965,139 @@ pub fn delete_library_pdf(
         return Err("Only library PDF files can be deleted".to_string());
     }
 
+    let trash_root = trash_root_dir(&app)?;
+    let file_name = target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or("Invalid PDF filename")?;
+    let trash_target = unique_file_path(&trash_root, file_name);
+    let trashed_path = trash_target.to_string_lossy().to_string();
+    let original_folder_path = target
+        .parent()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let trashed_at = now_iso8601();
+
     {
         let mut docs = state.documents.lock().unwrap();
         docs.remove(&path);
     }
 
-    fs::remove_file(&target).map_err(|e| format!("Failed to delete PDF: {}", e))?;
+    fs::rename(&target, &trash_target).map_err(|e| format!("Failed to move PDF to trash: {}", e))?;
 
-    remove_cached_pdf_metadata(&target);
-    remove_annotation_sidecar(&target);
+    rename_cached_pdf_metadata(&target, &trash_target);
+    rename_annotation_sidecar(&target, &trash_target);
 
     if let Ok(conn) = state.db.lock() {
-        let _ = conn.execute("DELETE FROM items WHERE id = ?1", rusqlite::params![&path]);
+        rekey_library_item_in_db(&conn, &path, &trashed_path, "__trash__")
+            .map_err(|e| format!("Failed to rekey trashed item: {}", e))?;
+        conn.execute(
+            "UPDATE items
+             SET is_trashed = 1,
+                 original_path = ?1,
+                 original_folder_path = ?2,
+                 trashed_at = ?3
+             WHERE id = ?4",
+            rusqlite::params![&path, &original_folder_path, &trashed_at, &trashed_path],
+        )
+        .map_err(|e| format!("Failed to mark item as trashed: {}", e))?;
     }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn restore_library_pdf(
+    path: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<String, String> {
+    let source = PathBuf::from(&path);
+    if !source.exists() {
+        return Err("Trashed PDF does not exist".to_string());
+    }
+
+    if !source.is_file() || !is_pdf_file(&source) {
+        return Err("Only trashed PDF files can be restored".to_string());
+    }
+
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    let (original_path, original_folder_path) = fetch_trashed_item_restore_info(&conn, &path)?
+        .ok_or("Trashed item not found".to_string())?;
+    if original_path.trim().is_empty() {
+        return Err("Original location is unavailable".to_string());
+    }
+
+    let restore_target = PathBuf::from(&original_path);
+    let restore_parent = if original_folder_path.trim().is_empty() {
+        restore_target.parent().map(Path::to_path_buf).ok_or("Invalid restore path")?
+    } else {
+        PathBuf::from(&original_folder_path)
+    };
+    fs::create_dir_all(&restore_parent)
+        .map_err(|e| format!("Failed to prepare restore folder: {}", e))?;
+
+    let restore_name = restore_target
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or("Invalid restore PDF name")?;
+    let final_target = unique_file_path(&restore_parent, restore_name);
+    let restored_path = final_target.to_string_lossy().to_string();
+
+    {
+        let mut docs = state.documents.lock().unwrap();
+        docs.remove(&path);
+    }
+
+    fs::rename(&source, &final_target).map_err(|e| format!("Failed to restore PDF: {}", e))?;
+    rename_cached_pdf_metadata(&source, &final_target);
+    rename_annotation_sidecar(&source, &final_target);
+
+    let new_folder_path = final_target
+        .parent()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_default();
+    rekey_library_item_in_db(&conn, &path, &restored_path, &new_folder_path)
+        .map_err(|e| format!("Failed to rekey restored item: {}", e))?;
+    conn.execute(
+        "UPDATE items
+         SET is_trashed = 0,
+             original_path = NULL,
+             original_folder_path = NULL,
+             trashed_at = NULL
+         WHERE id = ?1",
+        rusqlite::params![&restored_path],
+    )
+    .map_err(|e| format!("Failed to clear trash metadata: {}", e))?;
+
+    Ok(restored_path)
+}
+
+#[tauri::command]
+pub fn empty_trash(
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<(), String> {
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    let trashed_items = fetch_trashed_items_from_db(&conn)
+        .map_err(|e| format!("Failed to load trash items: {}", e))?;
+
+    {
+        let mut docs = state.documents.lock().unwrap();
+        for item in &trashed_items {
+            docs.remove(&item.id);
+        }
+    }
+
+    for item in &trashed_items {
+        let path = PathBuf::from(&item.id);
+        if path.exists() {
+            let _ = fs::remove_file(&path);
+        }
+        remove_cached_pdf_metadata(&path);
+        remove_annotation_sidecar(&path);
+    }
+
+    conn.execute("DELETE FROM items WHERE COALESCE(is_trashed, 0) = 1", [])
+        .map_err(|e| format!("Failed to empty trash: {}", e))?;
 
     Ok(())
 }
@@ -1234,7 +1467,7 @@ pub fn search_library_db(
          WHERE {} \
          ORDER BY i.title ASC \
          LIMIT 200",
-        conditions.join(" AND ")
+        format!("COALESCE(i.is_trashed, 0) = 0 AND {}", conditions.join(" AND "))
     );
 
     let mut stmt = conn
@@ -1365,6 +1598,93 @@ fn get_required_ai_settings(
     Ok((api_key, completion_url, model))
 }
 
+fn default_ai_summary_system_prompt() -> &'static str {
+    "You summarize academic papers. Follow the requested language exactly. Be concise, factual, and avoid markdown tables."
+}
+
+fn default_ai_translate_system_prompt() -> &'static str {
+    "You are a precise academic translator. Return only the translated text, then a final line in the format SOURCE_LANGUAGE_HINT: <value>."
+}
+
+fn get_ai_summary_system_prompt(conn: &rusqlite::Connection) -> Result<String, String> {
+    Ok(get_setting_value(conn, "aiSummarySystemPrompt")?
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default_ai_summary_system_prompt().to_string()))
+}
+
+fn get_ai_translate_system_prompt(conn: &rusqlite::Connection) -> Result<String, String> {
+    Ok(get_setting_value(conn, "aiTranslateSystemPrompt")?
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| default_ai_translate_system_prompt().to_string()))
+}
+
+fn make_summary_prompt_key(completion_url: &str, system_prompt: &str, item_title: &str) -> String {
+    format!(
+        "{}::{}::{}",
+        completion_url.trim().to_lowercase(),
+        system_prompt.trim(),
+        item_title.trim()
+    )
+}
+
+fn read_cached_paper_summary(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+    language: &str,
+    model: &str,
+    prompt_key: &str,
+) -> Result<Option<CachedPaperSummaryRecord>, String> {
+    let raw: Option<String> = conn
+        .query_row(
+            "SELECT summary_json FROM ai_paper_summary_cache WHERE item_id = ?1 AND language = ?2 AND model = ?3 AND prompt_key = ?4 LIMIT 1",
+            rusqlite::params![item_id, language, model, prompt_key],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("Failed to read cached paper summary: {}", e))?;
+
+    raw.map(|value| {
+        serde_json::from_str(&value)
+            .map_err(|e| format!("Failed to parse cached paper summary: {}", e))
+    })
+    .transpose()
+}
+
+fn write_cached_paper_summary(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+    language: &str,
+    model: &str,
+    prompt_key: &str,
+    record: &CachedPaperSummaryRecord,
+) -> Result<(), String> {
+    let payload = serde_json::to_string(record)
+        .map_err(|e| format!("Failed to serialize cached paper summary: {}", e))?;
+
+    conn.execute(
+        "INSERT INTO ai_paper_summary_cache (item_id, language, model, prompt_key, file_size, modified_unix_ms, summary_json, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(item_id, language, model, prompt_key)
+         DO UPDATE SET file_size = excluded.file_size,
+                       modified_unix_ms = excluded.modified_unix_ms,
+                       summary_json = excluded.summary_json,
+                       updated_at = excluded.updated_at",
+        rusqlite::params![
+            item_id,
+            language,
+            model,
+            prompt_key,
+            record.file_size as i64,
+            record.modified_unix_ms as i64,
+            payload,
+            record.updated_at,
+        ],
+    )
+    .map_err(|e| format!("Failed to cache paper summary: {}", e))?;
+
+    Ok(())
+}
+
 fn completion_message_content_to_string(content: &serde_json::Value) -> String {
     match content {
         serde_json::Value::String(text) => text.trim().to_string(),
@@ -1450,6 +1770,60 @@ fn parse_tagged_output(content: &str, tag: &str) -> Option<String> {
         .lines()
         .find_map(|line| line.strip_prefix(tag).map(|value| value.trim().to_string()))
         .filter(|value| !value.is_empty())
+}
+
+fn google_translate_text(text: &str, target_language: &str) -> Result<(String, String), String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("Failed to build Google Translate client: {}", e))?;
+
+    let response = client
+        .get("https://translate.googleapis.com/translate_a/single")
+        .query(&[
+            ("client", "gtx"),
+            ("sl", "auto"),
+            ("tl", target_language),
+            ("dt", "t"),
+            ("q", text),
+        ])
+        .send()
+        .map_err(|e| format!("Google Translate request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().unwrap_or_default();
+        return Err(format!("Google Translate request failed with {}: {}", status, body));
+    }
+
+    let payload: serde_json::Value = response
+        .json()
+        .map_err(|e| format!("Failed to parse Google Translate response: {}", e))?;
+
+    let translation = payload
+        .get(0)
+        .and_then(|value| value.as_array())
+        .map(|segments| {
+            segments
+                .iter()
+                .filter_map(|segment| segment.get(0).and_then(|value| value.as_str()))
+                .collect::<String>()
+        })
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    if translation.is_empty() {
+        return Err("Google Translate response was empty".to_string());
+    }
+
+    let source_language_hint = payload
+        .get(2)
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    Ok((translation, source_language_hint))
 }
 
 fn quote_markdown_block(text: &str) -> String {
@@ -2016,6 +2390,7 @@ pub fn generate_annotation_digest(
 pub fn summarize_document(
     item_id: String,
     language: Option<String>,
+    force_refresh: Option<bool>,
     state: tauri::State<'_, crate::models::AppState>,
 ) -> Result<AiPaperSummary, String> {
     let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
@@ -2024,22 +2399,43 @@ pub fn summarize_document(
         .map_err(|e| format!("Failed to load item metadata: {}", e))?
         .ok_or("Item not found")?;
     let (api_key, completion_url, model) = get_required_ai_settings(&conn)?;
+    let summary_system_prompt = get_ai_summary_system_prompt(&conn)?;
     let output_language = language
         .filter(|value| !value.trim().is_empty())
         .or_else(|| get_setting_value(&conn, "aiSummaryLanguage").ok().flatten())
         .unwrap_or_else(|| "zh-CN".to_string());
-    drop(conn);
 
     let Some(path_str) = pdf_path else {
         return Err("No PDF attachment found for this item".to_string());
     };
+    let path = Path::new(&path_str);
+    let prompt_key = make_summary_prompt_key(&completion_url, &summary_system_prompt, &item.title);
+    let force_refresh = force_refresh.unwrap_or(false);
+
+    if !force_refresh {
+        if let Some(cached) = read_cached_paper_summary(
+            &conn,
+            &item_id,
+            &output_language,
+            &model,
+            &prompt_key,
+        )? {
+            if let Some((file_size, modified_unix_ms)) = file_signature(path) {
+                if cached.file_size == file_size && cached.modified_unix_ms == modified_unix_ms {
+                    return Ok(cached.summary);
+                }
+            } else {
+                return Ok(cached.summary);
+            }
+        }
+    }
+    drop(conn);
 
     let extracted_text = extract_document_text_from_path(&path_str, 12, 14000)?;
     if extracted_text.trim().is_empty() {
         return Err("Could not extract readable text from this PDF".to_string());
     }
 
-    let system_prompt = "You summarize academic papers. Follow the requested language exactly. Be concise, factual, and avoid markdown tables.";
     let user_prompt = format!(
         "Read the following academic paper excerpt and respond in plain text using this exact format:\nTITLE: <short title>\nSUMMARY: <2-4 sentences>\nKEY_POINTS:\n- <point 1>\n- <point 2>\n- <point 3>\nLIMITATIONS:\n- <limitation 1>\n- <limitation 2>\n\nWrite in language: {}.\n\nPaper metadata title: {}\n\nPaper excerpt:\n{}",
         output_language,
@@ -2051,7 +2447,7 @@ pub fn summarize_document(
         &completion_url,
         &api_key,
         &model,
-        system_prompt,
+        &summary_system_prompt,
         &user_prompt,
     )?;
 
@@ -2077,7 +2473,7 @@ pub fn summarize_document(
         .unwrap_or("");
     let limitations_section = content.split("LIMITATIONS:").nth(1).unwrap_or("");
 
-    Ok(AiPaperSummary {
+    let summary = AiPaperSummary {
         title,
         summary,
         key_points: parse_bullet_lines(key_points_section)
@@ -2090,7 +2486,33 @@ pub fn summarize_document(
             .collect(),
         language: output_language,
         source_excerpt: extracted_text.chars().take(600).collect(),
-    })
+    };
+
+    if let Some((file_size, modified_unix_ms)) = file_signature(path) {
+        let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+        write_cached_paper_summary(
+            &conn,
+            &item_id,
+            &summary.language,
+            &model,
+            &prompt_key,
+            &CachedPaperSummaryRecord {
+                file_size,
+                modified_unix_ms,
+                summary: AiPaperSummary {
+                    title: summary.title.clone(),
+                    summary: summary.summary.clone(),
+                    key_points: summary.key_points.clone(),
+                    limitations: summary.limitations.clone(),
+                    language: summary.language.clone(),
+                    source_excerpt: summary.source_excerpt.clone(),
+                },
+                updated_at: now_iso8601(),
+            },
+        )?;
+    }
+
+    Ok(summary)
 }
 
 #[tauri::command]
@@ -2105,7 +2527,9 @@ pub fn translate_selection(
     }
 
     let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
-    let (api_key, completion_url, model) = get_required_ai_settings(&conn)?;
+    let translate_engine = get_setting_value(&conn, "aiTranslateEngine")?
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "google".to_string());
     let resolved_target_language = target_language
         .filter(|value| !value.trim().is_empty())
         .or_else(|| {
@@ -2114,37 +2538,47 @@ pub fn translate_selection(
                 .flatten()
         })
         .unwrap_or_else(|| "zh-CN".to_string());
-    drop(conn);
+    let translate_engine = translate_engine.trim().to_lowercase();
 
-    let system_prompt = "You are a precise academic translator. Return only the translated text, then a final line in the format SOURCE_LANGUAGE_HINT: <value>.";
-    let user_prompt = format!(
-        "Translate the following paper excerpt into {}. Preserve technical meaning and notation. Selected text:\n{}",
-        resolved_target_language,
-        trimmed
-    );
+    let (translation, source_language_hint) = if translate_engine == "llm" {
+        let (api_key, completion_url, model) = get_required_ai_settings(&conn)?;
+        let system_prompt = get_ai_translate_system_prompt(&conn)?;
+        drop(conn);
 
-    let content = call_openai_compatible_chat(
-        &completion_url,
-        &api_key,
-        &model,
-        system_prompt,
-        &user_prompt,
-    )?;
+        let user_prompt = format!(
+            "Translate the following paper excerpt into {}. Preserve technical meaning and notation. Selected text:\n{}",
+            resolved_target_language,
+            trimmed
+        );
 
-    let source_language_hint = parse_tagged_output(&content, "SOURCE_LANGUAGE_HINT:")
-        .unwrap_or_else(|| "unknown".to_string());
+        let content = call_openai_compatible_chat(
+            &completion_url,
+            &api_key,
+            &model,
+            &system_prompt,
+            &user_prompt,
+        )?;
 
-    let translation = content
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("SOURCE_LANGUAGE_HINT:"))
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_string();
+        let source_language_hint = parse_tagged_output(&content, "SOURCE_LANGUAGE_HINT:")
+            .unwrap_or_else(|| "unknown".to_string());
 
-    if translation.is_empty() {
-        return Err("AI translation response was empty".to_string());
-    }
+        let translation = content
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("SOURCE_LANGUAGE_HINT:"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string();
+
+        if translation.is_empty() {
+            return Err("AI translation response was empty".to_string());
+        }
+
+        (translation, source_language_hint)
+    } else {
+        drop(conn);
+        google_translate_text(trimmed, &resolved_target_language)?
+    };
 
     Ok(AiTranslationResult {
         translation,

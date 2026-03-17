@@ -63,12 +63,16 @@ describe("LibraryView", () => {
     render(
       <LibraryView
         folderTree={folderTree}
+        trashItems={[]}
+        isTrashView={false}
         selectedFolderId="root"
         selectedItemId={null}
         onSelectItem={() => undefined}
         onOpenItem={() => undefined}
         onAddItem={() => undefined}
         onDeleteItem={() => undefined}
+        onRestoreItem={() => undefined}
+        onEmptyTrash={() => undefined}
         onRenameItem={() => undefined}
         onUpdateItemTags={() => undefined}
         onItemPointerDown={() => undefined}

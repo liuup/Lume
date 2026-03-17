@@ -70,6 +70,8 @@ export const DEFAULT_FOLDER: FolderNode = {
   items: [],
 };
 
+export const TRASH_FOLDER_ID = "__trash__";
+
 export interface OpenTab {
   id: string;
   item: LibraryItem;

@@ -10,6 +10,7 @@ export type AppTheme = 'light' | 'dark' | 'auto';
 
 export interface AppSettings {
   theme: AppTheme;
+  uiFontScale: string;
   language: string;
   defaultPdfZoom: string;
   autoRenamePdf: boolean;
@@ -20,11 +21,15 @@ export interface AppSettings {
   aiModel: string;
   aiAutoSummarize: boolean;
   aiSummaryLanguage: string;
+  aiSummarySystemPrompt: string;
+  aiTranslateEngine: string;
   aiTranslateTargetLanguage: string;
+  aiTranslateSystemPrompt: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
   theme: 'auto',
+  uiFontScale: '100',
   language: 'system',
   defaultPdfZoom: 'page-fit',
   autoRenamePdf: true,
@@ -35,7 +40,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   aiModel: 'gpt-4o-mini',
   aiAutoSummarize: true,
   aiSummaryLanguage: 'zh-CN',
+  aiSummarySystemPrompt: 'You summarize academic papers. Follow the requested language exactly. Be concise, factual, and avoid markdown tables.',
+  aiTranslateEngine: 'google',
   aiTranslateTargetLanguage: 'zh-CN',
+  aiTranslateSystemPrompt: 'You are a precise academic translator. Return only the translated text, then a final line in the format SOURCE_LANGUAGE_HINT: <value>.',
 };
 
 function normalizeTheme(value: string | undefined): AppTheme {
@@ -56,6 +64,11 @@ function resolveTheme(theme: AppTheme, prefersDark: boolean): 'light' | 'dark' {
   }
 
   return theme;
+}
+
+function normalizeFontScale(value: string | undefined): string {
+  const allowed = new Set(['90', '100', '110', '120']);
+  return value && allowed.has(value) ? value : DEFAULT_SETTINGS.uiFontScale;
 }
 
 interface SettingsContextType {
@@ -86,6 +99,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
              loaded[s.key] = s.value === 'true';
            } else if (s.key === 'theme') {
              loaded.theme = normalizeTheme(s.value);
+           } else if (s.key === 'uiFontScale') {
+             loaded.uiFontScale = normalizeFontScale(s.value);
            } else {
              loaded[s.key as keyof AppSettings] = s.value as any;
            }
@@ -113,6 +128,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       root.classList.toggle('dark', nextResolvedTheme === 'dark');
       root.dataset.theme = settings.theme;
       root.style.colorScheme = nextResolvedTheme;
+      root.style.fontSize = `${normalizeFontScale(settings.uiFontScale)}%`;
       setResolvedTheme(nextResolvedTheme);
     };
 
@@ -126,7 +142,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
     mediaQuery.addEventListener('change', handleSystemThemeChange);
     return () => mediaQuery.removeEventListener('change', handleSystemThemeChange);
-  }, [settings.theme]);
+  }, [settings.theme, settings.uiFontScale]);
 
   const updateSetting = async <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
     const stringValue = typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value);

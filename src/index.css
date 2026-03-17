@@ -7,7 +7,10 @@
     scroll-behavior: smooth;
   }
   body {
-    @apply bg-zinc-50 text-zinc-900 font-sans antialiased selection:bg-indigo-100 selection:text-indigo-900;
+    @apply bg-zinc-50 text-zinc-900 font-sans selection:bg-indigo-100 selection:text-indigo-900;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: subpixel-antialiased;
+    -moz-osx-font-smoothing: auto;
   }
 }
 
@@ -46,6 +49,18 @@ html.dark .bg-zinc-50\/50 {
   background-color: rgba(24, 24, 27, 0.5) !important;
 }
 
+html.dark .bg-zinc-50\/60 {
+  background-color: rgba(24, 24, 27, 0.6) !important;
+}
+
+html.dark .bg-zinc-50\/70 {
+  background-color: rgba(24, 24, 27, 0.7) !important;
+}
+
+html.dark .bg-zinc-50\/80 {
+  background-color: rgba(24, 24, 27, 0.8) !important;
+}
+
 html.dark .bg-zinc-100 {
   background-color: #18181b !important;
 }
@@ -60,6 +75,14 @@ html.dark .bg-zinc-200\/40 {
 
 html.dark .bg-zinc-200\/50 {
   background-color: rgba(39, 39, 42, 0.5) !important;
+}
+
+html.dark .bg-zinc-200\/70 {
+  background-color: rgba(63, 63, 70, 0.7) !important;
+}
+
+html.dark .bg-zinc-900\/10 {
+  background-color: rgba(9, 9, 11, 0.45) !important;
 }
 
 html.dark .border-zinc-100 {
@@ -135,6 +158,15 @@ html.dark .hover\:text-zinc-900:hover {
 html.dark .focus\:bg-white:focus,
 html.dark .focus-within\:bg-white:focus-within {
   background-color: #18181b !important;
+}
+
+html.dark .from-zinc-50 {
+  --tw-gradient-from: #18181b var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgb(24 24 27 / 0) var(--tw-gradient-to-position) !important;
+}
+
+html.dark .to-zinc-100 {
+  --tw-gradient-to: #27272a var(--tw-gradient-to-position) !important;
 }
 
 html.dark .shadow-sm,
