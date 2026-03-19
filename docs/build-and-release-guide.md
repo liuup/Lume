@@ -1,144 +1,228 @@
 # Lume 编译、打包与发布指南
 
-本文档说明如何在本地或 GitHub Actions 中构建 Lume 的 macOS、Windows 与 Linux 发布产物。
+本文档基于当前仓库的实际配置更新，目标是说明：
 
----
+- 当前项目的构建技术栈
+- 本地开发与本地打包方式
+- macOS / Windows / Linux 的平台差异
+- 当前 GitHub Actions 发布流的真实行为
 
-## 一、项目基础信息
+## 一、当前项目技术栈
 
-Lume 基于以下技术栈构建：
+Lume 当前不是单一技术栈应用，而是一个桌面壳 + 前端 + Rust 后端 + 混合 PDF 运行时的组合：
 
-- Tauri v2
-- React + TypeScript + Vite
-- Rust
-- PDFium
+- 桌面框架：`Tauri v2`
+- 前端：`React 19` + `TypeScript` + `Vite 7`
+- 样式：`Tailwind CSS 3`
+- 后端：`Rust`
+- 数据库：`SQLite`，通过 `rusqlite` 的 `bundled` 特性静态集成 SQLite
+- PDF 运行时：
+  - Rust 侧使用 `pdfium-render`
+  - 前端侧使用 `pdfjs-dist`
+- 原生 CLI：`clap`
 
-由于 PDF 渲染依赖平台动态库，因此打包时必须同时处理：
+当前相关配置文件：
 
-- macOS: `libpdfium.dylib`
-- Windows: `pdfium.dll`
-- Linux: `libpdfium.so`
+- [package.json](../package.json)
+- [src-tauri/Cargo.toml](../src-tauri/Cargo.toml)
+- [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json)
 
----
+## 二、当前构建产物模型
 
-## 二、本地开发环境准备
+Lume 当前会生成两类可执行入口：
+
+1. Tauri 桌面应用主程序
+2. 独立原生 CLI 二进制 `lume-cli`
+
+需要特别注意的是，桌面应用和 CLI 都依赖当前项目的 PDF / 数据层实现，但打包发布时真正对最终用户分发的主入口仍然是桌面应用 bundle。
+
+当前仓库中与 CLI 相关的实现位置：
+
+- [src-tauri/src/cli.rs](../src-tauri/src/cli.rs)
+- [src-tauri/src/bin/lume-cli.rs](../src-tauri/src/bin/lume-cli.rs)
+
+CLI 推荐使用的当前语法是子命令风格，例如：
+
+```bash
+Lume list
+Lume search "transformer"
+Lume export --format bibtex -o refs.bib
+Lume open /absolute/path/to/paper.pdf
+```
+
+仓库里仍保留了 `--list-papers` 这类旧参数兼容层，主要用于现有 workflow 冒烟测试，但文档和日常使用应优先采用新的子命令形式。
+
+## 三、版本号与发布前检查
+
+当前 release workflow 用 `package.json` 中的版本号生成：
+
+- Git tag：`v<version>`
+- Release 标题：`Lume v<version>`
+
+但仓库中还有至少两个地方也维护版本号：
+
+- [package.json](../package.json)
+- [src-tauri/Cargo.toml](../src-tauri/Cargo.toml)
+- [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json)
+
+发布前建议先确认这三个文件中的版本一致，否则最终产物、窗口 About 信息、Cargo 元数据和 GitHub Release 名称可能出现不一致。
+
+## 四、本地开发环境准备
 
 ### 通用依赖
 
-在开始前，请先安装：
+建议准备以下环境：
 
-- Node.js 20+
-- Rust 工具链（`rustup` / `cargo`）
-- 项目依赖
+- Node.js 20.x
+- npm
+- Rust stable toolchain
+- 平台对应的 Tauri 构建依赖
 
-在仓库根目录执行：
+安装前端依赖：
 
 ```bash
 npm install
 ```
 
-### 开发模式运行
+### 本地开发模式
 
 ```bash
 npm run tauri dev
 ```
 
-### 本地构建 Release
+这会：
+
+- 启动 Vite 开发服务器
+- 启动 Tauri 开发壳
+- 使用 [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) 中定义的 `beforeDevCommand`
+
+### 本地前端构建
 
 ```bash
-npm run tauri build
+npm run build
 ```
 
----
+该命令会先执行 `tsc`，再执行 `vite build`。
 
-## 三、macOS 构建说明
+### 本地测试
 
-### 1. 准备 PDFium 动态库
+```bash
+npm test
+```
 
-需要下载与目标架构匹配的 `libpdfium.dylib`，并放到 `src-tauri/` 目录下。
+当前前端测试基于 `Vitest`。
 
-当前项目通过平台专用配置文件注入该资源：
+## 五、PDF 运行时与平台动态库
+
+Lume 当前在 Rust 侧依赖 PDFium，因此构建桌面发布包时必须为目标平台准备对应动态库：
+
+- macOS: `libpdfium.dylib`
+- Windows: `pdfium.dll`
+- Linux: `libpdfium.so`
+
+平台资源注入由以下配置负责：
 
 - [src-tauri/tauri.macos.conf.json](../src-tauri/tauri.macos.conf.json)
+- [src-tauri/tauri.windows.conf.json](../src-tauri/tauri.windows.conf.json)
+- [src-tauri/tauri.linux.conf.json](../src-tauri/tauri.linux.conf.json)
 
-### 2. 本地打包命令
+当前仓库只直接带了 macOS 的 `src-tauri/libpdfium.dylib`。Windows 和 Linux 构建前通常需要手动下载对应 PDFium 动态库并放到 `src-tauri/`。
 
-如果你在 macOS 本机上构建：
+## 六、本地打包通用命令
+
+最基础的桌面打包命令：
 
 ```bash
 npm run tauri build
 ```
 
-如果你要指定 Apple Silicon 目标：
+该命令会先执行：
 
 ```bash
-npm run tauri build -- --target aarch64-apple-darwin
+npm run build
 ```
 
-### 3. 产物位置
+然后再执行 Tauri bundling。
 
-常见输出目录：
+如果你要传递 Tauri 额外参数，写法如下：
+
+```bash
+npm run tauri build -- --ci
+```
+
+## 七、macOS 构建
+
+### 前置条件
+
+- macOS 主机
+- Node.js 20
+- Rust stable
+- 若目标为 Apple Silicon，建议安装 `aarch64-apple-darwin` target
+- `src-tauri/libpdfium.dylib` 已存在
+
+仓库当前的 release workflow 构建的是 Apple Silicon 包：
+
+```bash
+rustup target add aarch64-apple-darwin
+npm install
+npm run tauri build -- --target aarch64-apple-darwin --ci
+```
+
+### 常见产物位置
 
 - `.app`: `src-tauri/target/aarch64-apple-darwin/release/bundle/macos/`
 - `.dmg`: `src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/`
 
-### 4. 注意事项
+### 现状说明
 
-- 未签名应用首次打开时，macOS 可能拦截
-- 可在“系统设置 → 隐私与安全性”中手动允许打开
+- 当前 workflow 没有做 Apple 签名或 notarization
+- 未签名应用在用户机器上可能触发 Gatekeeper 拦截
 
----
+## 八、Windows 构建
 
-## 四、Windows 构建说明
+### 前置条件
 
-### 1. 准备 Windows 环境
+建议在真实 Windows 机器或 GitHub Actions `windows-latest` 环境中构建。
 
-建议在真实 Windows 机器或 Windows 虚拟机中构建。
+需要：
 
-需要安装：
+- Node.js 20
+- Rust stable
+- Visual Studio Build Tools
+- NSIS
+- `src-tauri/pdfium.dll`
+- WebView2 Runtime
 
-- Visual Studio Build Tools（包含“使用 C++ 的桌面开发”）
-- Rust 工具链
-- Node.js
-- WebView2 Runtime（多数 Windows 10/11 已内置）
+### 准备 PDFium
 
-### 2. 准备 PDFium 动态库
-
-下载 Windows x64 版本 PDFium，提取 `pdfium.dll`，放到 `src-tauri/` 目录下。
-
-当前项目通过平台专用配置文件注入该资源：
-
-- [src-tauri/tauri.windows.conf.json](../src-tauri/tauri.windows.conf.json)
-
-### 3. 构建“免安装可运行版”
-
-执行：
+当前 workflow 使用的是 `pdfium-win-x64.tgz`，并将其中的 `pdfium.dll` 放到：
 
 ```bash
+src-tauri/pdfium.dll
+```
+
+### 构建绿色版
+
+```bash
+npm install
 npm run tauri build -- --no-bundle --ci
 ```
 
-构建出的主程序通常位于：
+常见主程序位置：
 
 - `src-tauri/target/release/Lume.exe`
 
-注意：
-
-- 绿色版不能只拷贝 `Lume.exe`
-- 需要把 `pdfium.dll` 和 `Lume.exe` 放在同一目录下
-
-也就是说，真正可分发的绿色版目录应至少包含：
+当前项目的便携版目录至少应包含：
 
 - `Lume.exe`
 - `pdfium.dll`
 
-### 4. 构建“安装版 exe”
+也就是说，不能只分发单独一个 `Lume.exe`。
 
-当前 workflow 使用 NSIS 安装器。
-
-本地可执行：
+### 构建 NSIS 安装版
 
 ```bash
+npm install
 npm run tauri build -- --bundles nsis --ci
 ```
 
@@ -146,46 +230,28 @@ npm run tauri build -- --bundles nsis --ci
 
 - `src-tauri/target/release/bundle/nsis/`
 
-安装完成后，主程序本体仍然是 `Lume.exe`，因此安装版默认也支持：
+### 当前 release workflow 的 Windows 行为
 
-```powershell
-Lume.exe list
-Lume.exe list --json
-```
+当前 [.github/workflows/release.yml](../.github/workflows/release.yml) 会：
 
-### 5. 重要说明
+1. 构建 `--no-bundle` 绿色版
+2. 手工将 `Lume.exe` 与 `pdfium.dll` 组装到 `dist-portable/Lume/`
+3. 运行一次 CLI 冒烟测试
+4. 再构建 NSIS 安装器
+5. 静默安装后再运行一次 CLI 冒烟测试
 
-当前项目中的 PDFium 加载逻辑已兼容以下位置：
+上传的 artifact 名称：
 
-- Tauri 打包后的 `resource_dir`
-- 当前可执行文件所在目录
-- 项目开发目录
+- `Lume-windows-portable`
+- `Lume-windows-installer`
 
-对应代码位于：
+## 九、Linux 构建
 
-- [src-tauri/src/lib.rs](../src-tauri/src/lib.rs)
+### 前置条件
 
-这意味着：
+当前 workflow 使用 `ubuntu-24.04`，并构建 `.deb`。
 
-- **安装版** 可从 bundle 资源中找到 `pdfium.dll`
-- **绿色版** 可从 `Lume.exe` 同目录找到 `pdfium.dll`
-- **安装版 / 绿色版** 都复用同一个 `Lume.exe`，因此都内置原生子命令式 CLI（如 `list` / `search` / `open`）
-
----
-
-## 五、Linux `.deb` 构建说明
-
-### 1. 准备 Linux 环境
-
-建议在 Ubuntu 24.04 或兼容的 Debian / Ubuntu 环境中构建。
-
-需要安装：
-
-- Rust 工具链
-- Node.js
-- GTK / WebKitGTK 构建依赖
-
-常用依赖安装命令：
+需要安装的构建依赖与 workflow 保持一致：
 
 ```bash
 sudo apt-get update
@@ -201,15 +267,9 @@ sudo apt-get install -y \
   curl
 ```
 
-### 2. 准备 PDFium 动态库
+### 准备 PDFium
 
-下载 Linux x64 版本 PDFium，提取 `libpdfium.so`，放到 `src-tauri/` 目录下。
-
-当前项目通过平台专用配置文件注入该资源：
-
-- [src-tauri/tauri.linux.conf.json](../src-tauri/tauri.linux.conf.json)
-
-示例命令：
+当前 workflow 的做法：
 
 ```bash
 curl -L -o pdfium.tgz https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz
@@ -217,11 +277,10 @@ tar -xzf pdfium.tgz lib/libpdfium.so
 mv lib/libpdfium.so src-tauri/libpdfium.so
 ```
 
-### 3. 构建 `.deb`
-
-执行：
+### 构建 `.deb`
 
 ```bash
+npm install
 npm run tauri build -- --bundles deb --ci
 ```
 
@@ -229,158 +288,129 @@ npm run tauri build -- --bundles deb --ci
 
 - `src-tauri/target/release/bundle/deb/`
 
-### 4. 安装与验证
+### 运行时依赖
 
-安装：
+当前 Linux 打包配置声明在：
+
+- [src-tauri/tauri.linux.conf.json](../src-tauri/tauri.linux.conf.json)
+
+其中 `.deb` 运行时依赖包括：
+
+- `libwebkit2gtk-4.1-0`
+- `libjavascriptcoregtk-4.1-0`
+- `libgtk-3-0`
+- `libayatana-appindicator3-1`
+- `librsvg2-2`
+
+### 当前 release workflow 的 Linux 行为
+
+Linux job 会：
+
+1. 构建 `.deb`
+2. 用 `dpkg -i` 安装该包
+3. 找到安装出来的 CLI / 主程序入口
+4. 执行一次 CLI 冒烟测试
+
+上传的 artifact 名称：
+
+- `Lume-linux-deb`
+
+## 十、独立 CLI 构建与验证
+
+除了 Tauri 主程序，当前仓库还提供独立 CLI binary：
+
+开发态快速验证：
 
 ```bash
-sudo dpkg -i src-tauri/target/release/bundle/deb/*.deb
+npm run cli:list
 ```
 
-安装后可直接验证 CLI：
+直接使用 Cargo：
 
 ```bash
-Lume list
-Lume list --json
+cargo run --manifest-path src-tauri/Cargo.toml --bin lume-cli -- list
 ```
 
-### 5. 重要说明
+发布态二进制通常位于：
 
-- `.deb` 包会携带 `libpdfium.so`
-- Linux 包同样复用主程序二进制，因此默认支持原生子命令式 CLI
-- 当前配置为 Debian 包声明了常见运行时依赖，减少安装后缺库概率
+- macOS / Linux: `src-tauri/target/release/lume-cli`
+- Windows: `src-tauri/target/release/lume-cli.exe`
 
----
+如果你需要纯终端使用而不依赖桌面窗口，这个入口比直接调用 GUI 主程序更明确。
 
-## 六、GitHub Actions 构建说明
+## 十一、当前 GitHub Actions 发布流
 
-当前仓库的发布工作流为：
+当前发布工作流文件：
 
 - [.github/workflows/release.yml](../.github/workflows/release.yml)
 
-### 当前特性
+### 触发方式
 
-该 workflow：
+当前只支持：
 
-- **不会自动触发**
-- 仅支持 **手动执行**（`workflow_dispatch`）
-- 同时构建：
-  - macOS 包
-  - Windows 绿色版
-  - Windows 安装版
-  - Linux `.deb`
-- 在上传 Windows / Linux artifact 之前，会自动验证 CLI 是否可用
-- 构建完成后会自动创建或更新一个 **Draft Release**
+- `workflow_dispatch`
 
-### 产物说明
+也就是说，它不会在 push、tag 或 release event 上自动运行。
 
-手动运行后，Actions 中会出现以下 artifact：
+### 当前会构建的产物
+
+- macOS Apple Silicon `.dmg` 与 `.app`
+- Windows 绿色版目录
+- Windows NSIS 安装器
+- Linux `.deb`
+
+### 上传到 Actions 的 artifact
 
 - `Lume-macos-aarch64`
 - `Lume-windows-portable`
 - `Lume-windows-installer`
 - `Lume-linux-deb`
 
-其中：
+### Draft Release 行为
 
-- `Lume-windows-portable` 为免安装运行版
-- `Lume-windows-installer` 为安装器版
-- `Lume-linux-deb` 为 Debian / Ubuntu 安装包
+工作流最后会：
 
-Windows job 当前还包含两步 CLI 冒烟验证：
-
-- 直接运行绿色版中的 `Lume.exe list`
-- 静默安装 NSIS 包后，再运行安装目录里的 `Lume.exe list`
-
-Linux job 当前还包含一步 CLI 冒烟验证：
-
-- 安装 `.deb` 后直接运行包内安装出的 `Lume list`
-
-如果这些检查中的任意一步失败，artifact 不会上传，草稿发布也不会继续更新。
-
-此外，workflow 还会基于 `package.json` 中的版本号自动创建或更新一个草稿发布：
-
-- Tag 形式：`v<version>`
-- Release 标题：`Lume v<version>`
-
-草稿发布会附带以下资源：
+1. 读取 `package.json` 的版本号
+2. 生成 `v<version>` 形式的 tag
+3. 创建或更新对应的 GitHub Draft Release
+4. 上传以下资源：
 
 - macOS `.dmg`
-- Windows 安装版 `.exe`
+- Windows 安装器 `.exe`
 - Windows 绿色版 `.zip`
 - Linux `.deb`
 
----
+### 失败条件
 
-## 七、关于“免安装可运行 exe”的边界
+只要以下任一环节失败，后续草稿发布就不会继续：
 
-这里的“免安装”指：
+- 平台构建失败
+- PDFium 注入失败
+- Windows 绿色版 CLI 冒烟测试失败
+- Windows 安装版 CLI 冒烟测试失败
+- Linux `.deb` 安装后 CLI 冒烟测试失败
 
-- 用户不需要先运行安装向导
-- 直接解压后双击 `Lume.exe` 即可运行
+## 十二、推荐发布检查清单
 
-但仍有系统前提：
+正式发布前建议至少执行以下检查：
 
-- Windows 机器需要具备 WebView2 Runtime
+1. 确认 `package.json`、`Cargo.toml`、`tauri.conf.json` 版本一致。
+2. 本地执行 `npm install`。
+3. 本地执行 `npm test`。
+4. 本地执行 `npm run build`。
+5. 检查目标平台的 PDFium 动态库已放在 `src-tauri/`。
+6. 至少在一个目标平台本地执行一次 `npm run tauri build`。
+7. 如果使用 GitHub Actions 发布，手动触发 `Build Lume Desktop` workflow。
 
-这属于 Tauri/Windows 运行前提，不是 Lume 独有要求。
+## 十三、当前尚未覆盖的发布能力
 
----
+这份仓库当前还没有完整自动化的部分包括：
 
-## 八、推荐发布方式
-
-如果你准备开始公开宣传，建议同时提供两种 Windows 下载项：
-
-### 1. 普通用户
-- 推荐下载 **安装版 exe**
-- 优点：安装体验更标准，适合大多数用户
-
-### 2. 高级用户 / 便携使用场景
-- 提供 **绿色版压缩包**
-- 适合放在移动硬盘、同步盘或临时测试
-
-### 3. macOS 用户
-- 提供 `.dmg`
-- 如无签名，说明首次打开的系统放行方法
-
-### 4. Linux 用户
-- 提供 `.deb`
-- 明确说明当前优先支持 Debian / Ubuntu 系发行版
-
----
-
-## 九、推荐宣传页下载文案
-
-你可以在官网或发布页上直接使用类似文案：
-
-- **macOS (Apple Silicon)** — DMG 安装包
-- **Windows Installer** — 推荐大多数用户下载
-- **Windows Portable** — 免安装绿色版，解压即用
-- **Linux (.deb)** — Debian / Ubuntu 安装包
-
----
-
-## 十、常见问题
-
-### 1. 为什么 Windows 绿色版不能只有一个 exe？
-因为 PDF 渲染依赖 `pdfium.dll`，它必须和 `Lume.exe` 一起分发。
-
-### 2. 为什么用户电脑上可能仍然打不开？
-最常见原因是缺少 WebView2 Runtime，或系统安全策略阻止未签名程序。
-
-### 3. Linux `.deb` 安装后打不开怎么办？
-最常见原因是系统缺少 WebKitGTK 相关运行库，或目标发行版不是 Debian / Ubuntu 兼容环境。建议优先在 Ubuntu 24.04 / 22.04 上验证。
-
-### 3. 为什么 macOS 会提示无法验证开发者？
-因为应用尚未完成 Apple Developer 签名与公证。
-
----
-
-## 十、后续可继续完善的发布能力
-
-后续可以继续补充：
-
-- 版本号驱动的正式发布流
-- macOS 签名 / notarization
+- macOS 签名与 notarization
 - Windows 代码签名
-- 自动生成发布说明
+- 版本变更自动同步到多个配置文件
+- 基于 tag push 的正式自动发布
+- 多架构 macOS 通用包
+- `.rpm` / AppImage / Snap 等 Linux 发行格式
+
+如果后续这些能力补齐，这份文档也应该一起更新，而不是继续沿用旧描述。
