@@ -541,7 +541,7 @@ export function LibraryView({
           {isTrashView ? (
             <button
               onClick={() => { void onEmptyTrash(); }}
-              className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-red-600 bg-white border border-red-200 rounded-lg hover:bg-red-50 transition-colors shadow-sm active:scale-[0.98]"
+              className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-red-600 dark:text-red-300 bg-white dark:bg-zinc-950 border border-red-200 dark:border-red-950/70 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors shadow-sm active:scale-[0.98]"
               title={t("libraryView.actions.emptyTrashTitle")}
             >
               <Trash size={15} />

@@ -190,8 +190,8 @@ export function FolderSidebar({
   };
 
   return (
-    <aside className={`bg-zinc-50 border-r border-zinc-200 flex flex-col h-full shrink-0 overflow-hidden transition-[width] duration-300 ${isCollapsed ? "w-16" : "w-64"}`}>
-      <div className={`h-14 border-b border-zinc-200 shrink-0 flex items-center ${isCollapsed ? "px-2 justify-center" : "px-3 justify-between"}`}>
+    <aside className={`bg-zinc-50 dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 flex flex-col h-full shrink-0 overflow-hidden transition-[width] duration-300 ${isCollapsed ? "w-16" : "w-64"}`}>
+      <div className={`h-14 border-b border-zinc-200 dark:border-zinc-800 shrink-0 flex items-center ${isCollapsed ? "px-2 justify-center" : "px-3 justify-between"}`}>
         {!isCollapsed && (
           <div className="flex items-center gap-2">
             <button
@@ -217,7 +217,7 @@ export function FolderSidebar({
           <div className="flex-1 min-h-0 overflow-y-auto px-2 py-3 flex flex-col items-center gap-2">
             <button
               onClick={() => selectedFolder && onSelectFolder(selectedFolder.id)}
-              className={`inline-flex items-center justify-center w-10 h-10 rounded-xl border transition-colors ${selectedFolder ? "border-indigo-200 bg-indigo-50 text-indigo-600" : "border-zinc-200 bg-white text-zinc-400"}`}
+              className={`inline-flex items-center justify-center w-10 h-10 rounded-xl border transition-colors ${selectedFolder ? "border-indigo-200 dark:border-indigo-900/70 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-300" : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-400 dark:text-zinc-500"}`}
               title={selectedFolder?.name ?? t("folderSidebar.labels.currentFolder")}
             >
               <Folder size={16} />
@@ -237,8 +237,8 @@ export function FolderSidebar({
               onClick={() => onSelectFolder(TRASH_FOLDER_ID)}
               className={`inline-flex items-center justify-center w-10 h-10 rounded-xl border transition-colors ${
                 isTrashSelected
-                  ? "border-rose-200 bg-rose-50 text-rose-600"
-                  : "border-zinc-200 bg-white text-zinc-500"
+                  ? "border-rose-200 dark:border-rose-900/70 bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-300"
+                  : "border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-zinc-500 dark:text-zinc-400"
               }`}
               title={t("folderSidebar.labels.trash")}
             >
@@ -593,10 +593,10 @@ function FolderTreeItem({
         data-folder-drop-id={node.id}
         className={`group flex items-center space-x-1.5 px-2 py-1.5 rounded-md cursor-pointer select-none transition-colors ${
           isDropTarget
-            ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-300"
+            ? "bg-indigo-100 dark:bg-indigo-950/55 text-indigo-700 dark:text-indigo-200 ring-1 ring-indigo-300 dark:ring-indigo-800"
             : isSelected
-            ? "bg-indigo-50 text-indigo-700"
-            : "text-zinc-600 hover:bg-zinc-100"
+            ? "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-200"
+            : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900/80"
         }`}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
         onMouseEnter={() => {
@@ -629,7 +629,7 @@ function FolderTreeItem({
         {open && hasVisibleChildren ? (
           <FolderOpen size={14} className="shrink-0 text-indigo-400" />
         ) : (
-          <Folder size={14} className={`shrink-0 ${isSelected ? "text-indigo-500" : "text-zinc-400"}`} />
+          <Folder size={14} className={`shrink-0 ${isSelected ? "text-indigo-500 dark:text-indigo-300" : "text-zinc-400 dark:text-zinc-500"}`} />
         )}
 
         <span className="text-[13px] font-medium flex-1 truncate">{node.name}</span>
@@ -673,8 +673,8 @@ function FolderTreeItem({
               onClick={() => onSelectFolder(TRASH_FOLDER_ID)}
               className={`group flex w-full items-center space-x-1.5 rounded-md px-2 py-1.5 transition-colors ${
                 isTrashSelected
-                  ? "bg-rose-50 text-rose-700"
-                  : "text-zinc-600 hover:bg-zinc-100"
+                  ? "bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-200"
+                  : "text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900/80"
               }`}
               style={{ paddingLeft: `${8 + (depth + 1) * 14}px` }}
             >
