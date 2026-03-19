@@ -213,6 +213,10 @@ html.dark ::-webkit-scrollbar-thumb {
   background-size: 20px 20px;
 }
 
+.pdf-canvas-inverted {
+  filter: invert(1) hue-rotate(180deg);
+}
+
 /* Hide scrollbar for Chrome, Safari and Opera */
 .no-scrollbar::-webkit-scrollbar {
   display: none;

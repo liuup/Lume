@@ -5,6 +5,10 @@
     "zoomOptions": "Zoom Options",
     "fitWidth": "Fit to Width",
     "fitHeight": "Fit to Height",
+    "invertColors": {
+      "enable": "Enable PDF color inversion",
+      "disable": "Disable PDF color inversion"
+    },
     "tool": {
       "pointer": "Pointer — scroll & pan freely",
       "textNote": "Text Note — click anywhere on the PDF to type a note",

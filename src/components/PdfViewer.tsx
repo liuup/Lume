@@ -15,6 +15,7 @@ interface PdfViewerProps {
   totalPages: number;
   dimensions: PageDimension[];
   scale: number;
+  isColorInverted: boolean;
   activeTool: ToolType;
   currentPage: number;
   searchMatches: PdfSearchMatch[];
@@ -167,6 +168,7 @@ export function PdfViewer({
   totalPages,
   dimensions,
   scale,
+  isColorInverted,
   activeTool,
   currentPage,
   searchMatches,
@@ -547,6 +549,7 @@ export function PdfViewer({
           pageIndex={pageIndex}
           dimension={pageDimensions[pageIndex]}
           scale={scale}
+          isColorInverted={isColorInverted}
           activeTool={activeTool}
           shouldPrefetch={prefetchPages.has(pageIndex)}
           shouldLoadText={textLoadPages.has(pageIndex)}
@@ -594,6 +597,7 @@ interface PageRenderProps {
   pageIndex: number;
   dimension: PageDimension;
   scale: number;
+  isColorInverted: boolean;
   activeTool: ToolType;
   shouldPrefetch: boolean;
   shouldLoadText: boolean;
@@ -613,6 +617,7 @@ function PageRender({
   pageIndex,
   dimension,
   scale,
+  isColorInverted,
   activeTool,
   shouldPrefetch,
   shouldLoadText,
@@ -847,7 +852,7 @@ function PageRender({
       >
         <canvas
           ref={canvasRef}
-          className="absolute inset-0 w-full h-full"
+          className={`absolute inset-0 w-full h-full ${isColorInverted ? "pdf-canvas-inverted" : ""}`}
           style={{ opacity: hasRenderedBitmap ? 1 : 0 }}
         />
 
@@ -910,6 +915,7 @@ function PageRender({
             width={width}
             height={height}
             scale={scale}
+            isColorInverted={isColorInverted}
             activeTool={activeTool}
             onAnnotationsSaved={onAnnotationsSaved}
           />

@@ -5,6 +5,10 @@
     "zoomOptions": "缩放选项",
     "fitWidth": "适应宽度",
     "fitHeight": "适应高度",
+    "invertColors": {
+      "enable": "开启 PDF 反色预览",
+      "disable": "关闭 PDF 反色预览"
+    },
     "tool": {
       "pointer": "指针 — 自由滚动和拖动",
       "textNote": "文字批注 — 在 PDF 任意位置点击输入备注",

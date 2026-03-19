@@ -8,6 +8,7 @@ interface AnnotationLayerProps {
   width: number;
   height: number;
   scale: number;
+  isColorInverted: boolean;
   activeTool: ToolType;
   onAnnotationsSaved?: (pdfPath: string) => void;
 }
@@ -46,7 +47,16 @@ interface ActiveTextInput {
 const BASE_FONT_SIZE = 13;
 const FONT_FAMILY = "system-ui, -apple-system, sans-serif";
 
-export function AnnotationLayer({ pdfPath, pageIndex, width, height, scale, activeTool, onAnnotationsSaved }: AnnotationLayerProps) {
+export function AnnotationLayer({
+  pdfPath,
+  pageIndex,
+  width,
+  height,
+  scale,
+  isColorInverted,
+  activeTool,
+  onAnnotationsSaved,
+}: AnnotationLayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hasLoadedAnnotationsRef = useRef(false);
@@ -135,7 +145,7 @@ export function AnnotationLayer({ pdfPath, pageIndex, width, height, scale, acti
     const scaledFontSize = BASE_FONT_SIZE * scale;
     const lineHeight = scaledFontSize * 1.35;
     ctx.font = `${scaledFontSize}px ${FONT_FAMILY}`;
-    ctx.fillStyle = "rgba(20, 20, 20, 0.92)";
+    ctx.fillStyle = isColorInverted ? "rgba(245, 245, 245, 0.94)" : "rgba(20, 20, 20, 0.92)";
     ctx.globalCompositeOperation = "source-over";
 
     for (const ann of textAnnotations) {
@@ -157,13 +167,13 @@ export function AnnotationLayer({ pdfPath, pageIndex, width, height, scale, acti
         ctx.lineTo(path.points[i].x * scale, path.points[i].y * scale);
       }
       if (path.tool === "highlight") {
-        ctx.strokeStyle = "rgba(255, 235, 59, 0.45)";
+        ctx.strokeStyle = isColorInverted ? "rgba(250, 204, 21, 0.34)" : "rgba(255, 235, 59, 0.45)";
         ctx.lineWidth = 14 * scale;
         ctx.lineCap = "square";
         ctx.lineJoin = "bevel";
-        ctx.globalCompositeOperation = "multiply";
+        ctx.globalCompositeOperation = isColorInverted ? "screen" : "multiply";
       } else {
-        ctx.strokeStyle = "rgba(43, 108, 208, 0.85)";
+        ctx.strokeStyle = isColorInverted ? "rgba(125, 211, 252, 0.92)" : "rgba(43, 108, 208, 0.85)";
         ctx.lineWidth = 2 * scale;
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
@@ -172,7 +182,7 @@ export function AnnotationLayer({ pdfPath, pageIndex, width, height, scale, acti
       ctx.stroke();
       ctx.globalCompositeOperation = "source-over";
     }
-  }, [paths, currentPath, width, height, scale, textAnnotations]);
+  }, [paths, currentPath, width, height, isColorInverted, scale, textAnnotations]);
 
   // Auto-focus textarea when it appears
   useEffect(() => {

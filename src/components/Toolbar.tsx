@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type, PanelRight, PanelLeft, ChevronDown, Eraser } from "lucide-react";
+import { ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type, PanelRight, PanelLeft, ChevronDown, Eraser, Contrast } from "lucide-react";
 import { ToolType } from "../types";
 import { useI18n } from "../hooks/useI18n";
 
@@ -9,6 +9,8 @@ interface ToolbarProps {
   onZoomOut: () => void;
   scale: number;
   hasPdf: boolean;
+  isPdfColorInverted: boolean;
+  onTogglePdfColorInvert: () => void;
   activeTool: ToolType;
   onToolChange: (tool: ToolType) => void;
   isAiPanelOpen: boolean;
@@ -27,6 +29,8 @@ export function Toolbar({
   onZoomOut,
   scale,
   hasPdf,
+  isPdfColorInverted,
+  onTogglePdfColorInvert,
   activeTool,
   onToolChange,
   isAiPanelOpen,
@@ -193,6 +197,22 @@ export function Toolbar({
             className="p-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-white dark:hover:bg-zinc-800 rounded-xl transition-all active:scale-90"
           >
             <ZoomIn size={16} />
+          </TooltipButton>
+        </div>
+
+        <div className="w-px h-5 bg-zinc-300 dark:bg-zinc-700 mx-2 opacity-50" />
+
+        <div className="flex items-center px-1">
+          <TooltipButton
+            onClick={onTogglePdfColorInvert}
+            tooltip={isPdfColorInverted ? t("toolbar.invertColors.disable") : t("toolbar.invertColors.enable")}
+            className={`p-2 rounded-xl transition-all duration-150 active:scale-90 ${
+              isPdfColorInverted
+                ? "text-emerald-700 dark:text-emerald-300 bg-white dark:bg-zinc-800 shadow-sm ring-1 ring-black/5"
+                : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-100 hover:bg-white/50 dark:hover:bg-zinc-800/80"
+            }`}
+          >
+            <Contrast size={16} />
           </TooltipButton>
         </div>
 

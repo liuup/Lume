@@ -100,7 +100,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     "w-full flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors text-left",
                     isActive
                       ? "bg-white text-zinc-900 shadow-sm border border-zinc-200"
-                      : "text-zinc-500 hover:bg-white/80 hover:text-zinc-800"
+                      : "text-zinc-500 hover:bg-zinc-100/80 hover:text-zinc-800 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-100"
                   ].join(" ")}
                 >
                   <Icon size={16} />
@@ -121,11 +121,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-5">
+          <div className="flex-1 overflow-y-auto px-5 py-4">
             {isLoading ? (
               <div className="p-8 text-center text-sm text-zinc-500 animate-pulse">{t("settings.loading")}</div>
             ) : (
-              <div className="space-y-3">
+              <div className="divide-y divide-zinc-200/80 dark:divide-zinc-800">
                 {activeSection === "appearance" && (
                   <>
                     <SettingCard title={t("settings.theme.label")} description={`${t("settings.theme.description")}${themeSuffix}`}>
@@ -405,13 +405,13 @@ function SettingCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-[13px] font-medium text-zinc-800">{title}</div>
-          {description ? <div className="text-[11px] text-zinc-500 mt-0.5 leading-relaxed">{description}</div> : null}
+    <section className="py-3 first:pt-0 last:pb-0">
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-5">
+        <div className="min-w-0 flex-1 sm:max-w-[360px]">
+          <div className="text-[13px] font-medium text-zinc-800 leading-5">{title}</div>
+          {description ? <div className="mt-0.5 text-[11px] leading-5 text-zinc-500">{description}</div> : null}
         </div>
-        <div className="shrink-0 max-w-[65%]">{children}</div>
+        <div className="shrink-0 sm:max-w-[min(100%,420px)]">{children}</div>
       </div>
     </section>
   );

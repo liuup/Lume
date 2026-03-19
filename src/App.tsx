@@ -101,6 +101,7 @@ function App() {
   const [rightPanelWidth, setRightPanelWidth] = useState(320);
   const [aiPanelWidth, setAiPanelWidth] = useState(340);
   const [showSearch, setShowSearch] = useState(false);
+  const [isPdfColorInverted, setIsPdfColorInverted] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
   const [searchMatches, setSearchMatches] = useState<PdfSearchMatch[]>([]);
@@ -926,6 +927,8 @@ function App() {
                   onZoomOut={zoomOut}
                   scale={scale}
                   hasPdf={!!pdfPath}
+                  isPdfColorInverted={isPdfColorInverted}
+                  onTogglePdfColorInvert={() => setIsPdfColorInverted((value) => !value)}
                   activeTool={activeTool}
                   onToolChange={setActiveTool}
                   isAiPanelOpen={isAiPanelOpen}
@@ -988,6 +991,7 @@ function App() {
                         totalPages={tab.totalPages} 
                         dimensions={tab.dimensions} 
                         scale={scale} 
+                        isColorInverted={isPdfColorInverted}
                         activeTool={activeTool}
                         currentPage={tab.currentPage}
                         searchMatches={tab.id === activeTabId ? searchMatches : []}
