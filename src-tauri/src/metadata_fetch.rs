@@ -5,7 +5,7 @@ use regex::Regex;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -15,6 +15,7 @@ use crate::models::{
 };
 
 static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
+static URL_VALIDATION_CLIENT: OnceLock<Client> = OnceLock::new();
 static DOI_REGEX: OnceLock<Regex> = OnceLock::new();
 static ARXIV_REGEX: OnceLock<Regex> = OnceLock::new();
 static ARXIV_LEGACY_REGEX: OnceLock<Regex> = OnceLock::new();
@@ -199,6 +200,17 @@ pub fn http_client() -> &'static Client {
             .user_agent("Lume/0.1 (metadata enrichment)")
             .build()
             .expect("failed to build metadata HTTP client")
+    })
+}
+
+fn url_validation_client() -> &'static Client {
+    URL_VALIDATION_CLIENT.get_or_init(|| {
+        Client::builder()
+            .timeout(Duration::from_secs(6))
+            .redirect(reqwest::redirect::Policy::limited(6))
+            .user_agent("Lume/0.1 (metadata url validation)")
+            .build()
+            .expect("failed to build metadata URL validation HTTP client")
     })
 }
 
@@ -494,6 +506,95 @@ pub fn normalize_doi(value: &str) -> Option<String> {
     }
 }
 
+fn normalize_doi_url(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    let lowered = trimmed.to_lowercase();
+    let is_doi_url = lowered.starts_with("https://doi.org/")
+        || lowered.starts_with("http://doi.org/")
+        || lowered.starts_with("https://dx.doi.org/")
+        || lowered.starts_with("http://dx.doi.org/");
+
+    if is_doi_url {
+        normalize_doi(trimmed)
+    } else {
+        None
+    }
+}
+
+fn looks_like_web_url(value: &str) -> bool {
+    let lowered = value.trim().to_lowercase();
+    lowered.starts_with("https://") || lowered.starts_with("http://")
+}
+
+fn is_definitively_broken_url_status(status: u16) -> bool {
+    matches!(status, 404 | 410)
+}
+
+fn url_validation_error_indicates_broken_target(error: &str) -> bool {
+    let lower = error.to_lowercase();
+    lower.contains("too many redirects")
+        || lower.contains("redirect loop")
+        || lower.contains("redirect")
+            && (lower.contains("limit") || lower.contains("loop") || lower.contains("cyclic"))
+}
+
+fn probe_metadata_url(url: &str, use_head: bool) -> Result<Option<bool>, String> {
+    let response = if use_head {
+        url_validation_client().head(url).send()
+    } else {
+        url_validation_client().get(url).send()
+    }
+    .map_err(|e| format!("metadata URL validation failed: {}", e))?;
+
+    let status = response.status().as_u16();
+    if use_head && matches!(status, 405 | 501) {
+        return Ok(None);
+    }
+
+    Ok(Some(!is_definitively_broken_url_status(status)))
+}
+
+fn validate_metadata_url(url: &str) -> Result<bool, String> {
+    if !looks_like_web_url(url) {
+        return Ok(true);
+    }
+
+    retry_metadata_request(|| match probe_metadata_url(url, true) {
+        Ok(Some(result)) => Ok(result),
+        Ok(None) => probe_metadata_url(url, false).map(|result| result.unwrap_or(true)),
+        Err(error) => {
+            if url_validation_error_indicates_broken_target(&error) {
+                Ok(false)
+            } else {
+                Err(error)
+            }
+        }
+    })
+}
+
+pub fn strip_invalid_metadata_url(meta: &mut ParsedPdfMetadata) -> Result<bool, String> {
+    strip_invalid_metadata_url_with(meta, validate_metadata_url)
+}
+
+fn strip_invalid_metadata_url_with<F>(
+    meta: &mut ParsedPdfMetadata,
+    validate: F,
+) -> Result<bool, String>
+where
+    F: FnOnce(&str) -> Result<bool, String>,
+{
+    let Some(url) = meta.url.clone() else {
+        return Ok(false);
+    };
+
+    if validate(&url)? {
+        Ok(false)
+    } else {
+        meta.url = None;
+        Ok(true)
+    }
+}
+
 fn provider_supplies_unstable_publisher(provider: MetadataProvider) -> bool {
     matches!(
         provider,
@@ -570,6 +671,14 @@ fn sanitize_incoming_metadata(
         incoming.doi = None;
         incoming.arxiv_id = None;
         incoming.publisher = None;
+        if incoming
+            .url
+            .as_deref()
+            .and_then(normalize_doi_url)
+            .is_some()
+        {
+            incoming.url = None;
+        }
     }
 
     incoming
@@ -1239,10 +1348,19 @@ pub fn crossref_message_to_metadata(message: CrossrefWorkMessage) -> ParsedPdfMe
         .map(clean_title_text)
         .filter(|value| !value.is_empty());
     let url = message
+        .resource
+        .as_ref()
+        .and_then(|resource| resource.primary.as_ref())
+        .and_then(|primary| primary.url.as_deref())
+        .map(clean_title_text)
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            message
         .url
         .as_deref()
         .map(clean_title_text)
-        .filter(|value| !value.is_empty());
+        .filter(|value| !value.is_empty())
+        });
     let language = message
         .language
         .as_deref()
@@ -2321,6 +2439,41 @@ fn pick_metadata_value_if_allowed(
     pick_metadata_value_with_override(current, incoming, allow_override)
 }
 
+fn pick_item_url(current: &LibraryItem, parsed: &ParsedPdfMetadata) -> String {
+    let Some(incoming_url) = parsed
+        .url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return current.url.clone();
+    };
+
+    let current_url = current.url.trim();
+    if has_meaningful_item_value(current_url) {
+        if let Some(incoming_doi) = normalize_doi_url(incoming_url) {
+            let current_doi = normalize_doi(&current.doi);
+            let parsed_doi = parsed.doi.as_deref().and_then(normalize_doi);
+
+            // Do not replace an existing landing page URL with a DOI redirect
+            // unless the DOI is already confirmed by the current item.
+            if normalize_doi_url(current_url).is_none()
+                && current_doi.as_deref() != Some(incoming_doi.as_str())
+            {
+                return current.url.clone();
+            }
+
+            if let Some(known_doi) = current_doi.or(parsed_doi) {
+                if known_doi != incoming_doi {
+                    return current.url.clone();
+                }
+            }
+        }
+    }
+
+    incoming_url.to_string()
+}
+
 fn merge_item_with_parsed_metadata(
     current: &LibraryItem,
     parsed: &ParsedPdfMetadata,
@@ -2374,7 +2527,7 @@ fn merge_item_with_parsed_metadata(
             &parsed.isbn,
             can_override_bibliographic_fields,
         ),
-        url: pick_metadata_value(&current.url, &parsed.url),
+        url: pick_item_url(current, parsed),
         language: pick_metadata_value(&current.language, &parsed.language),
         date_added: current.date_added.clone(),
         date_modified: current.date_modified.clone(),
@@ -2388,14 +2541,22 @@ pub fn retrieve_item_metadata(
     item_id: String,
     state: tauri::State<'_, crate::models::AppState>,
 ) -> Result<RetrieveMetadataResult, String> {
-    let conn = state
-        .db
-        .lock()
-        .map_err(|e| format!("Database lock error: {}", e))?;
+    refresh_item_metadata_in_db(&state.db, &item_id)
+}
 
-    let current_item = crate::library_commands::fetch_item_from_db(&conn, &item_id)
-        .map_err(|e| format!("Failed to load current item: {}", e))?
-        .ok_or("Item not found".to_string())?;
+pub fn refresh_item_metadata_in_db(
+    db: &Arc<Mutex<rusqlite::Connection>>,
+    item_id: &str,
+) -> Result<RetrieveMetadataResult, String> {
+    let current_item = {
+        let conn = db
+            .lock()
+            .map_err(|e| format!("Database lock error: {}", e))?;
+
+        crate::library_commands::fetch_item_from_db(&conn, item_id)
+            .map_err(|e| format!("Failed to load current item: {}", e))?
+            .ok_or("Item not found".to_string())?
+    };
 
     let pdf_path = current_item
         .attachments
@@ -2416,6 +2577,10 @@ pub fn retrieve_item_metadata(
     }
 
     let merged = merge_item_with_parsed_metadata(&current_item, &resolved.meta);
+
+    let conn = db
+        .lock()
+        .map_err(|e| format!("Database lock error: {}", e))?;
 
     conn.execute(
         "UPDATE items SET title = ?1, authors = ?2, year = ?3, abstract = ?4, doi = ?5, arxiv_id = ?6, publication = ?7, volume = ?8, issue = ?9, pages = ?10, publisher = ?11, isbn = ?12, url = ?13, language = ?14, date_modified = datetime('now') WHERE id = ?15",
@@ -2439,7 +2604,7 @@ pub fn retrieve_item_metadata(
     )
     .map_err(|e| format!("Failed to update item metadata: {}", e))?;
 
-    let item = crate::library_commands::fetch_item_from_db(&conn, &item_id)
+    let item = crate::library_commands::fetch_item_from_db(&conn, item_id)
         .map_err(|e| format!("Failed to reload item metadata: {}", e))?
         .ok_or("Updated item not found".to_string())?;
 
@@ -2456,9 +2621,10 @@ mod tests {
         is_metadata_completed, is_preprint_metadata, item_type_supports_automatic_publisher,
         merge_item_with_parsed_metadata, merge_provider_metadata, metadata_candidate_match_score,
         metadata_request_cache_key, normalize_arxiv_id, openalex_work_to_metadata,
-        sanitize_incoming_metadata, validate_incoming_metadata, MetadataMergePriority,
-        MetadataProvider, MetadataStage, OpenAlexAuthor, OpenAlexAuthorship, OpenAlexBiblio,
-        OpenAlexPrimaryLocation, OpenAlexSource, OpenAlexWork, ParsedPdfMetadata,
+        sanitize_incoming_metadata, strip_invalid_metadata_url_with, validate_incoming_metadata,
+        MetadataMergePriority, MetadataProvider, MetadataStage, OpenAlexAuthor, OpenAlexAuthorship,
+        OpenAlexBiblio, OpenAlexPrimaryLocation, OpenAlexSource, OpenAlexWork,
+        ParsedPdfMetadata,
     };
     use crate::models::{CrossrefWorkMessage, LibraryAttachment, LibraryItem};
 
@@ -2510,6 +2676,7 @@ mod tests {
             issue: Some("1".to_string()),
             page: Some("100-110".to_string()),
             publisher: Some("Curran Associates".to_string()),
+            resource: None,
             url: Some("https://example.com/paper".to_string()),
             language: Some("en".to_string()),
         };
@@ -2523,6 +2690,39 @@ mod tests {
         assert_eq!(parsed.publisher.as_deref(), Some("Curran Associates"));
         assert_eq!(parsed.url.as_deref(), Some("https://example.com/paper"));
         assert_eq!(parsed.language.as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn crossref_message_to_metadata_prefers_primary_resource_url() {
+        let message = CrossrefWorkMessage {
+            title: vec!["Attention Is All You Need".to_string()],
+            container_title: vec![],
+            author: vec![],
+            published_print: None,
+            published_online: None,
+            created: None,
+            issued: None,
+            abstract_field: None,
+            doi: "10.5555/test-doi".to_string(),
+            volume: None,
+            issue: None,
+            page: None,
+            publisher: None,
+            resource: Some(crate::models::CrossrefResource {
+                primary: Some(crate::models::CrossrefPrimaryResource {
+                    url: Some("https://publisher.example.com/paper".to_string()),
+                }),
+            }),
+            url: Some("https://doi.org/10.5555/test-doi".to_string()),
+            language: None,
+        };
+
+        let parsed = crossref_message_to_metadata(message);
+
+        assert_eq!(
+            parsed.url.as_deref(),
+            Some("https://publisher.example.com/paper")
+        );
     }
 
     #[test]
@@ -2698,6 +2898,25 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_incoming_metadata_strips_doi_urls_from_fuzzy_results() {
+        let current = ParsedPdfMetadata::default();
+        let incoming = ParsedPdfMetadata {
+            url: Some("https://doi.org/10.65215/2q58a426".to_string()),
+            ..ParsedPdfMetadata::default()
+        };
+
+        let sanitized = sanitize_incoming_metadata(
+            &current,
+            incoming,
+            MetadataProvider::OpenAlexTitle,
+            MetadataStage::Fuzzy,
+            Some(0.88),
+        );
+
+        assert_eq!(sanitized.url, None);
+    }
+
+    #[test]
     fn validate_incoming_metadata_rejects_exact_doi_result_that_mismatches_context() {
         let current = ParsedPdfMetadata {
             title: Some("Attention Is All You Need".to_string()),
@@ -2747,6 +2966,49 @@ mod tests {
             normalize_arxiv_id("https://arxiv.org/abs/1706.03762v1"),
             Some("1706.03762v1".to_string())
         );
+    }
+
+    #[test]
+    fn strip_invalid_metadata_url_removes_404_targets() {
+        let mut meta = ParsedPdfMetadata {
+            url: Some("https://example.com/missing".to_string()),
+            ..ParsedPdfMetadata::default()
+        };
+
+        let stripped =
+            strip_invalid_metadata_url_with(&mut meta, |_| Ok(false)).expect("validation should succeed");
+
+        assert!(stripped);
+        assert_eq!(meta.url, None);
+    }
+
+    #[test]
+    fn strip_invalid_metadata_url_falls_back_to_get_after_head_405() {
+        let mut meta = ParsedPdfMetadata {
+            url: Some("https://example.com/fallback".to_string()),
+            ..ParsedPdfMetadata::default()
+        };
+
+        let stripped =
+            strip_invalid_metadata_url_with(&mut meta, |_| Ok(false)).expect("validation should succeed");
+
+        assert!(stripped);
+        assert_eq!(meta.url, None);
+    }
+
+    #[test]
+    fn strip_invalid_metadata_url_keeps_healthy_targets() {
+        let url = "https://example.com/paper".to_string();
+        let mut meta = ParsedPdfMetadata {
+            url: Some(url.clone()),
+            ..ParsedPdfMetadata::default()
+        };
+
+        let stripped =
+            strip_invalid_metadata_url_with(&mut meta, |_| Ok(true)).expect("validation should succeed");
+
+        assert!(!stripped);
+        assert_eq!(meta.url.as_deref(), Some(url.as_str()));
     }
 
     #[test]
@@ -2841,6 +3103,22 @@ mod tests {
         assert_eq!(resolved.publication.as_deref(), Some("NeurIPS"));
         assert_eq!(resolved.year.as_deref(), Some("2018"));
         assert_eq!(resolved.arxiv_id.as_deref(), Some("1706.03762"));
+    }
+
+    #[test]
+    fn merge_item_with_parsed_metadata_preserves_existing_url_against_conflicting_doi_url() {
+        let mut item = sample_item();
+        item.url = "https://example.com/paper".to_string();
+        item.doi = "10.1000/correct".to_string();
+        let parsed = ParsedPdfMetadata {
+            url: Some("https://doi.org/10.65215/2q58a426".to_string()),
+            doi: Some("10.65215/2q58a426".to_string()),
+            ..ParsedPdfMetadata::default()
+        };
+
+        let merged = merge_item_with_parsed_metadata(&item, &parsed);
+
+        assert_eq!(merged.url, "https://example.com/paper");
     }
 
     #[test]

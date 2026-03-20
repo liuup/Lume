@@ -314,10 +314,24 @@ pub struct CrossrefWorkMessage {
     pub page: Option<String>,
     #[serde(default)]
     pub publisher: Option<String>,
+    #[serde(default)]
+    pub resource: Option<CrossrefResource>,
     #[serde(default, rename = "URL")]
     pub url: Option<String>,
     #[serde(default)]
     pub language: Option<String>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct CrossrefResource {
+    #[serde(default)]
+    pub primary: Option<CrossrefPrimaryResource>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct CrossrefPrimaryResource {
+    #[serde(default, rename = "URL")]
+    pub url: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]

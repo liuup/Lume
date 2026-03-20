@@ -1,4 +1,6 @@
-use crate::metadata_fetch::enrich_metadata_with_remote_providers;
+use crate::metadata_fetch::{
+    enrich_metadata_with_remote_providers, refresh_item_metadata_in_db, strip_invalid_metadata_url,
+};
 /// Module: src-tauri/src/library_commands.rs
 /// Purpose: Encapsulates all general file/directory manipulation commands.
 /// Capabilities: Moving, renaming, deleting, parsing library structure, managing annotations cache sidecars.
@@ -14,8 +16,17 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::thread;
 use std::time::{Duration, Instant, UNIX_EPOCH};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+
+pub const LIBRARY_ITEM_METADATA_UPDATED_EVENT: &str = "library-item-metadata-updated";
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryItemMetadataUpdatedPayload {
+    item_id: String,
+}
 
 #[derive(Clone)]
 struct DigestCandidate {
@@ -340,6 +351,13 @@ pub fn resolve_pdf_metadata_with_report(path: &Path) -> ResolvedPdfMetadata {
         report = enriched.report;
     }
 
+    if let Err(error) = strip_invalid_metadata_url(&mut resolved) {
+        eprintln!("Failed to validate metadata URL: {}", error);
+        network_complete = false;
+    }
+
+    report.network_complete = network_complete;
+
     write_cached_pdf_metadata(
         path,
         &CachedPdfMetadataRecord {
@@ -395,13 +413,17 @@ pub fn get_item_metadata_fetch_report(
 }
 
 pub fn build_library_item(path: &Path) -> LibraryItem {
+    let parsed = resolve_pdf_metadata(path);
+    build_library_item_from_parsed_metadata(path, parsed)
+}
+
+fn build_library_item_from_parsed_metadata(path: &Path, parsed: ParsedPdfMetadata) -> LibraryItem {
     let name = path
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or("Untitled")
         .to_string();
     let path_str = path.to_string_lossy().to_string();
-    let parsed = resolve_pdf_metadata(path);
     let title = parsed.title.clone().unwrap_or_else(|| name.clone());
     let authors = parsed.authors.clone().unwrap_or_else(|| "—".to_string());
     let year = parsed.year.clone().unwrap_or_else(|| "—".to_string());
@@ -450,6 +472,33 @@ pub fn build_library_item(path: &Path) -> LibraryItem {
         tags: Vec::new(),
         attachments: vec![attachment],
     }
+}
+
+fn spawn_import_metadata_refresh(
+    app: tauri::AppHandle,
+    db: std::sync::Arc<Mutex<rusqlite::Connection>>,
+    item_id: String,
+) {
+    thread::spawn(move || {
+        match refresh_item_metadata_in_db(&db, &item_id) {
+            Ok(_) => {
+                if let Err(error) = app.emit(
+                    LIBRARY_ITEM_METADATA_UPDATED_EVENT,
+                    LibraryItemMetadataUpdatedPayload {
+                        item_id: item_id.clone(),
+                    },
+                ) {
+                    eprintln!("Failed to emit metadata update event: {}", error);
+                }
+            }
+            Err(error) => {
+                eprintln!(
+                    "Background metadata refresh failed for imported item {}: {}",
+                    item_id, error
+                );
+            }
+        }
+    });
 }
 
 pub fn fetch_item_from_db(
@@ -913,6 +962,7 @@ pub fn create_library_folder(parent_path: String, name: String) -> Result<String
 
 #[tauri::command]
 pub fn import_pdf_to_folder(
+    app: tauri::AppHandle,
     source_path: String,
     folder_path: String,
     state: tauri::State<'_, crate::models::AppState>,
@@ -938,7 +988,7 @@ pub fn import_pdf_to_folder(
     fs::copy(&source, &target).map_err(|e| format!("Failed to import PDF: {}", e))?;
     copy_annotation_sidecar(&source, &target);
 
-    let resolved_meta = resolve_pdf_metadata(&target);
+    let local_meta = extract_pdf_metadata(&target).unwrap_or_default();
 
     let mut auto_rename = true;
     let mut rename_pattern = "[Year] - [Author] - [Title]".to_string();
@@ -964,9 +1014,9 @@ pub fn import_pdf_to_folder(
     }
 
     let final_path = if auto_rename {
-        let title = resolved_meta.title.as_deref().unwrap_or("Unknown Title");
-        let year = resolved_meta.year.as_deref().unwrap_or("Unknown Year");
-        let authors = resolved_meta.authors.as_deref().unwrap_or("Unknown Author");
+        let title = local_meta.title.as_deref().unwrap_or("Unknown Title");
+        let year = local_meta.year.as_deref().unwrap_or("Unknown Year");
+        let authors = local_meta.authors.as_deref().unwrap_or("Unknown Author");
 
         let mut first_author = authors.split(',').next().unwrap_or("Unknown Author").trim();
         if first_author.contains(' ') {
@@ -1006,9 +1056,11 @@ pub fn import_pdf_to_folder(
     }
 
     if let Ok(conn) = state.db.lock() {
-        let new_item = build_library_item(&final_path);
+        let new_item = build_library_item_from_parsed_metadata(&final_path, local_meta);
         let _ = sync_item_to_db(&conn, &new_item);
     }
+
+    spawn_import_metadata_refresh(app, state.db.clone(), final_path.to_string_lossy().to_string());
 
     Ok(final_path.to_string_lossy().to_string())
 }

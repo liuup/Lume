@@ -17,6 +17,7 @@ import {
   CliLibraryChangedPayload,
   CliOpenRequest,
   FolderNode, 
+  LibraryItemMetadataUpdatedPayload,
   LibraryItem, 
   OpenTab, 
   PageDimension, 
@@ -88,6 +89,10 @@ export function useLibrary() {
       if (deep) return deep;
     }
     return null;
+  }
+
+  function findItemInLibraryState(nodes: FolderNode[], nextTrashItems: LibraryItem[], id: string) {
+    return findItem(nodes, id) ?? nextTrashItems.find((item) => item.id === id) ?? null;
   }
 
   function replacePathPrefix(path: string, oldPrefix: string, newPrefix: string) {
@@ -220,6 +225,7 @@ export function useLibrary() {
     let cancelled = false;
     let unlistenOpen: (() => void) | null = null;
     let unlistenChanged: (() => void) | null = null;
+    let unlistenMetadataUpdated: (() => void) | null = null;
 
     (async () => {
       unlistenOpen = await listen<CliOpenRequest>("cli-open-request", (event) => {
@@ -228,6 +234,10 @@ export function useLibrary() {
 
       unlistenChanged = await listen<CliLibraryChangedPayload>("cli-library-changed", () => {
         void handleCliLibraryChanged();
+      });
+
+      unlistenMetadataUpdated = await listen<LibraryItemMetadataUpdatedPayload>("library-item-metadata-updated", () => {
+        void handleItemUpdatedLocally();
       });
 
       const pending = await invoke<CliOpenRequest | null>("take_pending_cli_open_request");
@@ -242,6 +252,7 @@ export function useLibrary() {
       cancelled = true;
       if (unlistenOpen) unlistenOpen();
       if (unlistenChanged) unlistenChanged();
+      if (unlistenMetadataUpdated) unlistenMetadataUpdated();
     };
   }, []);
 
@@ -635,17 +646,36 @@ export function useLibrary() {
     }
   };
   
-  const handleItemUpdatedLocally = async () => {
-       const tree = await refreshLibrary(selectedFolderId);
+  const handleItemUpdatedLocally = useEffectEvent(async () => {
+       const [tree, nextTrashItems] = await Promise.all([
+         invoke<FolderNode[]>("load_library_tree"),
+         invoke<LibraryItem[]>("load_trash_items"),
+       ]);
+       setFolderTree(tree);
+       setTrashItems(nextTrashItems);
+
+       const rootId = tree[0]?.id ?? DEFAULT_FOLDER.id;
+       setSelectedFolderId(prev => {
+         if (prev === TRASH_FOLDER_ID) {
+           return TRASH_FOLDER_ID;
+         }
+         return prev && findFolder(tree, prev) ? prev : rootId;
+       });
+
+       setOpenTabs((prevTabs) =>
+         prevTabs.map((tab) => {
+           const updatedItem = findItemInLibraryState(tree, nextTrashItems, tab.id);
+           return updatedItem ? { ...tab, item: updatedItem } : tab;
+         })
+       );
+
        if (selectedItemId) {
-          const updatedItem = findItem(tree, selectedItemId) ?? trashItems.find(item => item.id === selectedItemId) ?? null;
-          if (updatedItem) {
-            setOpenTabs(prevTabs => 
-              prevTabs.map(tab => tab.id === selectedItemId ? { ...tab, item: updatedItem } : tab)
-            );
+          const updatedSelectedItem = findItemInLibraryState(tree, nextTrashItems, selectedItemId);
+          if (!updatedSelectedItem) {
+            setSelectedItemId(null);
           }
        }
-  }
+  });
 
   const handleRestoreTrashItem = async (item: LibraryItem) => {
     try {

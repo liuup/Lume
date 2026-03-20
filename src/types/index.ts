@@ -193,3 +193,7 @@ export interface CliOpenRequest {
 export interface CliLibraryChangedPayload {
   reason: string;
 }
+
+export interface LibraryItemMetadataUpdatedPayload {
+  itemId: string;
+}

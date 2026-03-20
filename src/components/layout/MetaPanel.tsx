@@ -691,6 +691,10 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
     }
   };
 
+  const renderEmptyMetaValue = () => (
+    <span className="text-zinc-400 italic dark:text-zinc-500">{t("metaPanel.none")}</span>
+  );
+
   return (
     <aside className="relative bg-white border-l border-zinc-200 flex flex-col h-full shrink-0 animate-slide-left dark:border-zinc-800 dark:bg-zinc-950" style={{ width }}>
       <div
@@ -851,14 +855,14 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
             </div>
           </div>
         ) : (
-          <div className="p-5 space-y-6">
+          <div className="p-4 space-y-4">
             {/* Title & tags */}
             <div>
               <h3 className="text-base font-bold text-zinc-900 leading-tight dark:text-zinc-100">
                 {selectedItem.title || selectedItem.attachments?.[0]?.name || t("metaPanel.untitled")}
               </h3>
               {selectedItem.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-3">
+                <div className="flex flex-wrap gap-1 mt-2">
                   {selectedItem.tags.map(tag => {
                     const color = tagColors[tag] || "#6366f1";
                     return (
@@ -875,75 +879,75 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
               )}
             </div>
 
-            <div className="space-y-4">
-              {/* Authors */}
+            <div className="space-y-2.5">
               <MetaRow icon={<User size={15} className="text-zinc-400" />} label={t("metaPanel.fields.authors")}>
-                {selectedItem.authors && selectedItem.authors !== "—" ? selectedItem.authors : (
-                  <span className="text-zinc-400 italic">{t("metaPanel.unknown")}</span>
-                )}
+                {selectedItem.authors && selectedItem.authors !== "—" ? selectedItem.authors : renderEmptyMetaValue()}
               </MetaRow>
 
-              {/* Year */}
               <MetaRow icon={<Calendar size={15} className="text-zinc-400" />} label={t("metaPanel.fields.year")}>
-                {selectedItem.year && selectedItem.year !== "—" ? selectedItem.year : (
-                  <span className="text-zinc-400 italic">{t("metaPanel.unknown")}</span>
-                )}
+                {selectedItem.year && selectedItem.year !== "—" ? selectedItem.year : renderEmptyMetaValue()}
               </MetaRow>
 
-              {/* Abstract */}
-              {selectedItem.abstract ? (
-                <MetaRow icon={<AlignLeft size={15} className="text-zinc-400" />} label={t("metaPanel.fields.abstract")}>
-                  <p className="text-sm text-zinc-600 leading-relaxed max-w-full overflow-hidden text-ellipsis">{selectedItem.abstract}</p>
-                </MetaRow>
-              ) : null}
+              <MetaRow icon={<Book size={15} className="text-zinc-400" />} label={t("metaPanel.fields.publication")}>
+                {selectedItem.publication ? <em className="font-serif">{selectedItem.publication}</em> : renderEmptyMetaValue()}
+              </MetaRow>
 
-              {/* Publication Info */}
-              {selectedItem.publication ? (
-                <MetaRow icon={<Book size={15} className="text-zinc-400" />} label={t("metaPanel.fields.publication")}>
-                  <span className="text-zinc-600">
-                    <em className="font-serif">{selectedItem.publication}</em>
-                    {selectedItem.volume ? ` ${t("metaPanel.publication.volume", { value: selectedItem.volume })}` : ''}
-                    {selectedItem.issue ? ` ${t("metaPanel.publication.issue", { value: selectedItem.issue })}` : ''}
-                    {selectedItem.pages ? ` ${t("metaPanel.publication.pages", { value: selectedItem.pages })}` : ''}
-                  </span>
-                </MetaRow>
-              ) : null}
+              <MetaRow icon={<Book size={15} className="text-zinc-400" />} label={t("metaPanel.fields.volume")}>
+                {selectedItem.volume || renderEmptyMetaValue()}
+              </MetaRow>
 
-              {/* Publisher */}
-              {selectedItem.publisher ? (
-                <MetaRow icon={<Building size={15} className="text-zinc-400" />} label={t("metaPanel.fields.publisher")}>
-                   <span className="text-zinc-600">{selectedItem.publisher}</span>
-                </MetaRow>
-              ) : null}
+              <MetaRow icon={<Book size={15} className="text-zinc-400" />} label={t("metaPanel.fields.issue")}>
+                {selectedItem.issue || renderEmptyMetaValue()}
+              </MetaRow>
 
-              {/* DOI */}
-              {selectedItem.doi ? (
-                <MetaRow icon={<Fingerprint size={15} className="text-zinc-400" />} label={t("metaPanel.fields.doi")}>
+              <MetaRow icon={<Book size={15} className="text-zinc-400" />} label={t("metaPanel.fields.pages")}>
+                {selectedItem.pages || renderEmptyMetaValue()}
+              </MetaRow>
+
+              <MetaRow icon={<Building size={15} className="text-zinc-400" />} label={t("metaPanel.fields.publisher")}>
+                {selectedItem.publisher || renderEmptyMetaValue()}
+              </MetaRow>
+
+              <MetaRow icon={<Fingerprint size={15} className="text-zinc-400" />} label={t("metaPanel.fields.doi")}>
+                {selectedItem.doi ? (
                   <a href={`https://doi.org/${selectedItem.doi}`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline break-all">
                     {selectedItem.doi}
                   </a>
-                </MetaRow>
-              ) : null}
+                ) : renderEmptyMetaValue()}
+              </MetaRow>
 
-              {/* arXiv */}
-              {selectedItem.arxiv_id ? (
-                <MetaRow icon={<Orbit size={15} className="text-zinc-400" />} label={t("metaPanel.fields.arxiv")}>
+              <MetaRow icon={<Orbit size={15} className="text-zinc-400" />} label={t("metaPanel.fields.arxiv")}>
+                {selectedItem.arxiv_id ? (
                   <a href={`https://arxiv.org/abs/${selectedItem.arxiv_id}`} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline break-all">
                     {selectedItem.arxiv_id}
                   </a>
-                </MetaRow>
-              ) : null}
+                ) : renderEmptyMetaValue()}
+              </MetaRow>
 
-              {/* URL */}
-              {selectedItem.url ? (
-                <MetaRow icon={<Link2 size={15} className="text-zinc-400" />} label={t("metaPanel.fields.url")}>
+              <MetaRow icon={<Fingerprint size={15} className="text-zinc-400" />} label={t("metaPanel.fields.isbn")}>
+                {selectedItem.isbn || renderEmptyMetaValue()}
+              </MetaRow>
+
+              <MetaRow icon={<Link2 size={15} className="text-zinc-400" />} label={t("metaPanel.fields.url")}>
+                {selectedItem.url ? (
                   <a href={selectedItem.url} target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline break-all line-clamp-2" title={selectedItem.url}>
                     {selectedItem.url}
                   </a>
-                </MetaRow>
-              ) : null}
+                ) : renderEmptyMetaValue()}
+              </MetaRow>
 
-              {/* Filename */}
+              <MetaRow icon={<Calendar size={15} className="text-zinc-400" />} label={t("metaPanel.fields.language")}>
+                {selectedItem.language || renderEmptyMetaValue()}
+              </MetaRow>
+
+              <MetaRow icon={<AlignLeft size={15} className="text-zinc-400" />} label={t("metaPanel.fields.abstract")}>
+                {selectedItem.abstract ? (
+                  <p className="text-sm text-zinc-600 leading-relaxed max-w-full overflow-hidden text-ellipsis dark:text-zinc-300">
+                    {selectedItem.abstract}
+                  </p>
+                ) : renderEmptyMetaValue()}
+              </MetaRow>
+
               <MetaRow icon={<Tag size={15} className="text-zinc-400" />} label={t("metaPanel.fields.file")}>
                 <span className="text-zinc-500 text-xs font-mono break-all line-clamp-2" title={selectedItem.attachments?.[0]?.name}>{selectedItem.attachments?.[0]?.name || t("metaPanel.none")}</span>
               </MetaRow>
@@ -1334,10 +1338,10 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
 
 function MetaRow({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-start space-x-3">
+    <div className="flex items-start gap-2.5">
       <span className="mt-0.5 shrink-0">{icon}</span>
       <div className="min-w-0 flex-1">
-        <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-0.5 dark:text-zinc-500">{label}</p>
+        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">{label}</p>
         <div className="text-sm text-zinc-800 leading-snug dark:text-zinc-100">{children}</div>
       </div>
     </div>
