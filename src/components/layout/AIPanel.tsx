@@ -66,23 +66,23 @@ export function AIPanel({ selectedItem, isOpen, onClose, width, onResizeStart }:
 
   return (
     <aside
-      className="relative shrink-0 border-r border-zinc-200 bg-white flex flex-col h-full animate-slide-right"
+      className="relative shrink-0 border-r border-zinc-200 bg-white flex flex-col h-full animate-slide-right dark:border-zinc-800 dark:bg-zinc-950"
       style={{ width }}
     >
       <div
         className="absolute top-0 right-0 h-full w-2 cursor-col-resize z-20 group"
         onMouseDown={onResizeStart}
       >
-        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent group-hover:bg-indigo-300" />
+        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent group-hover:bg-indigo-300 dark:group-hover:bg-indigo-700" />
       </div>
-      <div className="h-14 border-b border-zinc-200 flex items-center justify-between px-4 shrink-0 bg-zinc-50/60">
+      <div className="h-14 border-b border-zinc-200 flex items-center justify-between px-4 shrink-0 bg-zinc-50/60 dark:border-zinc-800 dark:bg-zinc-900/70">
         <div className="flex items-center gap-2">
-          <Bot size={16} className="text-indigo-600" />
-          <h2 className="font-semibold text-zinc-800 tracking-tight">{t("aiPanel.title")}</h2>
+          <Bot size={16} className="text-indigo-600 dark:text-indigo-300" />
+          <h2 className="font-semibold text-zinc-800 tracking-tight dark:text-zinc-100">{t("aiPanel.title")}</h2>
         </div>
         <button
           onClick={onClose}
-          className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-md transition-colors"
+          className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-md transition-colors dark:text-zinc-500 dark:hover:text-zinc-100 dark:hover:bg-zinc-800"
           title={t("aiPanel.close")}
         >
           <X size={15} />
@@ -90,18 +90,18 @@ export function AIPanel({ selectedItem, isOpen, onClose, width, onResizeStart }:
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        <section className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50/60 p-3">
+        <section className="space-y-3 rounded-2xl border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900/60">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <Sparkles size={14} className="text-indigo-600" />
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-600">
+              <Sparkles size={14} className="text-indigo-600 dark:text-indigo-300" />
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-600 dark:text-zinc-400">
                 {t("aiPanel.summary.title")}
               </span>
             </div>
             <button
               onClick={() => void handleGeneratePaperSummary(true)}
               disabled={!selectedItem || !aiIsConfigured || isLoadingPaperSummary}
-              className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-40"
+              className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-40 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:border-indigo-900/70 dark:hover:text-indigo-300"
             >
               {isLoadingPaperSummary ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
               {t("aiPanel.summary.refresh")}
@@ -109,24 +109,24 @@ export function AIPanel({ selectedItem, isOpen, onClose, width, onResizeStart }:
           </div>
 
           {!aiIsConfigured ? (
-            <div className="rounded-xl border border-dashed border-zinc-200 bg-white px-3 py-3 text-xs leading-relaxed text-zinc-500">
+            <div className="rounded-xl border border-dashed border-zinc-200 bg-white px-3 py-3 text-xs leading-relaxed text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
               {t("aiPanel.summary.notConfigured")}
             </div>
           ) : isLoadingPaperSummary ? (
-            <div className="rounded-xl border border-zinc-200 bg-white px-3 py-3 text-xs text-zinc-400 animate-pulse">
+            <div className="rounded-xl border border-zinc-200 bg-white px-3 py-3 text-xs text-zinc-400 animate-pulse dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-500">
               {t("aiPanel.summary.loading")}
             </div>
           ) : paperSummary ? (
-            <div className="space-y-3 rounded-xl bg-white p-3 border border-indigo-100">
+            <div className="space-y-3 rounded-xl bg-white p-3 border border-indigo-100 dark:border-indigo-900/60 dark:bg-zinc-950">
               <div>
-                <div className="text-sm font-semibold text-zinc-800">{paperSummary.title}</div>
-                <div className="mt-1 text-sm leading-relaxed text-zinc-700">{paperSummary.summary}</div>
+                <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{paperSummary.title}</div>
+                <div className="mt-1 text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">{paperSummary.summary}</div>
               </div>
 
               {paperSummary.keyPoints.length > 0 && (
                 <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">{t("aiPanel.summary.keyPoints")}</div>
-                  <ul className="mt-1 space-y-1 text-xs leading-relaxed text-zinc-600">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">{t("aiPanel.summary.keyPoints")}</div>
+                  <ul className="mt-1 space-y-1 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
                     {paperSummary.keyPoints.map((point, index) => (
                       <li key={`summary-point-${index}`}>• {point}</li>
                     ))}
@@ -136,8 +136,8 @@ export function AIPanel({ selectedItem, isOpen, onClose, width, onResizeStart }:
 
               {paperSummary.limitations.length > 0 && (
                 <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">{t("aiPanel.summary.limitations")}</div>
-                  <ul className="mt-1 space-y-1 text-xs leading-relaxed text-zinc-600">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">{t("aiPanel.summary.limitations")}</div>
+                  <ul className="mt-1 space-y-1 text-xs leading-relaxed text-zinc-600 dark:text-zinc-400">
                     {paperSummary.limitations.map((point, index) => (
                       <li key={`summary-limit-${index}`}>• {point}</li>
                     ))}
@@ -146,7 +146,7 @@ export function AIPanel({ selectedItem, isOpen, onClose, width, onResizeStart }:
               )}
             </div>
           ) : (
-            <div className="rounded-xl border border-dashed border-zinc-200 bg-white px-3 py-3 text-xs leading-relaxed text-zinc-500">
+            <div className="rounded-xl border border-dashed border-zinc-200 bg-white px-3 py-3 text-xs leading-relaxed text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
               {t("aiPanel.summary.empty")}
             </div>
           )}

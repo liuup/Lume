@@ -124,7 +124,7 @@ Lume CLI 允许你在终端中管理学术文献库。
   lume open paper.pdf                打开库内条目或任意 PDF 文件
   lume status                        查看文献库统计摘要
   lume completions zsh               生成 Zsh 自动补全脚本",
-    after_help = "更多信息请访问: https://github.com/liuup/Lume"
+    after_help = "更多信息请访问: https://github.com/LumeResearch/Lume"
 )]
 pub struct LumeCli {
     #[command(subcommand)]

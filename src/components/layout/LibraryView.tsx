@@ -535,7 +535,7 @@ export function LibraryView({
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder={searchPlaceholder}
-              className="w-full pl-10 pr-4 py-2 bg-zinc-100 border-transparent focus:bg-white border focus:border-indigo-400 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-400/20 transition-all placeholder:text-zinc-400 shadow-sm"
+              className="w-full pl-10 pr-4 py-2 bg-zinc-100 border-transparent focus:bg-white border focus:border-indigo-400 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-400/20 transition-all placeholder:text-zinc-400 shadow-sm dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:bg-zinc-950 dark:focus:border-indigo-800"
             />
           </div>
           {isTrashView ? (
@@ -551,7 +551,7 @@ export function LibraryView({
             <>
               <button
                 onClick={() => setShowExport(true)}
-                className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
+                className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98] dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-indigo-300 dark:hover:border-indigo-900/70"
                 title={t("libraryView.actions.exportTitle")}
               >
                 <Download size={15} />
@@ -559,7 +559,7 @@ export function LibraryView({
               </button>
               <button
                 onClick={onAddItem}
-                className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
+                className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98] dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-indigo-300 dark:hover:border-indigo-900/70"
               >
                 <FileUp size={15} />
                 <span className="hidden min-[900px]:inline">{t("libraryView.actions.addItem")}</span>
@@ -578,18 +578,18 @@ export function LibraryView({
               onChange={e => setYearFilter(e.target.value.replace(/\D/g, "").slice(0, 4))}
               placeholder="2024"
               maxLength={4}
-              className="w-16 px-2 py-1 bg-zinc-100 border border-transparent focus:bg-white focus:border-indigo-400 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-400/20 transition-all placeholder:text-zinc-400"
+              className="w-16 px-2 py-1 bg-zinc-100 border border-transparent focus:bg-white focus:border-indigo-400 rounded-lg text-xs outline-none focus:ring-2 focus:ring-indigo-400/20 transition-all placeholder:text-zinc-400 dark:bg-zinc-900 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:bg-zinc-950 dark:focus:border-indigo-800"
             />
           </div>
 
           {/* Active sidebar tag chip */}
           {tagFilter && !isTrashView && (
-            <div className="flex items-center gap-1.5 ml-1 px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-medium border border-indigo-200">
+            <div className="flex items-center gap-1.5 ml-1 px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700 text-xs font-medium border border-indigo-200 dark:border-indigo-900/70 dark:bg-indigo-950/40 dark:text-indigo-200">
               <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
               <span>#{tagFilter}</span>
               <button
                 onClick={onClearTagFilter}
-                className="ml-0.5 text-indigo-400 hover:text-indigo-700 transition-colors leading-none"
+                className="ml-0.5 text-indigo-400 hover:text-indigo-700 transition-colors leading-none dark:text-indigo-400 dark:hover:text-indigo-200"
                 title={t("libraryView.search.clearTag")}
               >
                 ×
@@ -670,7 +670,7 @@ export function LibraryView({
       {/* ── Context menu ────────────────────────────────────── */}
       {contextMenu && (
         <div
-          className="fixed z-50 min-w-44 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-[0_12px_40px_rgba(0,0,0,0.14)] animate-popup"
+          className="fixed z-50 min-w-44 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-[0_12px_40px_rgba(0,0,0,0.14)] animate-popup dark:border-zinc-800 dark:bg-zinc-950"
           style={{ left: menuX, top: menuY }}
           onClick={e => e.stopPropagation()}
         >
@@ -681,7 +681,7 @@ export function LibraryView({
                   void onRestoreItem(contextMenu.item);
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
               >
                 <RotateCcw size={15} />
                 <span>{t("libraryView.context.restore")}</span>
@@ -691,7 +691,7 @@ export function LibraryView({
                   void onEmptyTrash();
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30"
               >
                 <Trash2 size={15} />
                 <span>{t("libraryView.actions.emptyTrash")}</span>
@@ -705,7 +705,7 @@ export function LibraryView({
                   setRenameValue(contextMenu.item.title || contextMenu.item.attachments[0]?.name || t("libraryView.item.untitled"));
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
               >
                 <FilePenLine size={15} />
                 <span>{t("libraryView.context.rename")}</span>
@@ -717,7 +717,7 @@ export function LibraryView({
                   setTagEditorValue("");
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
               >
                 <Hash size={15} />
                 <span>{t("libraryView.context.editTags", undefined, "Edit Tags")}</span>
@@ -727,7 +727,7 @@ export function LibraryView({
                   onDeleteItem(contextMenu.item);
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30"
               >
                 <Trash2 size={15} />
                 <span>{t("libraryView.context.delete")}</span>
@@ -739,11 +739,11 @@ export function LibraryView({
 
       {headerMenu && (
         <div
-          className="fixed z-50 min-w-52 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.14)] animate-popup"
+          className="fixed z-50 min-w-52 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.14)] animate-popup dark:border-zinc-800 dark:bg-zinc-950"
           style={{ left: headerMenuX, top: headerMenuY }}
           onClick={(event) => event.stopPropagation()}
         >
-          <div className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+          <div className="px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
             {t("libraryView.columnMenu.title", undefined, "Visible Columns")}
           </div>
           {COLUMN_ORDER.map((column) => {
@@ -757,20 +757,20 @@ export function LibraryView({
                 onClick={() => toggleColumnVisibility(column)}
                 className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-sm text-left ${
                   isForced
-                    ? "cursor-not-allowed text-zinc-400"
-                    : "text-zinc-700 hover:bg-zinc-100"
+                    ? "cursor-not-allowed text-zinc-400 dark:text-zinc-500"
+                    : "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
                 }`}
               >
                 <span className={`flex h-4 w-4 items-center justify-center rounded border text-[11px] ${
                   isChecked
-                    ? "border-indigo-500 bg-indigo-500 text-white"
-                    : "border-zinc-300 bg-white text-transparent"
+                    ? "border-indigo-500 bg-indigo-500 text-white dark:border-indigo-700 dark:bg-indigo-700"
+                    : "border-zinc-300 bg-white text-transparent dark:border-zinc-700 dark:bg-zinc-950"
                 }`}>
                   ✓
                 </span>
                 <span className="flex-1 truncate">{t(`libraryView.columns.${column}`)}</span>
                 {isForced ? (
-                  <span className="shrink-0 text-[11px] text-zinc-400">
+                  <span className="shrink-0 text-[11px] text-zinc-400 dark:text-zinc-500">
                     {t("libraryView.columnMenu.alwaysVisible", undefined, "Required")}
                   </span>
                 ) : null}
@@ -782,23 +782,23 @@ export function LibraryView({
 
       {renameTarget && (
         <div
-          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px] animate-backdrop"
+          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px] animate-backdrop dark:bg-zinc-950/70"
           onClick={() => {
             setRenameTarget(null);
             setRenameValue("");
           }}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)] animate-modal"
+            className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)] animate-modal dark:border-zinc-800 dark:bg-zinc-950"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-indigo-50 p-2 text-indigo-600">
+              <div className="rounded-xl bg-indigo-50 p-2 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300">
                 <FilePenLine size={18} />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-zinc-900">{t("libraryView.renameDialog.title")}</h3>
-                <p className="text-xs text-zinc-500">{t("libraryView.renameDialog.description")}</p>
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("libraryView.renameDialog.title")}</h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">{t("libraryView.renameDialog.description")}</p>
               </div>
             </div>
 
@@ -810,17 +810,17 @@ export function LibraryView({
               }}
             >
               <div>
-                <label className="mb-2 block text-xs font-medium text-zinc-500">{t("libraryView.renameDialog.fileName")}</label>
-                <div className="flex items-center rounded-xl border border-zinc-200 bg-zinc-50 px-3 focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-400/15">
+                <label className="mb-2 block text-xs font-medium text-zinc-500 dark:text-zinc-400">{t("libraryView.renameDialog.fileName")}</label>
+                <div className="flex items-center rounded-xl border border-zinc-200 bg-zinc-50 px-3 focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-400/15 dark:border-zinc-800 dark:bg-zinc-900 dark:focus-within:border-indigo-800 dark:focus-within:bg-zinc-950">
                   <input
                     ref={renameInputRef}
                     type="text"
                     value={renameValue}
                     onChange={e => setRenameValue(e.target.value)}
-                    className="w-full bg-transparent py-2.5 text-sm text-zinc-800 outline-none"
+                    className="w-full bg-transparent py-2.5 text-sm text-zinc-800 outline-none dark:text-zinc-100 dark:placeholder:text-zinc-500"
                     placeholder={t("libraryView.renameDialog.placeholder")}
                   />
-                  <span className="shrink-0 text-sm text-zinc-400">.pdf</span>
+                  <span className="shrink-0 text-sm text-zinc-400 dark:text-zinc-500">.pdf</span>
                 </div>
               </div>
 
@@ -831,14 +831,14 @@ export function LibraryView({
                     setRenameTarget(null);
                     setRenameValue("");
                   }}
-                  className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+                  className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
                 >
                   {t("libraryView.renameDialog.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={!renameValue.trim()}
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300"
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300 dark:disabled:bg-indigo-900/60"
                 >
                   {t("libraryView.renameDialog.save")}
                 </button>
@@ -850,7 +850,7 @@ export function LibraryView({
 
       {tagEditorTarget && (
         <div
-          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px] animate-backdrop"
+          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px] animate-backdrop dark:bg-zinc-950/70"
           onClick={() => {
             setTagEditorTarget(null);
             setTagEditorTags([]);
@@ -858,29 +858,29 @@ export function LibraryView({
           }}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)] animate-modal"
+            className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)] animate-modal dark:border-zinc-800 dark:bg-zinc-950"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-indigo-50 p-2 text-indigo-600">
+              <div className="rounded-xl bg-indigo-50 p-2 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300">
                 <Hash size={18} />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-zinc-900">{t("libraryView.tagDialog.title", undefined, "Edit Item Tags")}</h3>
-                <p className="text-xs text-zinc-500">{t("libraryView.tagDialog.description", undefined, "Add custom tags for this PDF item.")}</p>
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("libraryView.tagDialog.title", undefined, "Edit Item Tags")}</h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">{t("libraryView.tagDialog.description", undefined, "Add custom tags for this PDF item.")}</p>
               </div>
             </div>
 
             <div className="mt-4 space-y-3">
               <div
-                className="flex flex-wrap gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 min-h-[44px]"
+                className="flex flex-wrap gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2.5 min-h-[44px] dark:border-zinc-800 dark:bg-zinc-900"
                 onClick={() => {
                   const input = document.getElementById("library-tag-editor-input") as HTMLInputElement | null;
                   input?.focus();
                 }}
               >
                 {tagEditorTags.map((tag) => (
-                  <span key={tag} className="inline-flex items-center gap-1 rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-600">
+                  <span key={tag} className="inline-flex items-center gap-1 rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-600 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-200">
                     {tag}
                     <button
                       type="button"
@@ -888,7 +888,7 @@ export function LibraryView({
                         e.stopPropagation();
                         removeTag(tag);
                       }}
-                      className="leading-none text-indigo-400 hover:text-indigo-700"
+                      className="leading-none text-indigo-400 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-200"
                     >
                       ×
                     </button>
@@ -902,10 +902,10 @@ export function LibraryView({
                   onKeyDown={handleTagEditorKeyDown}
                   onBlur={() => { if (tagEditorValue.trim()) addTag(tagEditorValue); }}
                   placeholder={tagEditorTags.length === 0 ? t("libraryView.tagDialog.placeholder", undefined, "Type tag and press Enter") : ""}
-                  className="min-w-[140px] flex-1 bg-transparent text-sm text-zinc-700 outline-none placeholder:text-zinc-400"
+                  className="min-w-[140px] flex-1 bg-transparent text-sm text-zinc-700 outline-none placeholder:text-zinc-400 dark:text-zinc-200 dark:placeholder:text-zinc-500"
                 />
               </div>
-              <p className="text-[11px] text-zinc-400">{t("libraryView.tagDialog.help", undefined, "Press Enter or comma to add a tag.")}</p>
+              <p className="text-[11px] text-zinc-400 dark:text-zinc-500">{t("libraryView.tagDialog.help", undefined, "Press Enter or comma to add a tag.")}</p>
             </div>
 
             <div className="mt-5 flex justify-end gap-2">
@@ -916,14 +916,14 @@ export function LibraryView({
                   setTagEditorTags([]);
                   setTagEditorValue("");
                 }}
-                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+                className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
               >
                 {t("libraryView.tagDialog.cancel", undefined, "Cancel")}
               </button>
               <button
                 type="button"
                 onClick={submitTags}
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500"
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 dark:bg-indigo-700 dark:hover:bg-indigo-600"
               >
                 {t("libraryView.tagDialog.save", undefined, "Save")}
               </button>

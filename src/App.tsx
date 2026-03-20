@@ -772,7 +772,7 @@ function App() {
   }, [activeSearchIndex, handlePageJump, searchMatches]);
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-50">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-50 dark:bg-zinc-950">
       {/* ── Top title-bar / tab strip ── */}
       <div
         data-tauri-drag-region="true"
@@ -1030,9 +1030,9 @@ function App() {
 
       {isFileDropActive && (
         <div className="pointer-events-none fixed inset-0 z-[95]">
-          <div className="absolute inset-4 rounded-[28px] border-2 border-dashed border-indigo-300 bg-indigo-100/40 backdrop-blur-[2px]" />
+          <div className="absolute inset-4 rounded-[28px] border-2 border-dashed border-indigo-300 bg-indigo-100/40 backdrop-blur-[2px] dark:border-indigo-900/70 dark:bg-indigo-950/20" />
           <div className="absolute inset-0 flex items-center justify-center px-6">
-            <div className="w-[min(520px,calc(100vw-3rem))] rounded-[24px] border border-indigo-200 bg-white/92 px-6 py-5 shadow-[0_26px_70px_-30px_rgba(79,70,229,0.45)] backdrop-blur-sm">
+            <div className="w-[min(520px,calc(100vw-3rem))] rounded-[24px] border border-indigo-200 bg-white/92 px-6 py-5 shadow-[0_26px_70px_-30px_rgba(79,70,229,0.45)] backdrop-blur-sm dark:border-indigo-900/70 dark:bg-zinc-950/92">
               <div className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-600">
                 {t("app.drag.importPdf")}
               </div>
@@ -1055,7 +1055,7 @@ function App() {
 
       {dragState && (
         <div
-          className="fixed z-[100] pointer-events-none rounded-xl border border-indigo-200 bg-white/95 px-3 py-2 shadow-xl backdrop-blur-sm animate-popup"
+          className="fixed z-[100] pointer-events-none rounded-xl border border-indigo-200 bg-white/95 px-3 py-2 shadow-xl backdrop-blur-sm animate-popup dark:border-indigo-900/70 dark:bg-zinc-950/95"
           style={{
             left: dragState.x + 14,
             top: dragState.y + 14,

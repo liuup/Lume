@@ -43,18 +43,18 @@ export function SearchBar({
   };
 
   return (
-    <div className="absolute top-16 right-6 z-50 flex items-center bg-white border border-zinc-200 shadow-xl rounded-lg px-2 py-1.5 space-x-2 animate-in fade-in slide-in-from-top-4 duration-200">
-      <Search size={16} className="text-zinc-400" />
+    <div className="absolute top-16 right-6 z-50 flex items-center bg-white border border-zinc-200 shadow-xl rounded-lg px-2 py-1.5 space-x-2 animate-in fade-in slide-in-from-top-4 duration-200 dark:bg-zinc-950 dark:border-zinc-800">
+      <Search size={16} className="text-zinc-400 dark:text-zinc-500" />
       <input
         ref={inputRef}
         type="text"
         placeholder={t("searchBar.placeholder")}
-        className="w-48 text-sm outline-none text-zinc-700 placeholder:text-zinc-400"
+        className="w-48 text-sm outline-none text-zinc-700 placeholder:text-zinc-400 bg-transparent dark:text-zinc-200 dark:placeholder:text-zinc-500"
         value={value}
         onChange={(e) => onValueChange(e.target.value)}
         onKeyDown={handleKeyDown}
       />
-      <div className="min-w-[56px] text-right text-xs tabular-nums text-zinc-400">
+      <div className="min-w-[56px] text-right text-xs tabular-nums text-zinc-400 dark:text-zinc-500">
         {isSearching
           ? t("searchBar.searching")
           : totalMatches > 0
@@ -63,11 +63,11 @@ export function SearchBar({
               ? t("searchBar.noResults")
               : ""}
       </div>
-      <div className="flex items-center space-x-0.5 border-l border-zinc-200 pl-2">
+      <div className="flex items-center space-x-0.5 border-l border-zinc-200 pl-2 dark:border-zinc-800">
         <button
           onClick={() => handleSearch(true)}
           disabled={isSearching || !value.trim()}
-          className="p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 rounded"
+          className="p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 rounded dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
           title={t("searchBar.previous")}
         >
           <ChevronUp size={16} />
@@ -75,7 +75,7 @@ export function SearchBar({
         <button
           onClick={() => handleSearch(false)}
           disabled={isSearching || !value.trim()}
-          className="p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 rounded"
+          className="p-1 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 rounded dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
           title={t("searchBar.next")}
         >
           <ChevronDown size={16} />
@@ -83,7 +83,7 @@ export function SearchBar({
       </div>
       <button
         onClick={onClose}
-        className="p-1 ml-1 text-zinc-400 hover:bg-red-50 hover:text-red-500 rounded"
+        className="p-1 ml-1 text-zinc-400 hover:bg-red-50 hover:text-red-500 rounded dark:text-zinc-500 dark:hover:bg-red-950/30 dark:hover:text-red-300"
         title={t("searchBar.close")}
       >
         <X size={16} />

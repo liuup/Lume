@@ -360,7 +360,8 @@ fn merge_text_fragments(fragments: Vec<TextFragment>) -> Vec<TextNode> {
             continue;
         }
 
-        let (x, y, width, height) = match (fragment.x, fragment.y, fragment.width, fragment.height) {
+        let (x, y, width, height) = match (fragment.x, fragment.y, fragment.width, fragment.height)
+        {
             (Some(x), Some(y), Some(width), Some(height)) if width > 0.0 && height > 0.0 => {
                 (x, y, width, height)
             }

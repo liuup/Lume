@@ -714,6 +714,39 @@ pub fn rekey_library_item_in_db(
     Ok(())
 }
 
+fn delete_item_records(conn: &rusqlite::Connection, item_id: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "DELETE FROM attachments WHERE item_id = ?1",
+        rusqlite::params![item_id],
+    )?;
+    conn.execute(
+        "DELETE FROM notes WHERE item_id = ?1",
+        rusqlite::params![item_id],
+    )?;
+    conn.execute(
+        "DELETE FROM item_tags WHERE item_id = ?1",
+        rusqlite::params![item_id],
+    )?;
+    conn.execute(
+        "DELETE FROM items WHERE id = ?1",
+        rusqlite::params![item_id],
+    )?;
+    Ok(())
+}
+
+fn delete_trashed_item_records(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
+    let trashed_ids = fetch_trashed_items_from_db(conn)?
+        .into_iter()
+        .map(|item| item.id)
+        .collect::<Vec<_>>();
+
+    for item_id in trashed_ids {
+        delete_item_records(conn, &item_id)?;
+    }
+
+    Ok(())
+}
+
 pub fn build_library_tree(
     path: &Path,
     is_root: bool,
@@ -1010,6 +1043,11 @@ pub fn delete_library_pdf(
     let target = PathBuf::from(&path);
     if !target.exists() {
         remove_cached_pdf_metadata(&target);
+        remove_annotation_sidecar(&target);
+        if let Ok(conn) = state.db.lock() {
+            delete_item_records(&conn, &path)
+                .map_err(|e| format!("Failed to delete stale item record: {}", e))?;
+        }
         return Ok(());
     }
 
@@ -1150,8 +1188,7 @@ pub fn empty_trash(state: tauri::State<'_, crate::models::AppState>) -> Result<(
         remove_annotation_sidecar(&path);
     }
 
-    conn.execute("DELETE FROM items WHERE COALESCE(is_trashed, 0) = 1", [])
-        .map_err(|e| format!("Failed to empty trash: {}", e))?;
+    delete_trashed_item_records(&conn).map_err(|e| format!("Failed to empty trash: {}", e))?;
 
     Ok(())
 }
@@ -3670,10 +3707,11 @@ pub fn save_setting(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_ai_annotation_digest, build_library_item, normalize_bing_web_language_code,
-        parse_bing_web_auth_state, render_annotations_markdown, sync_item_to_db,
+        build_ai_annotation_digest, build_library_item, delete_item_records,
+        delete_trashed_item_records, normalize_bing_web_language_code, parse_bing_web_auth_state,
+        render_annotations_markdown, sync_item_to_db,
     };
-    use crate::db::ensure_schema;
+    use crate::db::{ensure_schema, init_db_at_path};
     use crate::models::{
         SavedAnnotationPath, SavedAnnotationPoint, SavedPdfAnnotationsDocument,
         SavedPdfPageAnnotations, SavedTextAnnotation,
@@ -3914,6 +3952,157 @@ mod tests {
         assert_eq!(stored.0, stored.1);
 
         let _ = fs::remove_file(pdf_path);
+    }
+
+    #[test]
+    fn init_db_at_path_enables_foreign_keys() {
+        let temp_dir = std::env::temp_dir().join(format!("lume-db-test-{}", std::process::id()));
+        let _ = fs::create_dir_all(&temp_dir);
+        let db_path = temp_dir.join("foreign_keys.sqlite");
+        let _ = fs::remove_file(&db_path);
+
+        let conn = init_db_at_path(&db_path).unwrap();
+        let foreign_keys: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+            .unwrap();
+
+        assert_eq!(foreign_keys, 1);
+
+        let _ = fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn delete_item_records_removes_item_and_related_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO items (id, item_type, title, folder_path) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params!["item-1", "Journal Article", "Paper", "root"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO attachments (id, item_id, name, path, attachment_type) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["att-1", "item-1", "paper", "/tmp/paper.pdf", "PDF"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO notes (id, item_id, content, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["note-1", "item-1", "note", "now", "now"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO item_tags (item_id, tag) VALUES (?1, ?2)",
+            rusqlite::params!["item-1", "ml"],
+        )
+        .unwrap();
+
+        delete_item_records(&conn, "item-1").unwrap();
+
+        let item_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM items WHERE id = 'item-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let attachment_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM attachments WHERE item_id = 'item-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let note_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM notes WHERE item_id = 'item-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let tag_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM item_tags WHERE item_id = 'item-1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(item_count, 0);
+        assert_eq!(attachment_count, 0);
+        assert_eq!(note_count, 0);
+        assert_eq!(tag_count, 0);
+    }
+
+    #[test]
+    fn delete_trashed_item_records_only_removes_trashed_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        ensure_schema(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO items (id, item_type, title, authors, year, abstract, doi, arxiv_id, publication, volume, issue, pages, publisher, isbn, url, language, date_added, date_modified, folder_path, is_trashed, trashed_at)
+             VALUES (?1, ?2, ?3, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ?4, 1, ?5)",
+            rusqlite::params![
+                "trash-item",
+                "Journal Article",
+                "Trash",
+                "__trash__",
+                "2026-03-20T00:00:00Z"
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO attachments (id, item_id, name, path, attachment_type) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["att-trash", "trash-item", "paper", "/tmp/trash.pdf", "PDF"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO items (id, item_type, title, authors, year, abstract, doi, arxiv_id, publication, volume, issue, pages, publisher, isbn, url, language, date_added, date_modified, folder_path, is_trashed)
+             VALUES (?1, ?2, ?3, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ?4, 0)",
+            rusqlite::params!["live-item", "Journal Article", "Live", "root"],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO attachments (id, item_id, name, path, attachment_type) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["att-live", "live-item", "paper", "/tmp/live.pdf", "PDF"],
+        )
+        .unwrap();
+
+        delete_trashed_item_records(&conn).unwrap();
+
+        let trashed_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM items WHERE id = 'trash-item'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let trashed_attachment_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM attachments WHERE item_id = 'trash-item'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let live_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM items WHERE id = 'live-item'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let live_attachment_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM attachments WHERE item_id = 'live-item'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(trashed_count, 0);
+        assert_eq!(trashed_attachment_count, 0);
+        assert_eq!(live_count, 1);
+        assert_eq!(live_attachment_count, 1);
     }
 
     #[test]

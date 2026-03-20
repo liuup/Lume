@@ -341,22 +341,22 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
       : t("metaPanel.metadataFlow.states.partial");
 
   const metadataReportStateClassName = metadataFetchReport?.metadataCompleted
-    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"
     : metadataFetchReport?.isPreprint
-      ? "border-amber-200 bg-amber-50 text-amber-700"
-      : "border-zinc-200 bg-zinc-100 text-zinc-700";
+      ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+      : "border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300";
 
   const metadataStepStatusClassName = (status: string) => {
     if (status === "hit") {
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+      return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200";
     }
     if (status === "error") {
-      return "border-rose-200 bg-rose-50 text-rose-700";
+      return "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200";
     }
     if (status === "redundant") {
-      return "border-sky-200 bg-sky-50 text-sky-700";
+      return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200";
     }
-    return "border-zinc-200 bg-zinc-100 text-zinc-600";
+    return "border-zinc-200 bg-zinc-100 text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300";
   };
 
   const metadataStepStatusLabel = (status: string) => {
@@ -692,23 +692,23 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
   };
 
   return (
-    <aside className="relative bg-white border-l border-zinc-200 flex flex-col h-full shrink-0 animate-slide-left" style={{ width }}>
+    <aside className="relative bg-white border-l border-zinc-200 flex flex-col h-full shrink-0 animate-slide-left dark:border-zinc-800 dark:bg-zinc-950" style={{ width }}>
       <div
         className="absolute top-0 left-0 h-full w-2 cursor-col-resize z-20 group"
         onMouseDown={onResizeStart}
       >
-        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent group-hover:bg-indigo-300" />
+        <div className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent group-hover:bg-indigo-300 dark:group-hover:bg-indigo-700" />
       </div>
       {/* Header */}
-      <div className="h-14 border-b border-zinc-200 flex items-center justify-between px-4 shrink-0 bg-zinc-50/50">
-        <h2 className="font-semibold text-zinc-800 tracking-tight">{t("metaPanel.title")}</h2>
+      <div className="h-14 border-b border-zinc-200 flex items-center justify-between px-4 shrink-0 bg-zinc-50/50 dark:border-zinc-800 dark:bg-zinc-900/70">
+        <h2 className="font-semibold text-zinc-800 tracking-tight dark:text-zinc-100">{t("metaPanel.title")}</h2>
         <div className="flex items-center space-x-1">
           {selectedItem && (
             isEditing ? (
                <button
                  onClick={handleSave}
                  disabled={isSaving}
-                 className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors flex items-center gap-1 text-xs font-medium"
+                 className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-md transition-colors flex items-center gap-1 text-xs font-medium dark:text-emerald-300 dark:hover:bg-emerald-950/30"
                  title={t("metaPanel.actions.saveChanges")}
                >
                  <Check size={14} />
@@ -719,7 +719,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                 <button
                   onClick={handleRetrieveMetadata}
                   disabled={isRetrievingMetadata}
-                  className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors flex items-center gap-1 text-xs font-medium disabled:cursor-wait disabled:text-indigo-300"
+                  className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors flex items-center gap-1 text-xs font-medium disabled:cursor-wait disabled:text-indigo-300 dark:text-indigo-300 dark:hover:bg-indigo-950/30 dark:disabled:text-indigo-800"
                   title={t("metaPanel.actions.retrieveMetadata")}
                 >
                   {isRetrievingMetadata ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
@@ -727,7 +727,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                 </button>
                 <button
                   onClick={() => setIsEditing(true)}
-                  className="p-1.5 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 rounded-md transition-colors flex items-center gap-1 text-xs font-medium"
+                  className="p-1.5 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 rounded-md transition-colors flex items-center gap-1 text-xs font-medium dark:text-zinc-400 dark:hover:text-zinc-100 dark:hover:bg-zinc-800"
                   title={t("metaPanel.actions.editMetadata")}
                 >
                   <Edit2 size={14} />
@@ -744,7 +744,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                 onClose();
               }
             }}
-            className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-md transition-colors ml-1"
+            className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-md transition-colors ml-1 dark:text-zinc-500 dark:hover:text-zinc-100 dark:hover:bg-zinc-800"
             title={isEditing ? t("metaPanel.actions.cancelEdit") : t("metaPanel.actions.closePanel")}
           >
             <X size={15} />
@@ -755,9 +755,9 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
       <div className="flex-1 overflow-y-auto">
         {!selectedItem ? (
           /* Empty state */
-          <div className="flex flex-col items-center justify-center h-full text-zinc-300 space-y-3 px-6">
+          <div className="flex flex-col items-center justify-center h-full text-zinc-300 space-y-3 px-6 dark:text-zinc-600">
             <FileText size={36} className="opacity-40" />
-            <p className="text-sm text-center text-zinc-400 leading-snug">
+            <p className="text-sm text-center text-zinc-400 leading-snug dark:text-zinc-500">
               {t("metaPanel.empty")}
             </p>
           </div>
@@ -773,9 +773,9 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
 
             {/* Pill tag editor */}
             <div className="flex flex-col space-y-1">
-              <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t("metaPanel.fields.tags")}</label>
+              <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider dark:text-zinc-400">{t("metaPanel.fields.tags")}</label>
               <div
-                className="flex flex-wrap gap-1.5 p-2 border border-zinc-200 rounded-md bg-white min-h-[36px] cursor-text focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400 transition-shadow"
+                className="flex flex-wrap gap-1.5 p-2 border border-zinc-200 rounded-md bg-white min-h-[36px] cursor-text focus-within:border-zinc-400 focus-within:ring-1 focus-within:ring-zinc-400 transition-shadow dark:border-zinc-800 dark:bg-zinc-950 dark:focus-within:border-zinc-600"
                 onClick={() => tagInputRef.current?.focus()}
               >
                 {(editFormData.tags || []).map(tag => {
@@ -783,14 +783,14 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                   return (
                     <span
                       key={tag}
-                      className="flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded-full text-[11px] font-medium bg-zinc-100 text-zinc-700 border border-zinc-200"
+                      className="flex items-center gap-1 pl-1.5 pr-1 py-0.5 rounded-full text-[11px] font-medium bg-zinc-100 text-zinc-700 border border-zinc-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
                     >
                       <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
                       {tag}
                       <button
                         type="button"
                         onClick={e => { e.stopPropagation(); removeTag(tag); }}
-                        className="ml-0.5 text-zinc-400 hover:text-red-500 transition-colors leading-none"
+                        className="ml-0.5 text-zinc-400 hover:text-red-500 transition-colors leading-none dark:text-zinc-500 dark:hover:text-red-300"
                       >×</button>
                     </span>
                   );
@@ -803,13 +803,13 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                   onKeyDown={handleTagKeyDown}
                   onBlur={() => { if (tagInput.trim()) addTag(tagInput); }}
                   placeholder={(editFormData.tags || []).length === 0 ? t("metaPanel.placeholders.tagInput") : ""}
-                  className="flex-1 min-w-[120px] text-sm bg-transparent outline-none placeholder:text-zinc-300"
+                  className="flex-1 min-w-[120px] text-sm bg-transparent outline-none placeholder:text-zinc-300 dark:text-zinc-100 dark:placeholder:text-zinc-500"
                 />
               </div>
-              <p className="text-[10px] text-zinc-400">{t("metaPanel.tagsHelp")}</p>
+              <p className="text-[10px] text-zinc-400 dark:text-zinc-500">{t("metaPanel.tagsHelp")}</p>
             </div>
 
-            <div className="border-t border-zinc-100 pt-4 mt-2 space-y-4">
+            <div className="border-t border-zinc-100 pt-4 mt-2 space-y-4 dark:border-zinc-800">
               <EditField label={t("metaPanel.fields.publication")} value={editFormData.publication || ""} onChange={v => handleStringChange('publication', v)} />
               
               <div className="grid grid-cols-3 gap-3">
@@ -829,21 +829,21 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
               <EditField label={t("metaPanel.fields.url")} value={editFormData.url || ""} onChange={v => handleStringChange('url', v)} />
             </div>
 
-            <div className="border-t border-zinc-100 pt-4 mt-2">
+            <div className="border-t border-zinc-100 pt-4 mt-2 dark:border-zinc-800">
               <EditField label={t("metaPanel.fields.abstract")} value={editFormData.abstract || ""} onChange={v => handleStringChange('abstract', v)} isTextArea rows={8} />
             </div>
 
             <div className="flex justify-end pt-4 pb-8 space-x-2">
               <button 
                 onClick={() => setIsEditing(false)}
-                className="px-3 py-1.5 text-xs font-medium text-zinc-600 bg-white border border-zinc-200 rounded hover:bg-zinc-50 transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-zinc-600 bg-white border border-zinc-200 rounded hover:bg-zinc-50 transition-colors dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
                 disabled={isSaving}
               >
                 {t("metaPanel.actions.cancel")}
               </button>
               <button 
                 onClick={handleSave}
-                className="px-3 py-1.5 text-xs font-medium text-white bg-zinc-800 rounded hover:bg-zinc-900 transition-colors"
+                className="px-3 py-1.5 text-xs font-medium text-white bg-zinc-800 rounded hover:bg-zinc-900 transition-colors dark:bg-indigo-700 dark:hover:bg-indigo-600"
                 disabled={isSaving}
               >
                 {isSaving ? t("metaPanel.actions.savingWithDots") : t("metaPanel.actions.saveChanges")}
@@ -854,7 +854,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
           <div className="p-5 space-y-6">
             {/* Title & tags */}
             <div>
-              <h3 className="text-base font-bold text-zinc-900 leading-tight">
+              <h3 className="text-base font-bold text-zinc-900 leading-tight dark:text-zinc-100">
                 {selectedItem.title || selectedItem.attachments?.[0]?.name || t("metaPanel.untitled")}
               </h3>
               {selectedItem.tags.length > 0 && (
@@ -864,7 +864,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                     return (
                       <span
                         key={tag}
-                        className="flex items-center gap-1 px-2 py-0.5 bg-zinc-100 text-zinc-700 text-[10px] font-semibold rounded-full border border-zinc-200"
+                        className="flex items-center gap-1 px-2 py-0.5 bg-zinc-100 text-zinc-700 text-[10px] font-semibold rounded-full border border-zinc-200 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
                       >
                         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
                         {tag}
@@ -949,11 +949,11 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
               </MetaRow>
             </div>
             {(isLoadingMetadataFetchReport || metadataFetchReport) && (
-              <div className="border border-zinc-200 rounded-xl bg-zinc-50/80 p-3 space-y-3">
+              <div className="border border-zinc-200 rounded-xl bg-zinc-50/80 p-3 space-y-3 dark:border-zinc-800 dark:bg-zinc-900/70">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5">
-                    <Search size={14} className="text-zinc-500" />
-                    <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider">
+                    <Search size={14} className="text-zinc-500 dark:text-zinc-400" />
+                    <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-wider dark:text-zinc-300">
                       {t("metaPanel.metadataFlow.title")}
                     </span>
                   </div>
@@ -965,33 +965,33 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                 </div>
 
                 {isLoadingMetadataFetchReport && !metadataFetchReport ? (
-                  <p className="text-xs text-zinc-500">{t("metaPanel.metadataFlow.loading")}</p>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">{t("metaPanel.metadataFlow.loading")}</p>
                 ) : null}
 
                 {metadataFetchReport ? (
                   <>
                     {metadataFetchReport.summary ? (
-                      <p className="text-xs text-zinc-600 leading-relaxed">
+                      <p className="text-xs text-zinc-600 leading-relaxed dark:text-zinc-300">
                         {metadataFetchReport.summary}
                       </p>
                     ) : null}
 
                     {!metadataFetchReport.networkComplete ? (
-                      <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-2">
+                      <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-2.5 py-2 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
                         {t("metaPanel.metadataFlow.networkGaps")}
                       </p>
                     ) : null}
 
                     {metadataFetchReport.titleQueries.length > 0 ? (
                       <div className="space-y-1.5">
-                        <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
                           {t("metaPanel.metadataFlow.titleQueries")}
                         </div>
                         <div className="flex flex-wrap gap-1">
                           {metadataFetchReport.titleQueries.map((query) => (
                             <span
                               key={query}
-                              className="px-2 py-0.5 rounded-full bg-white border border-zinc-200 text-[10px] text-zinc-600 max-w-full truncate"
+                              className="px-2 py-0.5 rounded-full bg-white border border-zinc-200 text-[10px] text-zinc-600 max-w-full truncate dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300"
                               title={query}
                             >
                               {query}
@@ -1004,28 +1004,28 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                     {metadataFetchReport.steps.length > 0 ? (
                       <div className="space-y-2">
                         {metadataFetchReport.steps.map((step, index) => (
-                          <div key={`${step.provider}-${step.query}-${index}`} className="rounded-lg border border-zinc-200 bg-white px-3 py-2 space-y-1.5">
+                          <div key={`${step.provider}-${step.query}-${index}`} className="rounded-lg border border-zinc-200 bg-white px-3 py-2 space-y-1.5 dark:border-zinc-800 dark:bg-zinc-950">
                             <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-[11px] font-semibold text-zinc-700">
+                              <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-200">
                                 {metadataStepProviderLabel(step.provider)}
                               </span>
-                              <span className="px-1.5 py-0.5 rounded border border-zinc-200 bg-zinc-50 text-[10px] uppercase tracking-wide text-zinc-500">
+                              <span className="px-1.5 py-0.5 rounded border border-zinc-200 bg-zinc-50 text-[10px] uppercase tracking-wide text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
                                 {metadataStepStageLabel(step.stage)}
                               </span>
                               <span className={`px-1.5 py-0.5 rounded border text-[10px] uppercase tracking-wide ${metadataStepStatusClassName(step.status)}`}>
                                 {metadataStepStatusLabel(step.status)}
                               </span>
                               {typeof step.score === "number" ? (
-                                <span className="text-[10px] text-zinc-400">
+                                <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
                                   {t("metaPanel.metadataFlow.score", { value: step.score.toFixed(2) })}
                                 </span>
                               ) : null}
                             </div>
-                            <div className="text-[11px] text-zinc-500 font-mono break-all">
+                            <div className="text-[11px] text-zinc-500 font-mono break-all dark:text-zinc-400">
                               {step.query}
                             </div>
                             {step.fieldsChanged.length > 0 ? (
-                              <div className="text-[11px] text-zinc-600">
+                              <div className="text-[11px] text-zinc-600 dark:text-zinc-300">
                                 {t("metaPanel.metadataFlow.fieldsChanged", {
                                   fields: step.fieldsChanged.join(", "),
                                 })}
@@ -1040,24 +1040,24 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                         ))}
                       </div>
                     ) : (
-                      <p className="text-xs text-zinc-500">{t("metaPanel.metadataFlow.empty")}</p>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">{t("metaPanel.metadataFlow.empty")}</p>
                     )}
                   </>
                 ) : null}
               </div>
             )}
             {/* ── Notes section ───────────────────────────────────────── */}
-            <div className="border-t border-zinc-100 pt-5 space-y-2">
+            <div className="border-t border-zinc-100 pt-5 space-y-2 dark:border-zinc-800">
               <div className="flex items-center justify-between gap-1.5">
                 <div className="flex items-center gap-1.5">
-                  <StickyNote size={14} className="text-zinc-400" />
-                  <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t("metaPanel.notes.title")}</span>
+                  <StickyNote size={14} className="text-zinc-400 dark:text-zinc-500" />
+                  <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider dark:text-zinc-400">{t("metaPanel.notes.title")}</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <button
                     onClick={handleGenerateAnnotationDigest}
                     disabled={!selectedItem || isGeneratingAnnotationDigest}
-                    className="px-2 py-1 text-[10px] font-medium flex items-center gap-1 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors disabled:opacity-50"
+                    className="px-2 py-1 text-[10px] font-medium flex items-center gap-1 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors disabled:opacity-50 dark:text-zinc-400 dark:hover:text-indigo-300 dark:hover:bg-indigo-950/30"
                     title={t("metaPanel.notes.digestTitle")}
                   >
                     {isGeneratingAnnotationDigest ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
@@ -1083,7 +1083,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                         });
                       }
                     }}
-                    className="px-2 py-1 text-[10px] font-medium flex items-center gap-1 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors"
+                    className="px-2 py-1 text-[10px] font-medium flex items-center gap-1 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors dark:text-zinc-400 dark:hover:text-indigo-300 dark:hover:bg-indigo-950/30"
                     title={t("metaPanel.notes.extractTitle")}
                   >
                     <Wand2 size={12} />
@@ -1092,13 +1092,13 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                 </div>
               </div>
               {annotationDigest && (
-                <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 space-y-3">
+                <div className="rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 space-y-3 dark:border-indigo-900/60 dark:bg-indigo-950/25">
                   <div className="space-y-1">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
                         {t("metaPanel.notes.digestPreview")}
                       </span>
-                      <span className="text-[10px] text-indigo-500">
+                      <span className="text-[10px] text-indigo-500 dark:text-indigo-400">
                         {t("metaPanel.notes.digestStats", {
                           text: annotationDigest.stats.textAnnotations,
                           highlight: annotationDigest.stats.highlightStrokes,
@@ -1106,18 +1106,18 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                         })}
                       </span>
                     </div>
-                    <p className="text-sm leading-relaxed text-zinc-700">{annotationDigest.overview}</p>
-                    <p className="text-xs leading-relaxed text-zinc-500">{annotationDigest.coverageNote}</p>
+                    <p className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-200">{annotationDigest.overview}</p>
+                    <p className="text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">{annotationDigest.coverageNote}</p>
                   </div>
                   <div className="space-y-2">
                     {annotationDigest.sections.filter((section) => section.entries.length > 0).map((section) => (
-                      <div key={section.id} className="rounded-lg border border-white/80 bg-white/80 p-2.5">
-                        <div className="text-[11px] font-semibold text-zinc-700">{section.title}</div>
-                        <div className="mt-1 text-[11px] text-zinc-500">{section.summary}</div>
+                      <div key={section.id} className="rounded-lg border border-white/80 bg-white/80 p-2.5 dark:border-zinc-800 dark:bg-zinc-950/90">
+                        <div className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-200">{section.title}</div>
+                        <div className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">{section.summary}</div>
                         <div className="mt-2 space-y-1.5">
                           {section.entries.slice(0, 3).map((entry, index) => (
-                            <div key={`${section.id}-${entry.page}-${index}`} className="text-xs leading-relaxed text-zinc-600">
-                              <span className="font-medium text-indigo-600">{t("metaPanel.annotations.page", { page: entry.page })}</span>
+                            <div key={`${section.id}-${entry.page}-${index}`} className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
+                              <span className="font-medium text-indigo-600 dark:text-indigo-300">{t("metaPanel.annotations.page", { page: entry.page })}</span>
                               {" · "}
                               {entry.text}
                             </div>
@@ -1129,21 +1129,21 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                   <div className="flex flex-wrap justify-end gap-2">
                     <button
                       onClick={() => setAnnotationDigest(null)}
-                      className="px-2.5 py-1.5 text-[11px] font-medium rounded-md border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50"
+                      className="px-2.5 py-1.5 text-[11px] font-medium rounded-md border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
                     >
                       {t("metaPanel.actions.cancel")}
                     </button>
                     <button
                       onClick={() => handleApplyAnnotationDigest("append")}
                       disabled={isApplyingAnnotationDigest}
-                      className="px-2.5 py-1.5 text-[11px] font-medium rounded-md border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                      className="px-2.5 py-1.5 text-[11px] font-medium rounded-md border border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 dark:border-indigo-900/60 dark:bg-zinc-950 dark:text-indigo-300 dark:hover:bg-indigo-950/30"
                     >
                       {t("metaPanel.notes.digestAppend")}
                     </button>
                     <button
                       onClick={() => handleApplyAnnotationDigest("replace")}
                       disabled={isApplyingAnnotationDigest}
-                      className="px-2.5 py-1.5 text-[11px] font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50"
+                      className="px-2.5 py-1.5 text-[11px] font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 dark:bg-indigo-700 dark:hover:bg-indigo-600"
                     >
                       {isApplyingAnnotationDigest ? t("metaPanel.actions.savingWithDots") : t("metaPanel.notes.digestReplace")}
                     </button>
@@ -1155,14 +1155,14 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                 onChange={e => setNoteText(e.target.value)}
                 rows={8}
                   placeholder={t("metaPanel.notes.placeholder")}
-                className="w-full p-2.5 text-sm text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg resize-y leading-relaxed outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400"
+                className="w-full p-2.5 text-sm text-zinc-800 bg-zinc-50 border border-zinc-200 rounded-lg resize-y leading-relaxed outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-600"
                 spellCheck={false}
               />
               <div className="flex justify-end">
                 <button
                   onClick={handleSaveNote}
                   disabled={isSavingNote || isLoadingNote || !selectedItem}
-                  className="px-3 py-1.5 text-xs font-medium rounded-md border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                  className="px-3 py-1.5 text-xs font-medium rounded-md border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
                 >
                   {isSavingNote ? t("metaPanel.actions.savingWithDots") : t("metaPanel.notes.save")}
                 </button>
@@ -1170,16 +1170,16 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
             </div>
 
             {/* ── Annotations section ─────────────────────────────────────── */}
-            <div className="border-t border-zinc-100 pt-5 space-y-3">
+            <div className="border-t border-zinc-100 pt-5 space-y-3 dark:border-zinc-800">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5">
-                  <Highlighter size={14} className="text-zinc-400" />
-                  <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t("metaPanel.annotations.title")}</span>
+                  <Highlighter size={14} className="text-zinc-400 dark:text-zinc-500" />
+                  <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider dark:text-zinc-400">{t("metaPanel.annotations.title")}</span>
                 </div>
                 <button
                   onClick={handleExportAnnotations}
                   disabled={!hasAnnotations || isExportingAnnotations}
-                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-40"
+                  className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-600 transition-colors hover:border-indigo-200 hover:text-indigo-600 disabled:opacity-40 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:border-indigo-900/70 dark:hover:text-indigo-300"
                   title={t("metaPanel.annotations.export")}
                 >
                   {isExportingAnnotations ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
@@ -1188,14 +1188,14 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
               </div>
               
               {isLoadingAnnotations && !pdfAnnotations ? (
-                <div className="py-4 text-center text-xs text-zinc-400 animate-pulse">{t("metaPanel.annotations.loading")}</div>
+                <div className="py-4 text-center text-xs text-zinc-400 animate-pulse dark:text-zinc-500">{t("metaPanel.annotations.loading")}</div>
               ) : !hasAnnotations ? (
-                <div className="py-4 text-center text-xs text-zinc-400 bg-zinc-50 rounded-lg border border-dashed border-zinc-200">
+                <div className="py-4 text-center text-xs text-zinc-400 bg-zinc-50 rounded-lg border border-dashed border-zinc-200 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-500">
                   {t("metaPanel.annotations.empty")}
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <div className="space-y-2 rounded-xl border border-zinc-200 bg-zinc-50/60 p-3">
+                  <div className="space-y-2 rounded-xl border border-zinc-200 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-900/70">
                     <div className="flex flex-wrap items-center gap-1.5">
                       {ANNOTATION_FILTERS.map((filter) => (
                         <button
@@ -1204,8 +1204,8 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                           className={[
                             "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
                             annotationFilter === filter.id
-                              ? "border-indigo-600 bg-indigo-600 text-white"
-                              : "border-zinc-200 bg-white text-zinc-500 hover:border-indigo-300 hover:text-indigo-600",
+                              ? "border-indigo-600 bg-indigo-600 text-white dark:border-indigo-700 dark:bg-indigo-700"
+                              : "border-zinc-200 bg-white text-zinc-500 hover:border-indigo-300 hover:text-indigo-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400 dark:hover:border-indigo-900/70 dark:hover:text-indigo-300",
                           ].join(" ")}
                         >
                           {t(filter.labelKey)}
@@ -1215,16 +1215,16 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
 
                     <div className="flex items-center gap-2">
                       <div className="relative min-w-0 flex-1">
-                        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500" />
                         <input
                           type="text"
                           value={annotationSearchQuery}
                           onChange={(event) => setAnnotationSearchQuery(event.target.value)}
                           placeholder={t("metaPanel.annotations.searchPlaceholder")}
-                          className="w-full rounded-lg border border-transparent bg-white py-2 pl-9 pr-3 text-sm text-zinc-700 outline-none transition-colors focus:border-indigo-300 focus:ring-2 focus:ring-indigo-400/15"
+                          className="w-full rounded-lg border border-transparent bg-white py-2 pl-9 pr-3 text-sm text-zinc-700 outline-none transition-colors focus:border-indigo-300 focus:ring-2 focus:ring-indigo-400/15 dark:bg-zinc-950 dark:text-zinc-200 dark:placeholder:text-zinc-500 dark:focus:border-indigo-800"
                         />
                       </div>
-                      <span className="shrink-0 text-[11px] font-medium text-zinc-400">
+                      <span className="shrink-0 text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
                         {t("metaPanel.annotations.results", {
                           visible: filteredAnnotationEntries.length,
                           total: annotationEntries.length,
@@ -1234,7 +1234,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                   </div>
 
                   {filteredAnnotationEntries.length === 0 ? (
-                    <div className="py-4 text-center text-xs text-zinc-400 bg-zinc-50 rounded-lg border border-dashed border-zinc-200">
+                    <div className="py-4 text-center text-xs text-zinc-400 bg-zinc-50 rounded-lg border border-dashed border-zinc-200 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-500">
                       {hasActiveAnnotationFilters
                         ? t("metaPanel.annotations.emptyFiltered")
                         : t("metaPanel.annotations.empty")}
@@ -1246,30 +1246,30 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                           key={entry.id}
                           type="button"
                           onClick={() => onPageJump && onPageJump(entry.page)}
-                          className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-3 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50/40"
+                          className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-3 text-left transition-colors hover:border-indigo-200 hover:bg-indigo-50/40 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-indigo-900/70 dark:hover:bg-indigo-950/20"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0 space-y-1">
                               <div className="flex flex-wrap items-center gap-2">
-                                <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600">
+                                <span className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-300">
                                   {t("metaPanel.annotations.page", { page: entry.page })}
                                 </span>
                                 <span className={[
                                   "rounded-full px-2 py-0.5 text-[10px] font-semibold",
                                   entry.type === "text"
-                                    ? "bg-indigo-50 text-indigo-600"
+                                    ? "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300"
                                     : entry.type === "highlight"
-                                      ? "bg-amber-50 text-amber-700"
-                                      : "bg-sky-50 text-sky-700",
+                                      ? "bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-200"
+                                      : "bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-200",
                                 ].join(" ")}>
                                   {annotationEntryTitle(entry)}
                                 </span>
                               </div>
-                              <p className="text-sm leading-relaxed text-zinc-700">
+                              <p className="text-sm leading-relaxed text-zinc-700 dark:text-zinc-200">
                                 {annotationEntryPreview(entry)}
                               </p>
                             </div>
-                            <span className="text-[10px] text-zinc-400">{entry.type === "text" ? t("metaPanel.annotations.jump") : t("metaPanel.annotations.jumpToPage")}</span>
+                            <span className="text-[10px] text-zinc-400 dark:text-zinc-500">{entry.type === "text" ? t("metaPanel.annotations.jump") : t("metaPanel.annotations.jumpToPage")}</span>
                           </div>
                         </button>
                       ))}
@@ -1280,10 +1280,10 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
             </div>
 
             {/* ── Cite section ─────────────────────────────────────────── */}
-            <div className="border-t border-zinc-100 pt-5">
+            <div className="border-t border-zinc-100 pt-5 dark:border-zinc-800">
               <div className="flex items-center gap-1.5 mb-3">
-                <Quote size={14} className="text-zinc-400" />
-                <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{t("metaPanel.cite.title")}</span>
+                <Quote size={14} className="text-zinc-400 dark:text-zinc-500" />
+                <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider dark:text-zinc-400">{t("metaPanel.cite.title")}</span>
               </div>
               {/* Format tabs */}
               <div className="flex flex-wrap gap-1 mb-3">
@@ -1294,8 +1294,8 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                     className={[
                       "px-2.5 py-1 rounded-full text-[10px] font-semibold border transition-colors",
                       citeFormat === f
-                        ? "bg-indigo-600 text-white border-indigo-600"
-                        : "bg-white text-zinc-500 border-zinc-200 hover:border-indigo-300 hover:text-indigo-600",
+                        ? "bg-indigo-600 text-white border-indigo-600 dark:border-indigo-700 dark:bg-indigo-700"
+                        : "bg-white text-zinc-500 border-zinc-200 hover:border-indigo-300 hover:text-indigo-600 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400 dark:hover:border-indigo-900/70 dark:hover:text-indigo-300",
                     ].join(" ")}
                   >
                     {citationFormatLabel(f)}
@@ -1308,7 +1308,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                   readOnly
                   value={citeText}
                   rows={4}
-                  className="w-full p-2.5 text-xs font-mono text-zinc-700 bg-zinc-50 border border-zinc-200 rounded-lg resize-none leading-relaxed outline-none"
+                  className="w-full p-2.5 text-xs font-mono text-zinc-700 bg-zinc-50 border border-zinc-200 rounded-lg resize-none leading-relaxed outline-none dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
                   spellCheck={false}
                 />
                 <button
@@ -1318,7 +1318,7 @@ export function MetaPanel({ selectedItem, isOpen, onClose, width = 320, onResize
                     setTimeout(() => setCiteCopied(false), 2000);
                   }}
                   disabled={!citeText}
-                  className="absolute top-2 right-2 p-1 rounded bg-white border border-zinc-200 text-zinc-400 hover:text-indigo-600 hover:border-indigo-300 transition-colors disabled:opacity-30"
+                  className="absolute top-2 right-2 p-1 rounded bg-white border border-zinc-200 text-zinc-400 hover:text-indigo-600 hover:border-indigo-300 transition-colors disabled:opacity-30 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-500 dark:hover:text-indigo-300 dark:hover:border-indigo-900/70"
                   title={t("metaPanel.cite.copyTitle")}
                 >
                   {citeCopied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
@@ -1337,8 +1337,8 @@ function MetaRow({ icon, label, children }: { icon: React.ReactNode; label: stri
     <div className="flex items-start space-x-3">
       <span className="mt-0.5 shrink-0">{icon}</span>
       <div className="min-w-0 flex-1">
-        <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-0.5">{label}</p>
-        <div className="text-sm text-zinc-800 leading-snug">{children}</div>
+        <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider mb-0.5 dark:text-zinc-500">{label}</p>
+        <div className="text-sm text-zinc-800 leading-snug dark:text-zinc-100">{children}</div>
       </div>
     </div>
   );
@@ -1361,14 +1361,14 @@ function EditField({
 }) {
   return (
     <div className="flex flex-col space-y-1">
-      <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{label}</label>
+      <label className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider dark:text-zinc-400">{label}</label>
       {isTextArea ? (
         <textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
           rows={rows}
           placeholder={placeholder}
-          className="w-full text-sm p-2 border border-zinc-200 rounded-md bg-white text-zinc-800 placeholder:text-zinc-300 focus:outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400 transition-shadow resize-y min-h-[60px]"
+          className="w-full text-sm p-2 border border-zinc-200 rounded-md bg-white text-zinc-800 placeholder:text-zinc-300 focus:outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400 transition-shadow resize-y min-h-[60px] dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-600"
         />
       ) : (
         <input
@@ -1376,7 +1376,7 @@ function EditField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
-          className="w-full text-sm p-1.5 border border-zinc-200 rounded-md bg-white text-zinc-800 placeholder:text-zinc-300 focus:outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400 transition-shadow"
+          className="w-full text-sm p-1.5 border border-zinc-200 rounded-md bg-white text-zinc-800 placeholder:text-zinc-300 focus:outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-400 transition-shadow dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-zinc-600"
         />
       )}
     </div>

@@ -27,7 +27,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   const [aboutInfo, setAboutInfo] = useState<AboutInfo>({
     name: "Lume",
     version: "0.1.0",
-    repository: "https://github.com/liuup/Lume",
+    repository: "https://github.com/LumeResearch/Lume",
   });
 
   const themeOptions: { value: AppTheme; label: string }[] = [
@@ -65,7 +65,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
       setAboutInfo({
         name: results[0].status === "fulfilled" ? results[0].value : "Lume",
         version: results[1].status === "fulfilled" ? results[1].value : "0.1.0",
-        repository: "https://github.com/liuup/Lume",
+        repository: "https://github.com/LumeResearch/Lume",
       });
     });
 
@@ -79,13 +79,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/20 backdrop-blur-sm animate-backdrop" onClick={onClose}>
       <div
-        className="w-[980px] max-w-[calc(100vw-2rem)] h-[min(86vh,780px)] bg-white rounded-2xl shadow-xl flex pointer-events-auto animate-modal overflow-hidden"
+        className="w-[980px] max-w-[calc(100vw-2rem)] h-[min(86vh,780px)] bg-white rounded-2xl shadow-xl flex pointer-events-auto animate-modal overflow-hidden dark:bg-zinc-950"
         onClick={(e) => e.stopPropagation()}
       >
-        <aside className="w-64 shrink-0 border-r border-zinc-100 bg-zinc-50/70 flex flex-col">
-          <div className="flex items-center gap-2 px-5 py-4 border-b border-zinc-100">
-            <Settings size={18} className="text-zinc-500" />
-            <h2 className="text-base font-semibold text-zinc-800">{t("settings.title")}</h2>
+        <aside className="w-64 shrink-0 border-r border-zinc-100 bg-zinc-50/70 flex flex-col dark:border-zinc-800 dark:bg-zinc-900/70">
+          <div className="flex items-center gap-2 px-5 py-4 border-b border-zinc-100 dark:border-zinc-800">
+            <Settings size={18} className="text-zinc-500 dark:text-zinc-400" />
+            <h2 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">{t("settings.title")}</h2>
           </div>
           <nav className="p-3 space-y-1">
             {sections.map((section) => {
@@ -99,7 +99,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                   className={[
                     "w-full flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors text-left",
                     isActive
-                      ? "bg-white text-zinc-900 shadow-sm border border-zinc-200"
+                      ? "bg-white text-zinc-900 shadow-sm border border-zinc-200 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
                       : "text-zinc-500 hover:bg-zinc-100/80 hover:text-zinc-800 dark:hover:bg-zinc-800/60 dark:hover:text-zinc-100"
                   ].join(" ")}
                 >
@@ -112,11 +112,11 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         </aside>
 
         <div className="flex-1 min-w-0 flex flex-col">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-100 bg-white/95 backdrop-blur-sm">
-            <div className="text-sm font-semibold text-zinc-800">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-100 bg-white/95 backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/95">
+            <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
               {sections.find((section) => section.id === activeSection)?.label}
             </div>
-            <button onClick={onClose} className="p-1 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors">
+            <button onClick={onClose} className="p-1 rounded-md text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 transition-colors dark:text-zinc-500 dark:hover:text-zinc-100 dark:hover:bg-zinc-800">
               <X size={20} />
             </button>
           </div>
@@ -171,7 +171,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       <select
                         value={settings.defaultPdfZoom}
                         onChange={(e) => updateSetting("defaultPdfZoom", e.target.value)}
-                        className="text-sm border-zinc-200 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 py-1.5 px-3 bg-white border"
+                        className="text-sm border-zinc-200 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 py-1.5 px-3 bg-white border dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                       >
                         <option value="page-fit">{t("settings.defaultPdfZoom.pageFit")}</option>
                         <option value="page-width">{t("settings.defaultPdfZoom.pageWidth")}</option>
@@ -190,7 +190,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <select
                       value={settings.language}
                       onChange={(e) => updateSetting("language", e.target.value)}
-                      className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-indigo-500 min-w-44"
+                      className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-indigo-500 min-w-44 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                     >
                       <option value="system">{t("settings.language.systemOption")}</option>
                       {availableLocales.map((item) => (
@@ -207,7 +207,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <SettingCard title={t("settings.autoRenamePdf.label")} description={t("settings.autoRenamePdf.description")}>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" className="sr-only peer" checked={settings.autoRenamePdf} onChange={(e) => updateSetting("autoRenamePdf", e.target.checked)} />
-                        <div className="w-9 h-5 bg-zinc-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                        <div className="w-9 h-5 bg-zinc-200 dark:bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white dark:after:bg-zinc-100 after:border-zinc-300 dark:after:border-zinc-500 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
                       </label>
                     </SettingCard>
 
@@ -217,7 +217,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                           type="text"
                           value={settings.renamePattern}
                           onChange={(e) => updateSetting("renamePattern", e.target.value)}
-                          className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-72 focus:ring-1 focus:ring-indigo-500 outline-none"
+                          className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-72 focus:ring-1 focus:ring-indigo-500 outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                           placeholder={t("settings.renamePattern.placeholder")}
                         />
                       </SettingCard>
@@ -230,7 +230,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <select
                       value={settings.defaultCitationFormat}
                       onChange={(e) => updateSetting("defaultCitationFormat", e.target.value)}
-                      className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-indigo-500"
+                      className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-indigo-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                     >
                       <option value="apa">{t("settings.citationFormats.apa")}</option>
                       <option value="mla">{t("settings.citationFormats.mla")}</option>
@@ -248,7 +248,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         type="password"
                         value={settings.aiApiKey}
                         onChange={(e) => updateSetting("aiApiKey", e.target.value)}
-                        className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-80 focus:ring-1 focus:ring-indigo-500 outline-none"
+                        className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-80 focus:ring-1 focus:ring-indigo-500 outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                         placeholder={t("settings.ai.apiKey.placeholder")}
                       />
                     </SettingCard>
@@ -258,7 +258,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         type="text"
                         value={settings.aiCompletionUrl}
                         onChange={(e) => updateSetting("aiCompletionUrl", e.target.value)}
-                        className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-full max-w-[420px] focus:ring-1 focus:ring-indigo-500 outline-none"
+                        className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-full max-w-[420px] focus:ring-1 focus:ring-indigo-500 outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                         placeholder={t("settings.ai.completionUrl.placeholder")}
                       />
                     </SettingCard>
@@ -268,7 +268,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         type="text"
                         value={settings.aiModel}
                         onChange={(e) => updateSetting("aiModel", e.target.value)}
-                        className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-72 focus:ring-1 focus:ring-indigo-500 outline-none"
+                        className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-72 focus:ring-1 focus:ring-indigo-500 outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                         placeholder={t("settings.ai.model.placeholder")}
                       />
                     </SettingCard>
@@ -276,7 +276,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                     <SettingCard title={t("settings.ai.autoSummarize.label")} description={t("settings.ai.autoSummarize.description")}>
                       <label className="relative inline-flex items-center cursor-pointer">
                         <input type="checkbox" className="sr-only peer" checked={settings.aiAutoSummarize} onChange={(e) => updateSetting("aiAutoSummarize", e.target.checked)} />
-                        <div className="w-9 h-5 bg-zinc-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                        <div className="w-9 h-5 bg-zinc-200 dark:bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white dark:after:bg-zinc-100 after:border-zinc-300 dark:after:border-zinc-500 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
                       </label>
                     </SettingCard>
 
@@ -285,7 +285,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         type="text"
                         value={settings.aiSummaryLanguage}
                         onChange={(e) => updateSetting("aiSummaryLanguage", e.target.value)}
-                        className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-48 focus:ring-1 focus:ring-indigo-500 outline-none"
+                        className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-48 focus:ring-1 focus:ring-indigo-500 outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                         placeholder={t("settings.ai.summaryLanguage.placeholder")}
                       />
                     </SettingCard>
@@ -294,7 +294,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       <textarea
                         value={settings.aiSummarySystemPrompt}
                         onChange={(e) => updateSetting("aiSummarySystemPrompt", e.target.value)}
-                        className="text-sm border border-zinc-200 rounded-lg px-3 py-2 w-full max-w-[620px] min-h-28 focus:ring-1 focus:ring-indigo-500 outline-none resize-y"
+                        className="text-sm border border-zinc-200 rounded-lg px-3 py-2 w-full max-w-[620px] min-h-28 focus:ring-1 focus:ring-indigo-500 outline-none resize-y dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                         placeholder={t("settings.ai.summarySystemPrompt.placeholder")}
                       />
                     </SettingCard>
@@ -303,7 +303,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       <select
                         value={settings.aiTranslateEngine}
                         onChange={(e) => updateSetting("aiTranslateEngine", e.target.value)}
-                        className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-indigo-500 min-w-44"
+                        className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-indigo-500 min-w-44 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                       >
                         <option value="google">{t("settings.ai.translateEngine.google")}</option>
                         <option value="bing">{t("settings.ai.translateEngine.bing")}</option>
@@ -316,7 +316,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         type="text"
                         value={settings.aiTranslateTargetLanguage}
                         onChange={(e) => updateSetting("aiTranslateTargetLanguage", e.target.value)}
-                        className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-48 focus:ring-1 focus:ring-indigo-500 outline-none"
+                        className="text-sm border border-zinc-200 rounded-lg px-3 py-1.5 w-48 focus:ring-1 focus:ring-indigo-500 outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                         placeholder={t("settings.ai.translateLanguage.placeholder")}
                       />
                     </SettingCard>
@@ -326,7 +326,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                         <textarea
                           value={settings.aiTranslateSystemPrompt}
                           onChange={(e) => updateSetting("aiTranslateSystemPrompt", e.target.value)}
-                          className="text-sm border border-zinc-200 rounded-lg px-3 py-2 w-full max-w-[620px] min-h-28 focus:ring-1 focus:ring-indigo-500 outline-none resize-y"
+                          className="text-sm border border-zinc-200 rounded-lg px-3 py-2 w-full max-w-[620px] min-h-28 focus:ring-1 focus:ring-indigo-500 outline-none resize-y dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
                           placeholder={t("settings.ai.translateSystemPrompt.placeholder")}
                         />
                       </SettingCard>
@@ -335,13 +335,13 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 )}
 
                 {activeSection === "about" && (
-                  <section className="flex min-h-[420px] items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50/50 px-8 py-10">
+                  <section className="flex min-h-[420px] items-center justify-center rounded-xl border border-zinc-200 bg-zinc-50/50 px-8 py-10 dark:border-zinc-800 dark:bg-zinc-900/60">
                     <div className="flex max-w-md flex-col items-center text-center">
-                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300">
                         <Info size={24} />
                       </div>
-                      <h3 className="mt-4 text-2xl font-semibold text-zinc-900">{aboutInfo.name}</h3>
-                      <p className="mt-1 text-sm text-zinc-500">{t("settings.about.tagline")}</p>
+                      <h3 className="mt-4 text-2xl font-semibold text-zinc-900 dark:text-zinc-100">{aboutInfo.name}</h3>
+                      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{t("settings.about.tagline")}</p>
 
                       <div className="mt-8 w-full space-y-3">
                         <AboutStat label={t("settings.about.version")} value={aboutInfo.version} />
@@ -376,20 +376,20 @@ function AboutStat({
   linkLabel?: string;
 }) {
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-center">
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">{label}</div>
+    <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-center dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">{label}</div>
       {isLink ? (
         <button
           type="button"
           onClick={() => {
             void openUrl(value);
           }}
-          className="mt-1 inline-flex max-w-full items-center justify-center text-center text-sm font-medium text-indigo-600 hover:text-indigo-500"
+          className="mt-1 inline-flex max-w-full items-center justify-center text-center text-sm font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-300 dark:hover:text-indigo-200"
         >
           {linkLabel ?? value}
         </button>
       ) : (
-        <div className="mt-1 break-all text-sm font-medium text-zinc-800">{value}</div>
+        <div className="mt-1 break-all text-sm font-medium text-zinc-800 dark:text-zinc-100">{value}</div>
       )}
     </div>
   );
@@ -408,8 +408,8 @@ function SettingCard({
     <section className="py-3 first:pt-0 last:pb-0">
       <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-5">
         <div className="min-w-0 flex-1 sm:max-w-[360px]">
-          <div className="text-[13px] font-medium text-zinc-800 leading-5">{title}</div>
-          {description ? <div className="mt-0.5 text-[11px] leading-5 text-zinc-500">{description}</div> : null}
+          <div className="text-[13px] font-medium text-zinc-800 leading-5 dark:text-zinc-100">{title}</div>
+          {description ? <div className="mt-0.5 text-[11px] leading-5 text-zinc-500 dark:text-zinc-400">{description}</div> : null}
         </div>
         <div className="shrink-0 sm:max-w-[min(100%,420px)]">{children}</div>
       </div>

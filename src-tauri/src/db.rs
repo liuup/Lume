@@ -10,7 +10,8 @@ use crate::library_commands::library_root_dir;
 fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> SqlResult<()> {
     let pragma = format!("PRAGMA table_info({})", table);
     let mut stmt = conn.prepare(&pragma)?;
-    let exists = stmt.query_map([], |row| row.get::<_, String>(1))?
+    let exists = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
         .filter_map(Result::ok)
         .any(|name| name == column);
 
@@ -127,6 +128,7 @@ pub fn ensure_schema(conn: &Connection) -> SqlResult<()> {
 
 pub fn init_db_at_path(db_path: &Path) -> SqlResult<Connection> {
     let conn = Connection::open(db_path)?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
     ensure_schema(&conn)?;
     Ok(conn)
 }

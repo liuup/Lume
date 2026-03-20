@@ -93,12 +93,12 @@ export function ExportModal({ items, isOpen, onClose, scopeLabel }: Props) {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-backdrop"
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-[720px] max-w-[95vw] max-h-[85vh] flex flex-col overflow-hidden border border-zinc-200 animate-modal">
+      <div className="bg-white rounded-2xl shadow-2xl w-[720px] max-w-[95vw] max-h-[85vh] flex flex-col overflow-hidden border border-zinc-200 animate-modal dark:border-zinc-800 dark:bg-zinc-950">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 shrink-0">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 shrink-0 dark:border-zinc-800">
           <div>
-            <h2 className="font-semibold text-zinc-900">{t("exportModal.title")}</h2>
-            <p className="text-xs text-zinc-500 mt-0.5">
+            <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">{t("exportModal.title")}</h2>
+            <p className="text-xs text-zinc-500 mt-0.5 dark:text-zinc-400">
               {scopeLabel
                 ? scopeLabel
                 : (items.length === 1
@@ -108,15 +108,15 @@ export function ExportModal({ items, isOpen, onClose, scopeLabel }: Props) {
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors"
+            className="p-1.5 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-lg transition-colors dark:text-zinc-500 dark:hover:text-zinc-100 dark:hover:bg-zinc-800"
           >
             <X size={16} />
           </button>
         </div>
 
         {/* Format picker */}
-        <div className="px-6 py-4 border-b border-zinc-100 shrink-0">
-          <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-3">{t("exportModal.outputFormat")}</p>
+        <div className="px-6 py-4 border-b border-zinc-100 shrink-0 dark:border-zinc-800">
+          <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-3 dark:text-zinc-400">{t("exportModal.outputFormat")}</p>
           <div className="flex flex-wrap gap-2">
             {FORMATS.map(f => (
               <button
@@ -125,14 +125,14 @@ export function ExportModal({ items, isOpen, onClose, scopeLabel }: Props) {
                 className={[
                   "flex flex-col items-start px-3 py-2 rounded-xl border text-left transition-all",
                   format === f.id
-                    ? "border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm"
-                    : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50",
+                    ? "border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-200"
+                    : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:border-zinc-700 dark:hover:bg-zinc-900",
                 ].join(" ")}
               >
-                <span className={`text-xs font-semibold leading-none ${format === f.id ? "text-indigo-700" : "text-zinc-700"}`}>
+                <span className={`text-xs font-semibold leading-none ${format === f.id ? "text-indigo-700 dark:text-indigo-200" : "text-zinc-700 dark:text-zinc-200"}`}>
                   {t(`exportModal.formats.${f.id}.label`)}
                 </span>
-                <span className="text-[10px] mt-1 leading-none text-zinc-400">{t(`exportModal.formats.${f.id}.description`)}</span>
+                <span className="text-[10px] mt-1 leading-none text-zinc-400 dark:text-zinc-500">{t(`exportModal.formats.${f.id}.description`)}</span>
               </button>
             ))}
           </div>
@@ -141,13 +141,13 @@ export function ExportModal({ items, isOpen, onClose, scopeLabel }: Props) {
         {/* Preview */}
         <div className="flex-1 overflow-hidden flex flex-col px-6 py-4 min-h-0">
           <div className="flex items-center justify-between mb-2 shrink-0">
-            <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
+            <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider dark:text-zinc-400">
               {items.length === 1
                 ? t("exportModal.preview.one", { format: selectedLabel, count: items.length })
                 : t("exportModal.preview.other", { format: selectedLabel, count: items.length })}
             </p>
             {isGenerating && (
-              <span className="flex items-center gap-1.5 text-xs text-zinc-400">
+              <span className="flex items-center gap-1.5 text-xs text-zinc-400 dark:text-zinc-500">
                 <Loader2 size={12} className="animate-spin" /> {t("exportModal.generating")}
               </span>
             )}
@@ -155,14 +155,14 @@ export function ExportModal({ items, isOpen, onClose, scopeLabel }: Props) {
           <textarea
             readOnly
             value={isGenerating ? t("exportModal.generating") : output}
-            className="flex-1 min-h-0 w-full p-3 rounded-xl border border-zinc-200 bg-zinc-50 text-xs font-mono text-zinc-700 outline-none resize-none leading-relaxed"
+            className="flex-1 min-h-0 w-full p-3 rounded-xl border border-zinc-200 bg-zinc-50 text-xs font-mono text-zinc-700 outline-none resize-none leading-relaxed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
             spellCheck={false}
           />
         </div>
 
         {/* Footer actions */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-100 bg-zinc-50/50 shrink-0">
-          <p className="text-xs text-zinc-400">
+        <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-100 bg-zinc-50/50 shrink-0 dark:border-zinc-800 dark:bg-zinc-900/70">
+          <p className="text-xs text-zinc-400 dark:text-zinc-500">
             {items.length === 0
               ? t("exportModal.noItems")
               : (items.length === 1
@@ -173,7 +173,7 @@ export function ExportModal({ items, isOpen, onClose, scopeLabel }: Props) {
             <button
               onClick={handleCopy}
               disabled={isGenerating || !output}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 transition-colors disabled:opacity-40"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 transition-colors disabled:opacity-40 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
             >
               {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
               {copied ? t("exportModal.copied") : t("exportModal.copyAll")}

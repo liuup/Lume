@@ -37,27 +37,27 @@ function getToastStyles(variant: FeedbackVariant) {
   switch (variant) {
     case "success":
       return {
-        panel: "border-emerald-200 bg-white",
-        iconWrap: "bg-emerald-50 text-emerald-600",
-        title: "text-emerald-900",
-        description: "text-emerald-700/80",
-        button: "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100",
+        panel: "border-emerald-200 bg-white dark:border-emerald-950/70 dark:bg-zinc-900/95",
+        iconWrap: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/80 dark:text-emerald-300",
+        title: "text-emerald-900 dark:text-emerald-200",
+        description: "text-emerald-700/80 dark:text-emerald-300/80",
+        button: "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-200 dark:hover:bg-zinc-800",
       };
     case "error":
       return {
-        panel: "border-red-200 bg-white",
-        iconWrap: "bg-red-50 text-red-600",
-        title: "text-red-900",
-        description: "text-red-700/80",
-        button: "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100",
+        panel: "border-red-200 bg-white dark:border-red-950/70 dark:bg-zinc-900/95",
+        iconWrap: "bg-red-50 text-red-600 dark:bg-red-950/80 dark:text-red-300",
+        title: "text-red-900 dark:text-red-200",
+        description: "text-red-700/80 dark:text-red-300/80",
+        button: "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-200 dark:hover:bg-zinc-800",
       };
     default:
       return {
-        panel: "border-indigo-200 bg-white",
-        iconWrap: "bg-indigo-50 text-indigo-600",
-        title: "text-indigo-900",
-        description: "text-zinc-600",
-        button: "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100",
+        panel: "border-indigo-200 bg-white dark:border-indigo-950/70 dark:bg-zinc-900/95",
+        iconWrap: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/80 dark:text-indigo-300",
+        title: "text-indigo-900 dark:text-indigo-200",
+        description: "text-zinc-600 dark:text-zinc-400",
+        button: "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:text-zinc-500 dark:hover:text-zinc-200 dark:hover:bg-zinc-800",
       };
   }
 }

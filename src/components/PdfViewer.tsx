@@ -565,20 +565,20 @@ export function PdfViewer({
       ))}
       {translationPopup && (
         <div
-          className="fixed z-[70] w-[min(360px,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-[0_18px_45px_-18px_rgba(0,0,0,0.28)] backdrop-blur-sm"
+          className="fixed z-[70] w-[min(360px,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-[0_18px_45px_-18px_rgba(0,0,0,0.28)] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/95"
           style={{
             left: translationPopup.x,
             top: translationPopup.y,
           }}
           onMouseDown={(event) => event.stopPropagation()}
         >
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-300">
             {t("textLayer.translation.title", { language: settings.aiTranslateTargetLanguage || "zh-CN" })}
           </div>
-          <div className="mt-1 text-xs leading-relaxed text-zinc-500 line-clamp-3">
+          <div className="mt-1 text-xs leading-relaxed text-zinc-500 line-clamp-3 dark:text-zinc-400">
             {translationPopup.selectedText}
           </div>
-          <div className="mt-2 text-sm leading-relaxed text-zinc-700 whitespace-pre-wrap">
+          <div className="mt-2 text-sm leading-relaxed text-zinc-700 whitespace-pre-wrap dark:text-zinc-200">
             {translationPopup.isLoading
               ? t("textLayer.translation.loading")
               : translationPopup.error

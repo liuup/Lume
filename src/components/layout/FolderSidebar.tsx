@@ -196,7 +196,7 @@ export function FolderSidebar({
           <div className="flex items-center gap-2">
             <button
               onClick={onOpenSettings}
-              className="inline-flex items-center justify-center w-9 h-9 text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
+              className="inline-flex items-center justify-center w-9 h-9 text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98] dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-indigo-300 dark:hover:border-indigo-900/70"
               title={t("folderSidebar.actions.settings")}
             >
               <Settings size={15} />
@@ -205,7 +205,7 @@ export function FolderSidebar({
         )}
         <button
           onClick={onToggleCollapse}
-          className="inline-flex items-center justify-center w-9 h-9 text-zinc-500 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98]"
+          className="inline-flex items-center justify-center w-9 h-9 text-zinc-500 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-indigo-600 hover:border-indigo-200 transition-colors shadow-sm active:scale-[0.98] dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-indigo-300 dark:hover:border-indigo-900/70"
           title={isCollapsed ? t("folderSidebar.actions.expand") : t("folderSidebar.actions.collapse")}
         >
           {isCollapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
@@ -226,7 +226,7 @@ export function FolderSidebar({
             {selectedTagFilter && (
               <button
                 onClick={() => onSelectTag(selectedTagFilter)}
-                className="inline-flex items-center justify-center w-10 h-10 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-600 transition-colors"
+                className="inline-flex items-center justify-center w-10 h-10 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-600 transition-colors dark:border-indigo-900/70 dark:bg-indigo-950/40 dark:text-indigo-300"
                 title={t("folderSidebar.tags.activeFilter", { tag: selectedTagFilter })}
               >
                 <Hash size={16} />
@@ -282,7 +282,7 @@ export function FolderSidebar({
 
           {/* ── Tags section ──────────────────────────────────────── */}
           {allTags.length > 0 && (
-            <div className="border-t border-zinc-200 shrink-0">
+            <div className="border-t border-zinc-200 shrink-0 dark:border-zinc-800">
               {/* Header */}
               <div className="flex items-center justify-between px-4 pt-3 pb-1.5">
                 <div className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">
@@ -304,8 +304,8 @@ export function FolderSidebar({
                       className={[
                         'group inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
                         isActive
-                          ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
-                          : 'border-zinc-200 bg-white text-zinc-600 hover:border-indigo-200 hover:bg-zinc-100',
+                          ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900/70 dark:bg-indigo-950/40 dark:text-indigo-200'
+                          : 'border-zinc-200 bg-white text-zinc-600 hover:border-indigo-200 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:border-indigo-900/70 dark:hover:bg-zinc-900',
                       ].join(' ')}
                       onClick={() => onSelectTag(tagInfo.tag)}
                       onContextMenu={e => {
@@ -334,7 +334,7 @@ export function FolderSidebar({
 
       {contextMenu && (
         <div
-          className="fixed z-50 min-w-44 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-[0_12px_40px_rgba(0,0,0,0.14)] animate-popup"
+          className="fixed z-50 min-w-44 overflow-hidden rounded-xl border border-zinc-200 bg-white p-1 shadow-[0_12px_40px_rgba(0,0,0,0.14)] animate-popup dark:border-zinc-800 dark:bg-zinc-950"
           style={{ left: menuX, top: menuY }}
           onClick={e => e.stopPropagation()}
         >
@@ -344,7 +344,7 @@ export function FolderSidebar({
               setRenameValue(contextMenu.folder.name);
               setContextMenu(null);
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
           >
             <FilePenLine size={15} />
             <span>{t("folderSidebar.context.rename")}</span>
@@ -355,7 +355,7 @@ export function FolderSidebar({
               setContextMenu(null);
               await onDeleteFolder(folder);
             }}
-            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30"
           >
             <Trash2 size={15} />
             <span>{t("folderSidebar.context.delete")}</span>
@@ -365,20 +365,20 @@ export function FolderSidebar({
 
       {newFolderParentId && (
         <div
-          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px] animate-backdrop"
+          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px] animate-backdrop dark:bg-zinc-950/70"
           onClick={() => { setNewFolderParentId(null); setNewFolderName(""); }}
         >
           <div
-            className="w-[calc(100%-24px)] max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)] animate-modal"
+            className="w-[calc(100%-24px)] max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)] animate-modal dark:border-zinc-800 dark:bg-zinc-950"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-indigo-50 p-2 text-indigo-600">
+              <div className="rounded-xl bg-indigo-50 p-2 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300">
                 <FolderPlus size={18} />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-zinc-900">{t("folderSidebar.newDialog.title")}</h3>
-                <p className="text-xs text-zinc-500">{t("folderSidebar.newDialog.description")}</p>
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("folderSidebar.newDialog.title")}</h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">{t("folderSidebar.newDialog.description")}</p>
               </div>
             </div>
 
@@ -390,14 +390,14 @@ export function FolderSidebar({
               }}
             >
               <div>
-                <label className="mb-2 block text-xs font-medium text-zinc-500">{t("folderSidebar.newDialog.name")}</label>
-                <div className="flex items-center rounded-xl border border-zinc-200 bg-zinc-50 px-3 focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-400/15">
+                <label className="mb-2 block text-xs font-medium text-zinc-500 dark:text-zinc-400">{t("folderSidebar.newDialog.name")}</label>
+                <div className="flex items-center rounded-xl border border-zinc-200 bg-zinc-50 px-3 focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-400/15 dark:border-zinc-800 dark:bg-zinc-900 dark:focus-within:border-indigo-800 dark:focus-within:bg-zinc-950">
                   <input
                     ref={newFolderInputRef}
                     type="text"
                     value={newFolderName}
                     onChange={e => setNewFolderName(e.target.value)}
-                    className="w-full bg-transparent py-2.5 text-sm text-zinc-800 outline-none"
+                    className="w-full bg-transparent py-2.5 text-sm text-zinc-800 outline-none dark:text-zinc-100 dark:placeholder:text-zinc-500"
                     placeholder={t("folderSidebar.newDialog.placeholder")}
                   />
                 </div>
@@ -407,14 +407,14 @@ export function FolderSidebar({
                 <button
                   type="button"
                   onClick={() => { setNewFolderParentId(null); setNewFolderName(""); }}
-                  className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+                  className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
                 >
                   {t("folderSidebar.newDialog.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={!newFolderName.trim()}
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300"
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300 dark:disabled:bg-indigo-900/60"
                 >
                   {t("folderSidebar.newDialog.create")}
                 </button>
@@ -426,23 +426,23 @@ export function FolderSidebar({
 
       {renameTarget && (
         <div
-          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px] animate-backdrop"
+          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px] animate-backdrop dark:bg-zinc-950/70"
           onClick={() => {
             setRenameTarget(null);
             setRenameValue("");
           }}
         >
           <div
-            className="w-[calc(100%-24px)] max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)] animate-modal"
+            className="w-[calc(100%-24px)] max-w-sm rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)] animate-modal dark:border-zinc-800 dark:bg-zinc-950"
             onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center gap-3">
-              <div className="rounded-xl bg-indigo-50 p-2 text-indigo-600">
+              <div className="rounded-xl bg-indigo-50 p-2 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-300">
                 <FilePenLine size={18} />
               </div>
               <div>
-                <h3 className="text-sm font-semibold text-zinc-900">{t("folderSidebar.renameDialog.title")}</h3>
-                <p className="text-xs text-zinc-500">{t("folderSidebar.renameDialog.description")}</p>
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("folderSidebar.renameDialog.title")}</h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">{t("folderSidebar.renameDialog.description")}</p>
               </div>
             </div>
 
@@ -454,14 +454,14 @@ export function FolderSidebar({
               }}
             >
               <div>
-                <label className="mb-2 block text-xs font-medium text-zinc-500">{t("folderSidebar.renameDialog.name")}</label>
-                <div className="flex items-center rounded-xl border border-zinc-200 bg-zinc-50 px-3 focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-400/15">
+                <label className="mb-2 block text-xs font-medium text-zinc-500 dark:text-zinc-400">{t("folderSidebar.renameDialog.name")}</label>
+                <div className="flex items-center rounded-xl border border-zinc-200 bg-zinc-50 px-3 focus-within:border-indigo-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-400/15 dark:border-zinc-800 dark:bg-zinc-900 dark:focus-within:border-indigo-800 dark:focus-within:bg-zinc-950">
                   <input
                     ref={renameInputRef}
                     type="text"
                     value={renameValue}
                     onChange={e => setRenameValue(e.target.value)}
-                    className="w-full bg-transparent py-2.5 text-sm text-zinc-800 outline-none"
+                    className="w-full bg-transparent py-2.5 text-sm text-zinc-800 outline-none dark:text-zinc-100 dark:placeholder:text-zinc-500"
                     placeholder={t("folderSidebar.renameDialog.placeholder")}
                   />
                 </div>
@@ -474,14 +474,14 @@ export function FolderSidebar({
                     setRenameTarget(null);
                     setRenameValue("");
                   }}
-                  className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50"
+                  className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
                 >
                   {t("folderSidebar.renameDialog.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={!renameValue.trim()}
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300"
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300 dark:disabled:bg-indigo-900/60"
                 >
                   {t("folderSidebar.renameDialog.save")}
                 </button>
@@ -494,14 +494,14 @@ export function FolderSidebar({
       {/* Tag color picker (right-click context menu) */}
       {tagColorMenu && (
         <div
-          className="fixed z-50 rounded-xl border border-zinc-200 bg-white p-3 shadow-[0_12px_40px_rgba(0,0,0,0.14)] min-w-[160px] animate-popup"
+          className="fixed z-50 rounded-xl border border-zinc-200 bg-white p-3 shadow-[0_12px_40px_rgba(0,0,0,0.14)] min-w-[160px] animate-popup dark:border-zinc-800 dark:bg-zinc-950"
           style={{
             left: Math.min(tagColorMenu.x, window.innerWidth  - 172),
             top:  Math.min(tagColorMenu.y, window.innerHeight - 100),
           }}
           onClick={e => e.stopPropagation()}
         >
-          <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 px-0.5">
+          <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2 px-0.5 dark:text-zinc-400">
             {t("folderSidebar.tags.color")}
           </p>
           <div className="grid grid-cols-4 gap-1.5">
