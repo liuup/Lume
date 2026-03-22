@@ -23,6 +23,18 @@
     "aiPanel": {
       "show": "Show AI Panel",
       "hide": "Hide AI Panel"
+    },
+    "navPanel": {
+      "show": "Show Navigation Panel",
+      "hide": "Hide Navigation Panel"
+    },
+    "history": {
+      "undo": "Undo Annotation",
+      "redo": "Redo Annotation"
+    },
+    "bookmarks": {
+      "add": "Add Page Bookmark",
+      "remove": "Remove Page Bookmark"
     }
   },
   "searchBar": {
@@ -36,7 +48,16 @@
   },
   "pdfViewer": {
     "pageLabel": "Page {page}",
-    "pageAlt": "Page {page}"
+    "pageAlt": "Page {page}",
+    "navigation": {
+      "outline": "Outline",
+      "pages": "Pages",
+      "bookmarks": "Bookmarks",
+      "outlineEmpty": "No outline available for this PDF.",
+      "outlineHint": "This document does not expose a table of contents.",
+      "bookmarksEmpty": "No bookmarked pages yet.",
+      "bookmarksHint": "Use the bookmark button in the toolbar to save the current page."
+    }
   },
   "app": {
     "loading": {
@@ -65,6 +86,10 @@
         "title": "Failed to open PDF",
         "description": "The selected PDF could not be opened."
       },
+      "openNoPdf": {
+        "title": "No PDF attachment",
+        "description": "This library item does not have a PDF attachment yet."
+      },
       "import": {
         "success": {
           "title": "PDF imported",
@@ -74,6 +99,32 @@
         "error": {
           "title": "Import failed",
           "description": "The selected PDF could not be imported."
+        }
+      },
+      "identifierImport": {
+        "success": {
+          "title": "Identifier imported",
+          "description": "{title} was added to your library."
+        },
+        "existing": {
+          "title": "Item already exists",
+          "description": "{title} is already in your library."
+        },
+        "error": {
+          "title": "Identifier import failed",
+          "description": "The DOI or arXiv identifier could not be imported."
+        }
+      },
+      "referenceImport": {
+        "success": {
+          "title": "References imported",
+          "description": "Imported {count} references from {format}.",
+          "mixedDescription": "Imported {created} references from {format}; {existing} already existed.",
+          "existingDescription": "All {count} references already existed in your library."
+        },
+        "error": {
+          "title": "Reference import failed",
+          "description": "The selected BibTeX, RIS, or CSL JSON file could not be imported."
         }
       },
       "tags": {
@@ -137,9 +188,17 @@
           "title": "Item moved",
           "description": "Moved the item to {folder}."
         },
+        "mergeSuccess": {
+          "title": "Duplicates merged",
+          "description": "Merged {count} duplicate items into {title}."
+        },
         "moveError": {
           "title": "Failed to move item",
           "description": "The selected item could not be moved."
+        },
+        "mergeError": {
+          "title": "Failed to merge duplicates",
+          "description": "The selected duplicate group could not be merged."
         }
       },
       "folder": {
@@ -209,6 +268,22 @@
       "annotationsEmpty": {
         "title": "No annotations to export",
         "description": "This paper does not have any saved annotations yet."
+      },
+      "annotationUpdateSuccess": {
+        "title": "Annotation updated",
+        "description": "The text annotation was saved."
+      },
+      "annotationUpdateError": {
+        "title": "Failed to update annotation",
+        "description": "The text annotation could not be saved."
+      },
+      "annotationDeleteSuccess": {
+        "title": "Annotation deleted",
+        "description": "The annotation was removed from this PDF."
+      },
+      "annotationDeleteError": {
+        "title": "Failed to delete annotation",
+        "description": "The annotation could not be removed."
       },
       "digestSuccess": {
         "title": "AI digest ready",
@@ -390,6 +465,8 @@
     "actions": {
       "export": "Export",
       "exportTitle": "Export references",
+      "addReferenceFile": "Import BibTeX / RIS / CSL JSON",
+      "addIdentifier": "Add DOI / arXiv",
       "addItem": "Add Library Item",
       "emptyTrash": "Empty Trash",
       "emptyTrashTitle": "Permanently remove all trashed items"
@@ -409,10 +486,15 @@
       "searching": "Searching…",
       "noResults": "No results found",
       "noItems": "No items in this folder",
+      "noDuplicates": "No duplicate groups found",
+      "noSmartCollectionItems": "No items match {name}",
+      "noFavorites": "No favorite papers yet",
       "hint": "Use the Add Library Item button above to add a paper."
     },
     "context": {
       "rename": "Rename Item",
+      "favorite": "Add to Favorites",
+      "unfavorite": "Remove from Favorites",
       "editTags": "Edit Tags",
       "delete": "Delete Item",
       "restore": "Restore"
@@ -433,6 +515,18 @@
       "cancel": "Cancel",
       "save": "Save"
     },
+    "identifierDialog": {
+      "title": "Import by DOI / arXiv",
+      "description": "Create library items from DOI or arXiv identifiers.",
+      "label": "Identifiers",
+      "placeholder": "10.48550/arXiv.1706.03762\n1706.03762\n10.1145/3292500.3330701",
+      "help": "Paste one identifier per line, or separate multiple values with commas. Supports DOI URLs, raw DOI values, arXiv URLs, and arXiv IDs.",
+      "progress": "{completed} / {total} processed",
+      "summary": "{created} new · {existing} existing · {failed} failed",
+      "cancel": "Cancel",
+      "import": "Import",
+      "importing": "Importing"
+    },
     "export": {
       "searchScope": {
         "one": "{count} item from search results",
@@ -441,6 +535,18 @@
       "folderScope": {
         "one": "{count} item in {folder}",
         "other": "{count} items in {folder}"
+      }
+    },
+    "duplicates": {
+      "hint": "Duplicate groups are inferred from DOI, arXiv ID, and title/author/year matches.",
+      "merge": "Merge Group",
+      "merging": "Merging",
+      "groupCount": "{count} items",
+      "metadataOnly": "Metadata only",
+      "reason": {
+        "doi": "DOI match",
+        "arxiv": "arXiv match",
+        "metadata": "Metadata match"
       }
     },
     "item": {
@@ -471,6 +577,57 @@
       "collapse": "Collapse sidebar",
       "expand": "Expand sidebar",
       "settings": "Settings"
+    },
+    "recents": {
+      "title": "Recent",
+      "resumeAt": "Resume at page {page}"
+    },
+    "favorites": {
+      "title": "Favorites",
+      "empty": "No favorite papers yet.",
+      "open": "Open paper"
+    },
+    "duplicates": {
+      "title": "Duplicates",
+      "empty": "No duplicate groups yet.",
+      "summary": "{groups} groups · {items} items",
+      "hint": "Review inferred duplicates from DOI, arXiv ID, and metadata matches.",
+      "hintEmpty": "Potential duplicates will appear here after import or metadata updates."
+    },
+    "smartCollections": {
+      "title": "Smart Collections",
+      "empty": "No smart collections yet.",
+      "create": "Create smart collection",
+      "edit": "Edit smart collection",
+      "delete": "Delete smart collection",
+      "emptyRules": "No filters configured",
+      "summary": {
+        "year": "Year",
+        "tags": "Tags",
+        "favoritesOnly": "Favorites only"
+      },
+      "dialog": {
+        "createTitle": "New Smart Collection",
+        "editTitle": "Edit Smart Collection",
+        "description": "Create a saved rule-based view for your library.",
+        "name": "Collection name",
+        "namePlaceholder": "Example: NeurIPS favorites",
+        "query": "Keywords",
+        "queryPlaceholder": "title, authors, DOI, abstract...",
+        "year": "Year",
+        "tags": "Tags",
+        "tagsPlaceholder": "comma-separated tags",
+        "favoritesOnly": "Only include favorite items",
+        "ruleRequired": "Add at least one rule before saving this smart collection.",
+        "cancel": "Cancel",
+        "create": "Create",
+        "save": "Save",
+        "matchMode": {
+          "label": "Match",
+          "all": "All",
+          "any": "Any"
+        }
+      }
     },
     "tags": {
       "title": "Tags",
@@ -590,9 +747,12 @@
       "save": "Save",
       "retrieve": "Retrieve",
       "retrieveMetadata": "Retrieve metadata",
+      "retrieveMetadataDisabled": "Metadata refresh requires a PDF attachment",
       "retrievingMetadata": "Retrieving...",
       "edit": "Edit",
       "editMetadata": "Edit metadata",
+      "favorite": "Add to Favorites",
+      "unfavorite": "Remove from Favorites",
       "cancelEdit": "Cancel edit",
       "closePanel": "Close panel",
       "cancel": "Cancel"
@@ -670,10 +830,33 @@
         "highlight": "Highlight",
         "ink": "Ink"
       },
-      "searchPlaceholder": "Search text annotations...",
+      "searchPlaceholder": "Search annotations and highlight excerpts...",
       "results": "{visible}/{total} shown",
+      "sortLabel": "Sort",
+      "viewLabel": "View",
+      "groupCount": "{count} annotations",
+      "collapseAll": "Collapse all",
+      "expandAll": "Expand all",
       "export": "Export Markdown",
       "exportFallbackFileName": "annotations",
+      "edit": "Edit annotation",
+      "saveEdit": "Save note",
+      "delete": "Delete annotation",
+      "sortModes": {
+        "pageAsc": "Page ↑",
+        "pageDesc": "Page ↓",
+        "type": "Type"
+      },
+      "viewModes": {
+        "flat": "Flat",
+        "grouped": "Group by page"
+      },
+      "stats": {
+        "pages": "Pages",
+        "text": "Text",
+        "highlight": "Highlights",
+        "ink": "Ink"
+      },
       "items": {
         "text": "Text note",
         "highlight": "Highlight #{index}",
@@ -682,6 +865,9 @@
       "previews": {
         "highlight": "Freehand highlight stroke",
         "ink": "Freehand ink stroke"
+      },
+      "sources": {
+        "excerpt": "Text excerpt"
       },
       "jump": "Jump",
       "jumpToPage": "Open page",

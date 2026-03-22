@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type, PanelRight, PanelLeft, ChevronDown, Eraser, Contrast } from "lucide-react";
+import { ZoomIn, ZoomOut, Highlighter, Pencil, MousePointer2, Type, PanelRight, PanelLeft, ChevronDown, Eraser, Contrast, BookOpen, Undo2, Redo2, Bookmark } from "lucide-react";
 import { ToolType } from "../types";
 import { useI18n } from "../hooks/useI18n";
 
@@ -15,6 +15,8 @@ interface ToolbarProps {
   onToolChange: (tool: ToolType) => void;
   isAiPanelOpen: boolean;
   onToggleAiPanel: () => void;
+  isNavPanelOpen: boolean;
+  onToggleNavPanel: () => void;
   isRightPanelOpen: boolean;
   onToggleRightPanel: () => void;
   onFitWidth: () => void;
@@ -22,6 +24,12 @@ interface ToolbarProps {
   currentPage: number;
   totalPages: number;
   onPageJump: (page: number) => void;
+  isCurrentPageBookmarked: boolean;
+  onToggleCurrentPageBookmark: () => void;
+  canUndoAnnotations: boolean;
+  canRedoAnnotations: boolean;
+  onUndoAnnotations: () => void;
+  onRedoAnnotations: () => void;
 }
 
 export function Toolbar({
@@ -35,6 +43,8 @@ export function Toolbar({
   onToolChange,
   isAiPanelOpen,
   onToggleAiPanel,
+  isNavPanelOpen,
+  onToggleNavPanel,
   isRightPanelOpen,
   onToggleRightPanel,
   onFitWidth,
@@ -42,6 +52,12 @@ export function Toolbar({
   currentPage,
   totalPages,
   onPageJump,
+  isCurrentPageBookmarked,
+  onToggleCurrentPageBookmark,
+  canUndoAnnotations,
+  canRedoAnnotations,
+  onUndoAnnotations,
+  onRedoAnnotations,
 }: ToolbarProps) {
   const { t } = useI18n();
   const [showZoomMenu, setShowZoomMenu] = useState(false);
@@ -121,6 +137,17 @@ export function Toolbar({
           }`}
         >
           <PanelLeft size={16} />
+        </TooltipButton>
+        <TooltipButton
+          onClick={onToggleNavPanel}
+          tooltip={isNavPanelOpen ? t("toolbar.navPanel.hide") : t("toolbar.navPanel.show")}
+          className={`ml-1 p-2 rounded-xl transition-all active:scale-90 relative z-10 ${
+            isNavPanelOpen
+              ? "text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60"
+              : "text-zinc-400 dark:text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          }`}
+        >
+          <BookOpen size={16} />
         </TooltipButton>
       </div>
 
@@ -218,6 +245,22 @@ export function Toolbar({
 
         <div className="w-px h-5 bg-zinc-300 dark:bg-zinc-700 mx-2 opacity-50" />
 
+        <div className="flex items-center px-1">
+          <TooltipButton
+            onClick={onToggleCurrentPageBookmark}
+            tooltip={isCurrentPageBookmarked ? t("toolbar.bookmarks.remove") : t("toolbar.bookmarks.add")}
+            className={`p-2 rounded-xl transition-all duration-150 active:scale-90 ${
+              isCurrentPageBookmarked
+                ? "text-amber-600 dark:text-amber-300 bg-white dark:bg-zinc-800 shadow-sm ring-1 ring-black/5"
+                : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-100 hover:bg-white/50 dark:hover:bg-zinc-800/80"
+            }`}
+          >
+            <Bookmark size={16} className={isCurrentPageBookmarked ? "fill-current" : undefined} />
+          </TooltipButton>
+        </div>
+
+        <div className="w-px h-5 bg-zinc-300 dark:bg-zinc-700 mx-2 opacity-50" />
+
         {/* Annotation tools */}
         <div className="flex items-center space-x-1 px-1">
           <ToolButton
@@ -254,6 +297,27 @@ export function Toolbar({
             tooltip={t("toolbar.tool.eraser")}
             activeClass="text-pink-600 dark:text-pink-300 bg-white dark:bg-zinc-800"
           />
+        </div>
+
+        <div className="w-px h-5 bg-zinc-300 dark:bg-zinc-700 mx-2 opacity-50" />
+
+        <div className="flex items-center space-x-1 px-1">
+          <TooltipButton
+            onClick={onUndoAnnotations}
+            tooltip={t("toolbar.history.undo")}
+            className="p-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-white dark:hover:bg-zinc-800 rounded-xl transition-all active:scale-90 disabled:opacity-35 disabled:hover:bg-transparent"
+            disabled={!canUndoAnnotations}
+          >
+            <Undo2 size={16} />
+          </TooltipButton>
+          <TooltipButton
+            onClick={onRedoAnnotations}
+            tooltip={t("toolbar.history.redo")}
+            className="p-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-white dark:hover:bg-zinc-800 rounded-xl transition-all active:scale-90 disabled:opacity-35 disabled:hover:bg-transparent"
+            disabled={!canRedoAnnotations}
+          >
+            <Redo2 size={16} />
+          </TooltipButton>
         </div>
       </div>
       </div>
@@ -311,11 +375,13 @@ function TooltipButton({
   onClick,
   tooltip,
   className,
+  disabled = false,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   tooltip: string;
   className: string;
+  disabled?: boolean;
 }) {
   const [visible, setVisible] = useState(false);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
@@ -355,7 +421,7 @@ function TooltipButton({
       onMouseEnter={() => setVisible(true)}
       onMouseLeave={() => setVisible(false)}
     >
-      <button onClick={onClick} className={className}>
+      <button onClick={onClick} className={className} disabled={disabled}>
         {children}
       </button>
       {visible && position && typeof document !== "undefined"

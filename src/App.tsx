@@ -17,7 +17,7 @@ import {
 } from "./components/pdfRuntime";
 import { X } from "lucide-react";
 
-import { CliLibraryChangedPayload, DEFAULT_FOLDER, LibraryItem, PdfSearchMatch, TagInfo, ToolType, TRASH_FOLDER_ID } from "./types";
+import { AnnotationFocusTarget, CliLibraryChangedPayload, DEFAULT_FOLDER, DUPLICATES_FOLDER_ID, FAVORITES_FOLDER_ID, LibraryItem, PdfSearchMatch, SMART_COLLECTION_PREFIX, TagInfo, ToolType, TRASH_FOLDER_ID } from "./types";
 import { useLibrary } from "./hooks/useLibrary";
 import { useSettings } from "./hooks/useSettings";
 import { useI18n } from "./hooks/useI18n";
@@ -33,6 +33,12 @@ type LibraryDragState = {
 type SearchRequestOptions = {
   notifyOnNoResults?: boolean;
   advanceIfSameTerm?: boolean;
+};
+
+type PdfNavigationMode = "outline" | "thumbnails" | "bookmarks";
+type AnnotationHistoryCommand = {
+  type: "undo" | "redo";
+  nonce: number;
 };
 
 const PdfViewer = lazy(async () => {
@@ -63,6 +69,7 @@ function App() {
     openTabs,
     activeTabId,
     setActiveTabId,
+    activeTab,
     pdfPath,
     totalPages,
     dimensions,
@@ -70,6 +77,10 @@ function App() {
     isLoading,
     folderTree,
     trashItems,
+    recentDocuments,
+    favoriteDocuments,
+    duplicateGroups,
+    smartCollections,
     selectedFolderId,
     setSelectedFolderId,
     selectedItemId,
@@ -77,12 +88,25 @@ function App() {
     findItem,
     findFolder,
     handleAddItem,
+    handleAddReferenceFile,
     importPdfPaths,
+    importIdentifier,
     handleOpenItem,
+    handleOpenRecentDocument,
+    mergeDuplicateGroup,
     handleCloseTab,
     handlePageJump,
     updateCurrentPage,
     updatePageDimension,
+    isFavoriteItem,
+    toggleFavoriteItem,
+    getPageBookmarks,
+    isPageBookmarked,
+    togglePageBookmark,
+    getSmartCollectionItems,
+    createSmartCollection,
+    updateSmartCollection,
+    deleteSmartCollection,
     handleAddFolder,
     handleDeleteItem,
     handleRenameItem,
@@ -98,6 +122,8 @@ function App() {
   const [activeTool, setActiveTool] = useState<ToolType>('none');
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false);
   const [isAiPanelOpen, setIsAiPanelOpen] = useState(true);
+  const [isPdfNavOpen, setIsPdfNavOpen] = useState(true);
+  const [pdfNavMode, setPdfNavMode] = useState<PdfNavigationMode>("outline");
   const [rightPanelWidth, setRightPanelWidth] = useState(320);
   const [aiPanelWidth, setAiPanelWidth] = useState(340);
   const [showSearch, setShowSearch] = useState(false);
@@ -111,6 +137,11 @@ function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [arePdfSidebarsReady, setArePdfSidebarsReady] = useState(false);
   const [annotationsRefreshKey, setAnnotationsRefreshKey] = useState(0);
+  const [viewerAnnotationsRefreshKey, setViewerAnnotationsRefreshKey] = useState(0);
+  const [canUndoAnnotations, setCanUndoAnnotations] = useState(false);
+  const [canRedoAnnotations, setCanRedoAnnotations] = useState(false);
+  const [annotationHistoryCommand, setAnnotationHistoryCommand] = useState<AnnotationHistoryCommand | null>(null);
+  const [annotationFocusTarget, setAnnotationFocusTarget] = useState<AnnotationFocusTarget | null>(null);
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [dragState, setDragState] = useState<LibraryDragState | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
@@ -129,6 +160,7 @@ function App() {
   const searchCacheRef = useRef<Map<string, PdfSearchMatch[]>>(new Map());
   const searchRequestIdRef = useRef(0);
   const activePdfScrollRef = useRef<HTMLDivElement | null>(null);
+  const restoredTabRef = useRef<string | null>(null);
   const { settings, isLoading: isSettingsLoading } = useSettings();
 
   useEffect(() => {
@@ -271,21 +303,124 @@ function App() {
 
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target
+        && (
+          target.tagName === "INPUT"
+          || target.tagName === "TEXTAREA"
+          || target.tagName === "SELECT"
+          || target.isContentEditable
+        )
+      ) {
+        return;
+      }
+
       // Cmd+F or Ctrl+F
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
         if (!activeTabId || activeTabId === 'library') return; // only in PDF view
         e.preventDefault();
         setShowSearch(true);
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && (e.key === "=" || e.key === "+")) {
+        if (!activeTabId || activeTabId === "library") return;
+        e.preventDefault();
+        zoomIn();
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key === "-") {
+        if (!activeTabId || activeTabId === "library") return;
+        e.preventDefault();
+        zoomOut();
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key === "0") {
+        if (!activeTabId || activeTabId === "library") return;
+        e.preventDefault();
+        fitWidth();
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        if (!activeTabId || activeTabId === "library") return;
+        e.preventDefault();
+        setAnnotationHistoryCommand({
+          type: e.shiftKey ? "redo" : "undo",
+          nonce: Date.now(),
+        });
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key.toLowerCase() === "y") {
+        if (!activeTabId || activeTabId === "library") return;
+        e.preventDefault();
+        setAnnotationHistoryCommand({
+          type: "redo",
+          nonce: Date.now(),
+        });
+        return;
+      }
+
+      if (e.key === "Escape" && showSearch) {
+        e.preventDefault();
+        clearSearchState();
+        setShowSearch(false);
+        return;
+      }
+
+      if (!activeTabId || activeTabId === "library" || e.metaKey || e.ctrlKey || e.altKey) {
+        return;
+      }
+
+      if (e.key === "ArrowRight" || e.key === "PageDown") {
+        e.preventDefault();
+        handlePageJump(Math.min(totalPages, currentPage + 1));
+        return;
+      }
+
+      if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        handlePageJump(Math.max(1, currentPage - 1));
       }
     };
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, [activeTabId]);
+  }, [activeTabId, clearSearchState, currentPage, fitWidth, handlePageJump, showSearch, totalPages, zoomIn, zoomOut]);
 
   useEffect(() => {
     clearSearchState();
     setShowSearch(false);
   }, [clearSearchState, pdfPath]);
+
+  useEffect(() => {
+    if (!activeTabId || activeTabId === "library") {
+      setCanUndoAnnotations(false);
+      setCanRedoAnnotations(false);
+    }
+  }, [activeTabId]);
+
+  useEffect(() => {
+    if (!activeTabId || activeTabId === "library" || !pdfPath) {
+      restoredTabRef.current = null;
+      return;
+    }
+
+    const restoreSignature = `${activeTabId}::${pdfPath}`;
+    if (restoredTabRef.current === restoreSignature || currentPage <= 1) {
+      return;
+    }
+
+    restoredTabRef.current = restoreSignature;
+    const timeoutId = window.setTimeout(() => {
+      handlePageJump(currentPage);
+    }, 120);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [activeTabId, currentPage, handlePageJump, pdfPath]);
 
   const tagColors: Record<string, string> = {};
   for (const t of allTags) {
@@ -295,26 +430,31 @@ function App() {
   const mainRef = useRef<HTMLElement>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
 
-  const zoomIn = () => setScale(s => Math.min(s + 0.25, 4.0));
-  const zoomOut = () => setScale(s => Math.max(s - 0.25, 0.5));
+  function zoomIn() {
+    setScale(s => Math.min(s + 0.25, 4.0));
+  }
 
-  const fitWidth = () => {
+  function zoomOut() {
+    setScale(s => Math.max(s - 0.25, 0.5));
+  }
+
+  function fitWidth() {
     if (!mainRef.current || !dimensions || dimensions.length === 0) return;
     const cw = mainRef.current.clientWidth;
     const padding = 64; 
     const baseW = dimensions[0]?.width || 1;
     const s = Math.max(0.25, Math.min(4.0, (cw - padding) / baseW));
     if (!isNaN(s)) setScale(s);
-  };
+  }
 
-  const fitHeight = () => {
+  function fitHeight() {
     if (!mainRef.current || !dimensions || dimensions.length === 0) return;
     const ch = mainRef.current.clientHeight;
     const padding = 64;
     const baseH = dimensions[0]?.height || 1;
     const s = Math.max(0.25, Math.min(4.0, (ch - padding) / baseH));
     if (!isNaN(s)) setScale(s);
-  };
+  }
 
   useEffect(() => {
     return () => {
@@ -401,9 +541,27 @@ function App() {
     updateCurrentPage(page);
   }, [activeTabId, currentPage, updateCurrentPage]);
 
+  const handleAnnotationFocus = useCallback((target: Omit<AnnotationFocusTarget, "nonce">) => {
+    setAnnotationFocusTarget({
+      ...target,
+      nonce: Date.now(),
+    });
+    handlePageJump(target.page);
+  }, [handlePageJump]);
+
   const selectedItem = selectedItemId
     ? (findItem(folderTree, selectedItemId) ?? trashItems.find((item) => item.id === selectedItemId) ?? null)
     : null;
+  const selectedSmartCollectionId = selectedFolderId.startsWith(SMART_COLLECTION_PREFIX)
+    ? selectedFolderId.slice(SMART_COLLECTION_PREFIX.length)
+    : null;
+  const selectedSmartCollection = selectedSmartCollectionId
+    ? smartCollections.find((collection) => collection.id === selectedSmartCollectionId) ?? null
+    : null;
+  const smartCollectionItems = selectedSmartCollection ? getSmartCollectionItems(selectedSmartCollection.id) : [];
+  const isFavoritesSelected = selectedFolderId === FAVORITES_FOLDER_ID;
+  const isDuplicatesSelected = selectedFolderId === DUPLICATES_FOLDER_ID;
+  const isSmartCollectionSelected = Boolean(selectedSmartCollection);
   const isTrashSelected = selectedFolderId === TRASH_FOLDER_ID;
   const isLibrary = activeTabId === 'library' || activeTabId === null;
   const activeFileDropFolderId = resolveImportFolderId(fileDropFolderId);
@@ -607,6 +765,11 @@ function App() {
       setAnnotationsRefreshKey(prev => prev + 1);
     }
   }, [selectedItem?.attachments]);
+
+  const handleAnnotationsUpdated = useCallback(() => {
+    setAnnotationsRefreshKey((previous) => previous + 1);
+    setViewerAnnotationsRefreshKey((previous) => previous + 1);
+  }, []);
 
   const jumpWithinSearchResults = useCallback((backwards: boolean, totalMatches: number) => {
     if (totalMatches <= 0) {
@@ -867,6 +1030,33 @@ function App() {
               draggedItemId={isFileDropActive ? "__external-file-drop__" : draggedItemId}
               dragOverFolderId={isFileDropActive ? activeFileDropFolderId : dragOverFolderId}
               onFolderHover={handleFolderHover}
+              recentDocuments={recentDocuments}
+              onOpenRecentDocument={(itemId) => {
+                void handleOpenRecentDocument(itemId);
+              }}
+              favoriteDocuments={favoriteDocuments}
+              onOpenFavoriteDocument={(itemId) => {
+                void handleOpenRecentDocument(itemId);
+              }}
+              duplicateGroups={duplicateGroups}
+              isDuplicatesSelected={isDuplicatesSelected}
+              onSelectDuplicates={() => {
+                setSelectedFolderId(DUPLICATES_FOLDER_ID);
+                setSelectedTagFilter(null);
+              }}
+              smartCollections={smartCollections}
+              selectedSmartCollectionId={selectedSmartCollection?.id ?? null}
+              onSelectSmartCollection={(collectionId) => {
+                setSelectedFolderId(`${SMART_COLLECTION_PREFIX}${collectionId}`);
+                setSelectedTagFilter(null);
+              }}
+              onCreateSmartCollection={(collection) => {
+                const nextCollection = createSmartCollection(collection);
+                setSelectedFolderId(`${SMART_COLLECTION_PREFIX}${nextCollection.id}`);
+                setSelectedTagFilter(null);
+              }}
+              onUpdateSmartCollection={updateSmartCollection}
+              onDeleteSmartCollection={deleteSmartCollection}
               allTags={allTags}
               selectedTagFilter={selectedTagFilter}
               onSelectTag={t => setSelectedTagFilter(prev => prev === t ? null : t)}
@@ -892,17 +1082,29 @@ function App() {
               folderTree={folderTree}
               trashItems={trashItems}
               isTrashView={isTrashSelected}
+              isFavoritesView={isFavoritesSelected}
+              isDuplicatesView={isDuplicatesSelected}
+              isSmartCollectionView={isSmartCollectionSelected}
               selectedFolderId={selectedFolderId}
               selectedItemId={selectedItemId}
+              favoriteItems={favoriteDocuments}
+              duplicateGroups={duplicateGroups}
+              smartCollectionItems={smartCollectionItems}
+              smartCollectionName={selectedSmartCollection?.name ?? null}
               onSelectItem={setSelectedItemId}
               onOpenItem={handleOpenItem}
               onAddItem={handleAddItem}
+              onAddReferenceFile={handleAddReferenceFile}
+              onAddIdentifier={(identifier, options) => importIdentifier(identifier, undefined, options)}
+              onMergeDuplicateGroup={mergeDuplicateGroup}
               onDeleteItem={handleDeleteItem}
               onRestoreItem={handleRestoreTrashItem}
               onEmptyTrash={handleEmptyTrash}
               onRenameItem={handleRenameItem}
               onUpdateItemTags={handleUpdateItemTags}
               onItemPointerDown={handleItemPointerDown}
+              isFavoriteItem={isFavoriteItem}
+              onToggleFavorite={(item) => toggleFavoriteItem(item.id)}
               tagFilter={selectedTagFilter}
               onClearTagFilter={() => setSelectedTagFilter(null)}
             />
@@ -933,6 +1135,8 @@ function App() {
                   onToolChange={setActiveTool}
                   isAiPanelOpen={isAiPanelOpen}
                   onToggleAiPanel={() => setIsAiPanelOpen(v => !v)}
+                  isNavPanelOpen={isPdfNavOpen}
+                  onToggleNavPanel={() => setIsPdfNavOpen(v => !v)}
                   isRightPanelOpen={isRightPanelOpen}
                   onToggleRightPanel={() => setIsRightPanelOpen(v => !v)}
                   onFitWidth={fitWidth}
@@ -940,6 +1144,20 @@ function App() {
                   currentPage={currentPage}
                   totalPages={totalPages}
                   onPageJump={handlePageJump}
+                  isCurrentPageBookmarked={Boolean(activeTab && isPageBookmarked(activeTab.id, currentPage))}
+                  onToggleCurrentPageBookmark={() => {
+                    if (activeTab) {
+                      togglePageBookmark(activeTab.id, currentPage);
+                    }
+                  }}
+                  canUndoAnnotations={canUndoAnnotations}
+                  canRedoAnnotations={canRedoAnnotations}
+                  onUndoAnnotations={() => {
+                    setAnnotationHistoryCommand({ type: "undo", nonce: Date.now() });
+                  }}
+                  onRedoAnnotations={() => {
+                    setAnnotationHistoryCommand({ type: "redo", nonce: Date.now() });
+                  }}
                 />
               </Suspense>
 
@@ -996,6 +1214,22 @@ function App() {
                         currentPage={tab.currentPage}
                         searchMatches={tab.id === activeTabId ? searchMatches : []}
                         activeSearchIndex={tab.id === activeTabId ? activeSearchIndex : -1}
+                        isNavigationOpen={isPdfNavOpen}
+                        navigationMode={pdfNavMode}
+                        onNavigationModeChange={setPdfNavMode}
+                        onNavigateToPage={handlePageJump}
+                        bookmarks={getPageBookmarks(tab.id)}
+                        onToggleBookmarkPage={(page) => {
+                          togglePageBookmark(tab.id, page);
+                        }}
+                        annotationsRefreshKey={viewerAnnotationsRefreshKey}
+                        annotationHistoryCommand={tab.id === activeTabId ? annotationHistoryCommand : null}
+                        annotationFocusTarget={tab.id === activeTabId ? annotationFocusTarget : null}
+                        scrollContainerRef={tab.id === activeTabId ? activePdfScrollRef : undefined}
+                        onAnnotationHistoryStateChange={tab.id === activeTabId ? ((state) => {
+                          setCanUndoAnnotations(state.canUndo);
+                          setCanRedoAnnotations(state.canRedo);
+                        }) : undefined}
                         onDimensionResolved={updatePageDimension}
                         onCurrentPageChange={tab.id === activeTabId ? handleVisiblePageChange : undefined}
                         onAnnotationsSaved={handleAnnotationsSaved}
@@ -1022,7 +1256,15 @@ function App() {
                 refreshAllTags();
               }}
               onPageJump={handlePageJump}
+              onAnnotationFocus={handleAnnotationFocus}
               annotationsRefreshKey={annotationsRefreshKey}
+              onAnnotationsUpdated={handleAnnotationsUpdated}
+              isFavorite={Boolean(selectedItem && isFavoriteItem(selectedItem.id))}
+              onToggleFavorite={() => {
+                if (selectedItem) {
+                  toggleFavoriteItem(selectedItem.id);
+                }
+              }}
             />
           </Suspense>
         )}

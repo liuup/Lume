@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowDown, ArrowUp, Download, FilePenLine, FileText, FileUp, Hash, Loader2, RotateCcw, Search, Trash2, Trash } from "lucide-react";
-import { FolderNode, LibraryItem } from "../../types";
+import { ArrowDown, ArrowUp, Download, FilePenLine, FileText, FileUp, GitMerge, Hash, Loader2, Orbit, RotateCcw, Search, Star, Trash2, Trash } from "lucide-react";
+import { DuplicateGroup, FolderNode, IdentifierImportResult, LibraryItem } from "../../types";
 import { ExportModal } from "./ExportModal";
 import { preloadPdfDocument } from "../pdfDocumentRuntime";
 import { preloadPdfCoreRuntime } from "../pdfRuntime";
@@ -41,21 +41,45 @@ function highlightText(text: string, query: string): React.ReactNode {
   );
 }
 
+function parseIdentifierBatchInput(raw: string): string[] {
+  return Array.from(new Set(
+    raw
+      .split(/[\n,;]/)
+      .map((value) => value.trim())
+      .filter(Boolean),
+  ));
+}
+
 interface LibraryViewProps {
   folderTree: FolderNode[];
   trashItems: LibraryItem[];
   isTrashView: boolean;
+  isFavoritesView?: boolean;
+  isDuplicatesView?: boolean;
+  isSmartCollectionView?: boolean;
   selectedFolderId: string;
   selectedItemId: string | null;
+  favoriteItems?: LibraryItem[];
+  duplicateGroups?: DuplicateGroup[];
+  smartCollectionItems?: LibraryItem[];
+  smartCollectionName?: string | null;
   onSelectItem: (id: string) => void;
   onOpenItem: (item: LibraryItem) => void;
   onAddItem: () => void;
+  onAddReferenceFile?: () => Promise<void> | void;
+  onAddIdentifier?: (
+    identifier: string,
+    options?: { silent?: boolean },
+  ) => Promise<IdentifierImportResult | null> | IdentifierImportResult | null;
+  onMergeDuplicateGroup?: (group: DuplicateGroup) => Promise<void> | void;
   onDeleteItem: (item: LibraryItem) => void;
   onRestoreItem: (item: LibraryItem) => Promise<void> | void;
   onEmptyTrash: () => Promise<void> | void;
   onRenameItem: (item: LibraryItem, nextName: string) => Promise<void> | void;
   onUpdateItemTags: (item: LibraryItem, tags: string[]) => Promise<void> | void;
   onItemPointerDown: (item: LibraryItem, event: React.MouseEvent<HTMLDivElement>) => void;
+  isFavoriteItem?: (itemId: string) => boolean;
+  onToggleFavorite?: (item: LibraryItem) => void;
   /** Sidebar tag filter (null = no filter active). */
   tagFilter: string | null;
   onClearTagFilter: () => void;
@@ -65,17 +89,29 @@ export function LibraryView({
   folderTree,
   trashItems,
   isTrashView,
+  isFavoritesView = false,
+  isDuplicatesView = false,
+  isSmartCollectionView = false,
   selectedFolderId,
   selectedItemId,
+  favoriteItems = [],
+  duplicateGroups = [],
+  smartCollectionItems = [],
+  smartCollectionName = null,
   onSelectItem,
   onOpenItem,
   onAddItem,
+  onAddReferenceFile = async () => undefined,
+  onAddIdentifier = async () => null,
+  onMergeDuplicateGroup = async () => undefined,
   onDeleteItem,
   onRestoreItem,
   onEmptyTrash,
   onRenameItem,
   onUpdateItemTags,
   onItemPointerDown,
+  isFavoriteItem = () => false,
+  onToggleFavorite = () => {},
   tagFilter,
   onClearTagFilter,
 }: LibraryViewProps) {
@@ -117,6 +153,18 @@ export function LibraryView({
   const [headerMenu, setHeaderMenu] = useState<{ x: number; y: number } | null>(null);
   const [renameTarget, setRenameTarget] = useState<LibraryItem | null>(null);
   const [renameValue, setRenameValue]   = useState("");  const [showExport, setShowExport] = useState(false);  const renameInputRef = useRef<HTMLInputElement>(null);
+  const [showIdentifierImport, setShowIdentifierImport] = useState(false);
+  const [identifierValue, setIdentifierValue] = useState("");
+  const [isImportingIdentifier, setIsImportingIdentifier] = useState(false);
+  const [identifierImportProgress, setIdentifierImportProgress] = useState<{
+    total: number;
+    completed: number;
+    created: number;
+    existing: number;
+    failed: number;
+  } | null>(null);
+  const [mergingGroupId, setMergingGroupId] = useState<string | null>(null);
+  const identifierInputRef = useRef<HTMLTextAreaElement>(null);
   const [tagEditorTarget, setTagEditorTarget] = useState<LibraryItem | null>(null);
   const [tagEditorValue, setTagEditorValue] = useState("");
   const [tagEditorTags, setTagEditorTags] = useState<string[]>([]);
@@ -148,6 +196,12 @@ export function LibraryView({
 
   const folderItems: LibraryItem[] = isTrashView
     ? trashItems
+    : isDuplicatesView
+      ? duplicateGroups.flatMap((group) => group.items)
+    : isSmartCollectionView
+      ? smartCollectionItems
+    : isFavoritesView
+      ? favoriteItems
     : selectedFolder
     ? rootFolder && selectedFolder.id === rootFolder.id
       ? collectAllItems(selectedFolder)
@@ -156,11 +210,11 @@ export function LibraryView({
 
   // ── Global search via Tauri backend ─────────────────────────────────────
 
-  const isGlobalSearch = !isTrashView && (query.trim().length > 0 || yearFilter.trim().length > 0 || !!tagFilter);
+  const isGlobalSearch = !isTrashView && !isFavoritesView && !isDuplicatesView && !isSmartCollectionView && (query.trim().length > 0 || yearFilter.trim().length > 0 || !!tagFilter);
 
   const runGlobalSearch = useCallback(
     (q: string, year: string, sidebarTag: string | null) => {
-      if (isTrashView) {
+      if (isTrashView || isFavoritesView || isDuplicatesView || isSmartCollectionView) {
         setGlobalResults([]);
         setIsSearching(false);
         return;
@@ -178,7 +232,7 @@ export function LibraryView({
         .then(results => { setGlobalResults(results); setIsSearching(false); })
         .catch(err   => { console.error("search_library error:", err); setIsSearching(false); });
     },
-    [isTrashView]
+    [isDuplicatesView, isFavoritesView, isSmartCollectionView, isTrashView]
   );
 
   // Debounced search trigger — re-runs on any filter change, including sidebar tag
@@ -227,67 +281,6 @@ export function LibraryView({
 
     return () => observer.disconnect();
   }, []);
-
-  const displayItems = useMemo(() => {
-    const sourceItems = isGlobalSearch ? globalResults : folderItems;
-    const items = [...sourceItems].filter((item) => {
-      if (!isTrashView) return true;
-      const matchesQuery = !query.trim()
-        || item.title.toLowerCase().includes(query.trim().toLowerCase())
-        || item.authors.toLowerCase().includes(query.trim().toLowerCase())
-        || item.publication.toLowerCase().includes(query.trim().toLowerCase())
-        || item.doi.toLowerCase().includes(query.trim().toLowerCase())
-        || item.arxiv_id.toLowerCase().includes(query.trim().toLowerCase());
-      const matchesYear = !yearFilter.trim() || item.year === yearFilter.trim();
-      return matchesQuery && matchesYear;
-    });
-    const getTimestamp = (value: string) => {
-      const numeric = Number(value);
-      if (!Number.isNaN(numeric) && numeric > 0) {
-        return numeric;
-      }
-      const parsed = Date.parse(value);
-      return Number.isNaN(parsed) ? 0 : parsed;
-    };
-    const getYear = (item: LibraryItem) => {
-      const numeric = Number(item.year);
-      return Number.isNaN(numeric) ? -1 : numeric;
-    };
-
-    items.sort((left, right) => {
-      let comparison = 0;
-      switch (sortColumn) {
-        case "title":
-          comparison = left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
-          break;
-        case "authors":
-          comparison = left.authors.localeCompare(right.authors, undefined, { sensitivity: "base" });
-          break;
-        case "year":
-          comparison = getYear(left) - getYear(right);
-          break;
-        case "publication":
-          comparison = (left.publication || left.publisher || "").localeCompare(
-            right.publication || right.publisher || "",
-            undefined,
-            { sensitivity: "base" }
-          );
-          break;
-        case "dateAdded":
-        default:
-          comparison = getTimestamp(left.date_added) - getTimestamp(right.date_added);
-          break;
-      }
-
-      if (comparison === 0) {
-        comparison = left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
-      }
-
-      return sortDirection === "asc" ? comparison : -comparison;
-    });
-
-    return items;
-  }, [folderItems, globalResults, isGlobalSearch, isTrashView, query, sortColumn, sortDirection, yearFilter]);
 
   const responsiveColumns = useMemo(() => getResponsiveColumns(listViewportWidth), [listViewportWidth]);
   const visibleColumns = useMemo(
@@ -367,6 +360,25 @@ export function LibraryView({
     return () => window.removeEventListener("keydown", onEsc);
   }, [tagEditorTarget]);
 
+  useEffect(() => {
+    if (!showIdentifierImport) return;
+    const frame = window.requestAnimationFrame(() => {
+      identifierInputRef.current?.focus();
+      identifierInputRef.current?.select();
+    });
+    const onEsc = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !isImportingIdentifier) {
+        setShowIdentifierImport(false);
+        setIdentifierValue("");
+      }
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("keydown", onEsc);
+    };
+  }, [isImportingIdentifier, showIdentifierImport]);
+
   const menuX = contextMenu ? Math.min(contextMenu.x, window.innerWidth  - 184) : 0;
   const menuY = contextMenu ? Math.min(contextMenu.y, window.innerHeight - 56)  : 0;
   const headerMenuX = headerMenu ? Math.min(headerMenu.x, window.innerWidth - 220) : 0;
@@ -416,7 +428,146 @@ export function LibraryView({
     }
   };
 
-  const folderLabel = isTrashView ? t("folderSidebar.labels.trash") : selectedFolder?.name ?? t("libraryView.myLibrary");
+  const submitIdentifierImport = async () => {
+    const identifiers = parseIdentifierBatchInput(identifierValue);
+    if (identifiers.length === 0) return;
+
+    try {
+      setIsImportingIdentifier(true);
+      const isBatchImport = identifiers.length > 1;
+      let created = 0;
+      let existing = 0;
+      let failed = 0;
+
+      setIdentifierImportProgress({
+        total: identifiers.length,
+        completed: 0,
+        created: 0,
+        existing: 0,
+        failed: 0,
+      });
+
+      for (const [index, identifier] of identifiers.entries()) {
+        const result = await onAddIdentifier(identifier, { silent: isBatchImport });
+        if (result?.created) {
+          created += 1;
+        } else if (result?.item) {
+          existing += 1;
+        } else {
+          failed += 1;
+        }
+
+        setIdentifierImportProgress({
+          total: identifiers.length,
+          completed: index + 1,
+          created,
+          existing,
+          failed,
+        });
+      }
+
+      if (created > 0 || existing > 0) {
+        setShowIdentifierImport(false);
+        setIdentifierValue("");
+        setIdentifierImportProgress(null);
+      }
+    } finally {
+      setIsImportingIdentifier(false);
+    }
+  };
+
+  const matchesLocalFilters = useCallback((item: LibraryItem) => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const matchesQuery = !normalizedQuery
+      || item.title.toLowerCase().includes(normalizedQuery)
+      || item.authors.toLowerCase().includes(normalizedQuery)
+      || item.publication.toLowerCase().includes(normalizedQuery)
+      || item.doi.toLowerCase().includes(normalizedQuery)
+      || item.arxiv_id.toLowerCase().includes(normalizedQuery);
+    const matchesYear = !yearFilter.trim() || item.year === yearFilter.trim();
+    const matchesTag = !tagFilter || item.tags.includes(tagFilter);
+    return matchesQuery && matchesYear && matchesTag;
+  }, [query, tagFilter, yearFilter]);
+
+  const visibleDuplicateGroups = useMemo(() => {
+    if (!isDuplicatesView) {
+      return [] as DuplicateGroup[];
+    }
+
+    return duplicateGroups.filter((group) => group.items.some((item) => matchesLocalFilters(item)));
+  }, [duplicateGroups, isDuplicatesView, matchesLocalFilters]);
+
+  const displayItems = useMemo(() => {
+    const sourceItems = isDuplicatesView
+      ? Array.from(new Map(
+        visibleDuplicateGroups.flatMap((group) => group.items).map((item) => [item.id, item]),
+      ).values())
+      : isGlobalSearch
+        ? globalResults
+        : folderItems;
+    const items = [...sourceItems].filter((item) => {
+      if (isGlobalSearch) {
+        return true;
+      }
+      return matchesLocalFilters(item);
+    });
+    const getTimestamp = (value: string) => {
+      const numeric = Number(value);
+      if (!Number.isNaN(numeric) && numeric > 0) {
+        return numeric;
+      }
+      const parsed = Date.parse(value);
+      return Number.isNaN(parsed) ? 0 : parsed;
+    };
+    const getYear = (item: LibraryItem) => {
+      const numeric = Number(item.year);
+      return Number.isNaN(numeric) ? -1 : numeric;
+    };
+
+    items.sort((left, right) => {
+      let comparison = 0;
+      switch (sortColumn) {
+        case "title":
+          comparison = left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
+          break;
+        case "authors":
+          comparison = left.authors.localeCompare(right.authors, undefined, { sensitivity: "base" });
+          break;
+        case "year":
+          comparison = getYear(left) - getYear(right);
+          break;
+        case "publication":
+          comparison = (left.publication || left.publisher || "").localeCompare(
+            right.publication || right.publisher || "",
+            undefined,
+            { sensitivity: "base" }
+          );
+          break;
+        case "dateAdded":
+        default:
+          comparison = getTimestamp(left.date_added) - getTimestamp(right.date_added);
+          break;
+      }
+
+      if (comparison === 0) {
+        comparison = left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
+      }
+
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+
+    return items;
+  }, [folderItems, globalResults, isDuplicatesView, isGlobalSearch, matchesLocalFilters, sortColumn, sortDirection, visibleDuplicateGroups]);
+
+  const folderLabel = isTrashView
+    ? t("folderSidebar.labels.trash")
+    : isDuplicatesView
+      ? t("folderSidebar.duplicates.title")
+    : isSmartCollectionView
+      ? (smartCollectionName ?? t("folderSidebar.smartCollections.title"))
+    : isFavoritesView
+      ? t("folderSidebar.favorites.title")
+      : selectedFolder?.name ?? t("libraryView.myLibrary");
   const exportScopeLabel = isGlobalSearch
     ? (displayItems.length === 1
       ? t("libraryView.export.searchScope.one", { count: displayItems.length })
@@ -517,6 +668,34 @@ export function LibraryView({
     }));
   }, [displayItems, t]);
 
+  const duplicateReasonLabel = (reason: DuplicateGroup["reason"]) => {
+    const key = `libraryView.duplicates.reason.${reason}`;
+    return t(key, undefined, reason);
+  };
+
+  const duplicateReasonClassName = (reason: DuplicateGroup["reason"]) => {
+    if (reason === "doi") {
+      return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200";
+    }
+    if (reason === "arxiv") {
+      return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-200";
+    }
+    return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200";
+  };
+
+  const handleMergeDuplicateGroup = async (group: DuplicateGroup) => {
+    if (group.items.length < 2) {
+      return;
+    }
+
+    try {
+      setMergingGroupId(group.id);
+      await onMergeDuplicateGroup(group);
+    } finally {
+      setMergingGroupId((current) => current === group.id ? null : current);
+    }
+  };
+
   return (
     <div className="flex-1 min-w-0 flex flex-col h-full bg-white dark:bg-zinc-950 relative">
 
@@ -556,6 +735,24 @@ export function LibraryView({
               >
                 <Download size={15} />
                 <span className="hidden min-[900px]:inline">{t("libraryView.actions.export")}</span>
+              </button>
+              <button
+                onClick={() => {
+                  void onAddReferenceFile();
+                }}
+                className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-emerald-600 hover:border-emerald-200 transition-colors shadow-sm active:scale-[0.98] dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-emerald-300 dark:hover:border-emerald-900/70"
+                title={t("libraryView.actions.addReferenceFile", undefined, "Import BibTeX / RIS / CSL JSON")}
+              >
+                <FileText size={15} />
+                <span className="hidden min-[900px]:inline">{t("libraryView.actions.addReferenceFile", undefined, "Import BibTeX / RIS / CSL JSON")}</span>
+              </button>
+              <button
+                onClick={() => setShowIdentifierImport(true)}
+                className="inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 md:px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-cyan-600 hover:border-cyan-200 transition-colors shadow-sm active:scale-[0.98] dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:hover:text-cyan-300 dark:hover:border-cyan-900/70"
+                title={t("libraryView.actions.addIdentifier", undefined, "Add DOI / arXiv")}
+              >
+                <Orbit size={15} />
+                <span className="hidden min-[900px]:inline">{t("libraryView.actions.addIdentifier", undefined, "Add DOI / arXiv")}</span>
               </button>
               <button
                 onClick={onAddItem}
@@ -611,10 +808,126 @@ export function LibraryView({
               <p className="text-sm">{isSearching ? t("libraryView.empty.searching") : t("libraryView.empty.noResults")}</p>
             ) : (
               <>
-                <p className="text-sm">{t("libraryView.empty.noItems")}</p>
-                <p className="text-xs text-zinc-400">{t("libraryView.empty.hint")}</p>
+                <p className="text-sm">
+                  {isDuplicatesView
+                    ? t("libraryView.empty.noDuplicates", undefined, "No duplicate groups found")
+                    : isSmartCollectionView
+                    ? t("libraryView.empty.noSmartCollectionItems", { name: smartCollectionName ?? t("folderSidebar.smartCollections.title") })
+                    : isFavoritesView
+                      ? t("libraryView.empty.noFavorites", undefined, "No favorite papers yet")
+                      : t("libraryView.empty.noItems")}
+                </p>
+                <p className="text-xs text-zinc-400">
+                  {isDuplicatesView
+                    ? t("libraryView.duplicates.hint", undefined, "Duplicate groups are inferred from DOI, arXiv ID, and title/author/year matches.")
+                    : t("libraryView.empty.hint")}
+                </p>
               </>
             )}
+          </div>
+        ) : isDuplicatesView ? (
+          <div className="space-y-4 px-4 py-4 md:px-6">
+            {visibleDuplicateGroups.map((group) => (
+              <section
+                key={group.id}
+                className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/70">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${duplicateReasonClassName(group.reason)}`}>
+                        {duplicateReasonLabel(group.reason)}
+                      </span>
+                      <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                        {t("libraryView.duplicates.groupCount", { count: group.items.length }, `${group.items.length} items`)}
+                      </span>
+                    </div>
+                    <div className="mt-1 truncate text-xs text-zinc-500 dark:text-zinc-400">
+                      {group.matchValue}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleMergeDuplicateGroup(group);
+                    }}
+                    disabled={mergingGroupId === group.id}
+                    className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-700 transition-colors hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-70 dark:border-emerald-900/70 dark:bg-zinc-950 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+                    title={t("libraryView.duplicates.merge", undefined, "Merge Group")}
+                  >
+                    {mergingGroupId === group.id ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <GitMerge size={14} />
+                    )}
+                    <span>
+                      {mergingGroupId === group.id
+                        ? t("libraryView.duplicates.merging", undefined, "Merging")
+                        : t("libraryView.duplicates.merge", undefined, "Merge Group")}
+                    </span>
+                  </button>
+                </div>
+                <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                  {group.items.map((item) => {
+                    const hasPdf = item.attachments.some((attachment) => attachment.attachment_type.toLowerCase() === "pdf");
+                    return (
+                      <div
+                        key={item.id}
+                        className={`flex items-start gap-3 px-4 py-3 transition-colors ${
+                          selectedItemId === item.id
+                            ? "bg-indigo-50/80 dark:bg-indigo-950/20"
+                            : "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
+                        }`}
+                        onPointerDown={(event) => onItemPointerDown(item, event)}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onSelectItem(item.id);
+                          setContextMenu({ item, x: event.clientX, y: event.clientY });
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => onSelectItem(item.id)}
+                          onDoubleClick={() => onOpenItem(item)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="truncate text-sm font-medium text-zinc-800 dark:text-zinc-100">
+                              {item.title || item.attachments[0]?.name || t("libraryView.item.untitled")}
+                            </span>
+                            {!hasPdf ? (
+                              <span className="rounded-full border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+                                {t("libraryView.duplicates.metadataOnly", undefined, "Metadata only")}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                            {[item.authors || "—", item.year || "—", item.publication || item.publisher || "—"]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onToggleFavorite(item)}
+                          className={`mt-0.5 rounded-lg p-1.5 transition-colors ${
+                            isFavoriteItem(item.id)
+                              ? "text-amber-500 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950/30"
+                              : "text-zinc-400 hover:bg-zinc-100 hover:text-amber-500 dark:text-zinc-500 dark:hover:bg-zinc-900 dark:hover:text-amber-300"
+                          }`}
+                          title={isFavoriteItem(item.id)
+                            ? t("libraryView.context.unfavorite", undefined, "Remove from Favorites")
+                            : t("libraryView.context.favorite", undefined, "Add to Favorites")}
+                        >
+                          <Star size={15} className={isFavoriteItem(item.id) ? "fill-current" : undefined} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </div>
         ) : (
           <div className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 overflow-x-auto">
@@ -651,10 +964,12 @@ export function LibraryView({
                   item={item}
                   isSelected={selectedItemId === item.id}
                   highlight={isGlobalSearch ? query : ""}
+                  isFavorite={isFavoriteItem(item.id)}
                   visibleColumns={visibleColumns}
                   gridTemplateColumns={visibleGridTemplateColumns}
                   onSelect={() => onSelectItem(item.id)}
                   onOpen={() => onOpenItem(item)}
+                  onToggleFavorite={() => onToggleFavorite(item)}
                   onPointerDown={event => onItemPointerDown(item, event)}
                   onContextMenu={event => {
                     onSelectItem(item.id);
@@ -709,6 +1024,18 @@ export function LibraryView({
               >
                 <FilePenLine size={15} />
                 <span>{t("libraryView.context.rename")}</span>
+              </button>
+              <button
+                onClick={() => {
+                  onToggleFavorite(contextMenu.item);
+                  setContextMenu(null);
+                }}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-900"
+              >
+                <Star size={15} className={isFavoriteItem(contextMenu.item.id) ? "fill-current text-amber-500 dark:text-amber-300" : ""} />
+                <span>{isFavoriteItem(contextMenu.item.id)
+                  ? t("libraryView.context.unfavorite", undefined, "Remove from Favorites")
+                  : t("libraryView.context.favorite", undefined, "Add to Favorites")}</span>
               </button>
               <button
                 onClick={() => {
@@ -820,7 +1147,9 @@ export function LibraryView({
                     className="w-full bg-transparent py-2.5 text-sm text-zinc-800 outline-none dark:text-zinc-100 dark:placeholder:text-zinc-500"
                     placeholder={t("libraryView.renameDialog.placeholder")}
                   />
-                  <span className="shrink-0 text-sm text-zinc-400 dark:text-zinc-500">.pdf</span>
+                  {renameTarget.attachments.some((attachment) => attachment.attachment_type.toLowerCase() === "pdf") ? (
+                    <span className="shrink-0 text-sm text-zinc-400 dark:text-zinc-500">.pdf</span>
+                  ) : null}
                 </div>
               </div>
 
@@ -841,6 +1170,106 @@ export function LibraryView({
                   className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-300 dark:disabled:bg-indigo-900/60"
                 >
                   {t("libraryView.renameDialog.save")}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showIdentifierImport && (
+        <div
+          className="absolute inset-0 z-40 flex items-center justify-center bg-zinc-900/10 backdrop-blur-[1px] animate-backdrop dark:bg-zinc-950/70"
+          onClick={() => {
+            if (isImportingIdentifier) return;
+            setShowIdentifierImport(false);
+            setIdentifierValue("");
+            setIdentifierImportProgress(null);
+          }}
+        >
+          <div
+            className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-5 shadow-[0_20px_60px_rgba(0,0,0,0.16)] animate-modal dark:border-zinc-800 dark:bg-zinc-950"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="rounded-xl bg-cyan-50 p-2 text-cyan-600 dark:bg-cyan-950/40 dark:text-cyan-300">
+                <Orbit size={18} />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  {t("libraryView.identifierDialog.title", undefined, "Import by DOI / arXiv")}
+                </h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {t("libraryView.identifierDialog.description", undefined, "Create library items from DOI or arXiv identifiers.")}
+                </p>
+              </div>
+            </div>
+
+            <form
+              className="mt-4 space-y-4"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                await submitIdentifierImport();
+              }}
+            >
+              <div>
+                <label className="mb-2 block text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                  {t("libraryView.identifierDialog.label", undefined, "Identifiers")}
+                </label>
+                <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 focus-within:border-cyan-300 focus-within:bg-white focus-within:ring-2 focus-within:ring-cyan-400/15 dark:border-zinc-800 dark:bg-zinc-900 dark:focus-within:border-cyan-800 dark:focus-within:bg-zinc-950">
+                  <textarea
+                    ref={identifierInputRef}
+                    value={identifierValue}
+                    onChange={(event) => setIdentifierValue(event.target.value)}
+                    rows={4}
+                    className="w-full resize-none bg-transparent py-2.5 text-sm text-zinc-800 outline-none dark:text-zinc-100 dark:placeholder:text-zinc-500"
+                    placeholder={t("libraryView.identifierDialog.placeholder", undefined, "10.48550/arXiv.1706.03762\n1706.03762\n10.1145/3292500.3330701")}
+                  />
+                </div>
+                <p className="mt-2 text-[11px] text-zinc-400 dark:text-zinc-500">
+                  {t("libraryView.identifierDialog.help", undefined, "Paste one identifier per line, or separate multiple values with commas. Supports DOI URLs, raw DOI values, arXiv URLs, and arXiv IDs.")}
+                </p>
+                {identifierImportProgress ? (
+                  <div className="mt-3 rounded-xl border border-cyan-100 bg-cyan-50 px-3 py-2 text-xs text-cyan-700 dark:border-cyan-900/70 dark:bg-cyan-950/20 dark:text-cyan-200">
+                    <div className="font-medium">
+                      {t("libraryView.identifierDialog.progress", {
+                        completed: identifierImportProgress.completed,
+                        total: identifierImportProgress.total,
+                      }, `${identifierImportProgress.completed}/${identifierImportProgress.total}`)}
+                    </div>
+                    <div className="mt-1 text-[11px] text-cyan-600 dark:text-cyan-300">
+                      {t("libraryView.identifierDialog.summary", {
+                        created: identifierImportProgress.created,
+                        existing: identifierImportProgress.existing,
+                        failed: identifierImportProgress.failed,
+                      }, `${identifierImportProgress.created} new · ${identifierImportProgress.existing} existing · ${identifierImportProgress.failed} failed`)}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={isImportingIdentifier}
+                  onClick={() => {
+                    setShowIdentifierImport(false);
+                    setIdentifierValue("");
+                    setIdentifierImportProgress(null);
+                  }}
+                  className="rounded-lg border border-zinc-200 px-4 py-2 text-sm font-medium text-zinc-600 hover:bg-zinc-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-900"
+                >
+                  {t("libraryView.identifierDialog.cancel", undefined, "Cancel")}
+                </button>
+                <button
+                  type="submit"
+                  disabled={parseIdentifierBatchInput(identifierValue).length === 0 || isImportingIdentifier}
+                  className="inline-flex items-center gap-2 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-medium text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-cyan-300 dark:bg-cyan-700 dark:hover:bg-cyan-600 dark:disabled:bg-cyan-950/60"
+                >
+                  {isImportingIdentifier ? <Loader2 size={14} className="animate-spin" /> : null}
+                  {isImportingIdentifier
+                    ? t("libraryView.identifierDialog.importing", undefined, "Importing")
+                    : t("libraryView.identifierDialog.import", undefined, "Import")}
                 </button>
               </div>
             </form>
@@ -949,20 +1378,24 @@ function LibraryItemRow({
   item,
   isSelected,
   highlight,
+  isFavorite,
   visibleColumns,
   gridTemplateColumns,
   onSelect,
   onOpen,
+  onToggleFavorite,
   onPointerDown,
   onContextMenu,
 }: {
   item: LibraryItem;
   isSelected: boolean;
   highlight: string;
+  isFavorite: boolean;
   visibleColumns: SortColumn[];
   gridTemplateColumns: string;
   onSelect: () => void;
   onOpen: () => void;
+  onToggleFavorite: () => void;
   onPointerDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   onContextMenu: (event: React.MouseEvent<HTMLDivElement>) => void;
 }) {
@@ -1001,9 +1434,28 @@ function LibraryItemRow({
           }`}>
             <FileText size={14} />
           </div>
-          <h3 className="library-item-title text-[13px] font-semibold text-zinc-800 dark:text-zinc-100 truncate group-hover:text-indigo-900 dark:group-hover:text-indigo-200 transition-colors">
-            {highlight ? highlightText(displayTitle, highlight) : displayTitle}
-          </h3>
+          <div className="min-w-0 flex flex-1 items-center gap-2">
+            <h3 className="library-item-title flex-1 truncate text-[13px] font-semibold text-zinc-800 transition-colors group-hover:text-indigo-900 dark:text-zinc-100 dark:group-hover:text-indigo-200">
+              {highlight ? highlightText(displayTitle, highlight) : displayTitle}
+            </h3>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onToggleFavorite();
+              }}
+              className={`rounded-md p-1 transition-colors ${
+                isFavorite
+                  ? "text-amber-500 hover:text-amber-600 dark:text-amber-300 dark:hover:text-amber-200"
+                  : "text-zinc-300 opacity-0 group-hover:opacity-100 hover:text-amber-500 dark:text-zinc-700 dark:hover:text-amber-300"
+              }`}
+              title={isFavorite
+                ? t("libraryView.context.unfavorite", undefined, "Remove from Favorites")
+                : t("libraryView.context.favorite", undefined, "Add to Favorites")}
+            >
+              <Star size={14} className={isFavorite ? "fill-current" : undefined} />
+            </button>
+          </div>
         </div>
       )}
       {visibleColumns.includes("authors") && (

@@ -23,6 +23,18 @@
     "aiPanel": {
       "show": "显示 AI 侧边栏",
       "hide": "隐藏 AI 侧边栏"
+    },
+    "navPanel": {
+      "show": "显示导航侧栏",
+      "hide": "隐藏导航侧栏"
+    },
+    "history": {
+      "undo": "撤销批注",
+      "redo": "重做批注"
+    },
+    "bookmarks": {
+      "add": "收藏当前页",
+      "remove": "取消收藏当前页"
     }
   },
   "searchBar": {
@@ -36,7 +48,16 @@
   },
   "pdfViewer": {
     "pageLabel": "第 {page} 页",
-    "pageAlt": "第 {page} 页"
+    "pageAlt": "第 {page} 页",
+    "navigation": {
+      "outline": "目录",
+      "pages": "页面",
+      "bookmarks": "书签",
+      "outlineEmpty": "这个 PDF 没有可用目录。",
+      "outlineHint": "当前文档未暴露目录或书签结构。",
+      "bookmarksEmpty": "还没有收藏的页面。",
+      "bookmarksHint": "使用工具栏里的书签按钮保存当前页。"
+    }
   },
   "app": {
     "loading": {
@@ -65,6 +86,10 @@
         "title": "打开 PDF 失败",
         "description": "无法打开所选 PDF。"
       },
+      "openNoPdf": {
+        "title": "没有 PDF 附件",
+        "description": "这个条目目前还没有 PDF 附件。"
+      },
       "import": {
         "success": {
           "title": "PDF 已导入",
@@ -74,6 +99,32 @@
         "error": {
           "title": "导入失败",
           "description": "无法导入所选 PDF。"
+        }
+      },
+      "identifierImport": {
+        "success": {
+          "title": "标识符已导入",
+          "description": "{title} 已加入资料库。"
+        },
+        "existing": {
+          "title": "条目已存在",
+          "description": "{title} 已存在于资料库中。"
+        },
+        "error": {
+          "title": "标识符导入失败",
+          "description": "该 DOI 或 arXiv 标识符无法导入。"
+        }
+      },
+      "referenceImport": {
+        "success": {
+          "title": "参考文献已导入",
+          "description": "已从 {format} 导入 {count} 条参考文献。",
+          "mixedDescription": "已从 {format} 导入 {created} 条参考文献，另有 {existing} 条已存在于资料库中。",
+          "existingDescription": "所选的 {count} 条参考文献都已存在于资料库中。"
+        },
+        "error": {
+          "title": "参考文献导入失败",
+          "description": "无法导入所选的 BibTeX、RIS 或 CSL JSON 文件。"
         }
       },
       "tags": {
@@ -137,9 +188,17 @@
           "title": "条目已移动",
           "description": "已将条目移动到 {folder}。"
         },
+        "mergeSuccess": {
+          "title": "重复项已合并",
+          "description": "已将 {count} 个重复条目合并到 {title}。"
+        },
         "moveError": {
           "title": "移动条目失败",
           "description": "无法移动所选条目。"
+        },
+        "mergeError": {
+          "title": "合并重复项失败",
+          "description": "无法合并所选重复分组。"
         }
       },
       "folder": {
@@ -209,6 +268,22 @@
       "annotationsEmpty": {
         "title": "没有可导出的批注",
         "description": "这篇论文目前还没有已保存的批注。"
+      },
+      "annotationUpdateSuccess": {
+        "title": "批注已更新",
+        "description": "文字批注内容已保存。"
+      },
+      "annotationUpdateError": {
+        "title": "更新批注失败",
+        "description": "无法保存文字批注内容。"
+      },
+      "annotationDeleteSuccess": {
+        "title": "批注已删除",
+        "description": "该批注已从当前 PDF 中移除。"
+      },
+      "annotationDeleteError": {
+        "title": "删除批注失败",
+        "description": "无法移除该批注。"
       },
       "digestSuccess": {
         "title": "AI 整理已生成",
@@ -390,6 +465,8 @@
     "actions": {
       "export": "导出",
       "exportTitle": "导出参考文献",
+      "addReferenceFile": "导入 BibTeX / RIS / CSL JSON",
+      "addIdentifier": "添加 DOI / arXiv",
       "addItem": "添加文献条目",
       "emptyTrash": "清空回收站",
       "emptyTrashTitle": "永久删除回收站中的所有条目"
@@ -409,10 +486,15 @@
       "searching": "搜索中…",
       "noResults": "未找到结果",
       "noItems": "此文件夹中没有条目",
+      "noDuplicates": "没有发现重复分组",
+      "noSmartCollectionItems": "{name} 中还没有匹配的条目",
+      "noFavorites": "还没有收藏的文献",
       "hint": "使用上方的“添加文献条目”按钮添加论文。"
     },
     "context": {
       "rename": "重命名条目",
+      "favorite": "加入收藏",
+      "unfavorite": "取消收藏",
       "editTags": "编辑标签",
       "delete": "删除条目",
       "restore": "恢复"
@@ -433,6 +515,18 @@
       "cancel": "取消",
       "save": "保存"
     },
+    "identifierDialog": {
+      "title": "通过 DOI / arXiv 导入",
+      "description": "通过 DOI 或 arXiv 标识符批量创建资料库条目。",
+      "label": "标识符列表",
+      "placeholder": "10.48550/arXiv.1706.03762\n1706.03762\n10.1145/3292500.3330701",
+      "help": "支持每行一个标识符，也支持用逗号分隔多个值。兼容 DOI 链接、原始 DOI、arXiv 链接和 arXiv ID。",
+      "progress": "已处理 {completed} / {total}",
+      "summary": "新增 {created} 条 · 已存在 {existing} 条 · 失败 {failed} 条",
+      "cancel": "取消",
+      "import": "导入",
+      "importing": "导入中"
+    },
     "export": {
       "searchScope": {
         "one": "搜索结果中的 {count} 个条目",
@@ -441,6 +535,18 @@
       "folderScope": {
         "one": "{folder} 中的 {count} 个条目",
         "other": "{folder} 中的 {count} 个条目"
+      }
+    },
+    "duplicates": {
+      "hint": "重复分组基于 DOI、arXiv ID，以及标题/作者/年份的元数据匹配推断。",
+      "merge": "合并本组",
+      "merging": "合并中",
+      "groupCount": "{count} 个条目",
+      "metadataOnly": "仅元数据",
+      "reason": {
+        "doi": "DOI 匹配",
+        "arxiv": "arXiv 匹配",
+        "metadata": "元数据匹配"
       }
     },
     "item": {
@@ -471,6 +577,57 @@
       "collapse": "收起侧边栏",
       "expand": "展开侧边栏",
       "settings": "设置"
+    },
+    "recents": {
+      "title": "最近打开",
+      "resumeAt": "继续阅读 · 第 {page} 页"
+    },
+    "favorites": {
+      "title": "收藏",
+      "empty": "还没有收藏的文献。",
+      "open": "打开文献"
+    },
+    "duplicates": {
+      "title": "重复项",
+      "empty": "暂时没有重复分组。",
+      "summary": "{groups} 组 · {items} 个条目",
+      "hint": "这里会汇总根据 DOI、arXiv 和元数据推断出的重复条目。",
+      "hintEmpty": "导入或更新元数据后，潜在重复项会出现在这里。"
+    },
+    "smartCollections": {
+      "title": "智能集合",
+      "empty": "还没有智能集合。",
+      "create": "新建智能集合",
+      "edit": "编辑智能集合",
+      "delete": "删除智能集合",
+      "emptyRules": "还没有设置筛选规则",
+      "summary": {
+        "year": "年份",
+        "tags": "标签",
+        "favoritesOnly": "仅收藏"
+      },
+      "dialog": {
+        "createTitle": "新建智能集合",
+        "editTitle": "编辑智能集合",
+        "description": "创建一个基于规则的保存视图。",
+        "name": "集合名称",
+        "namePlaceholder": "例如：NeurIPS 收藏",
+        "query": "关键词",
+        "queryPlaceholder": "标题、作者、DOI、摘要...",
+        "year": "年份",
+        "tags": "标签",
+        "tagsPlaceholder": "用逗号分隔多个标签",
+        "favoritesOnly": "仅包含已收藏条目",
+        "ruleRequired": "至少添加一条规则后才能保存智能集合。",
+        "cancel": "取消",
+        "create": "创建",
+        "save": "保存",
+        "matchMode": {
+          "label": "匹配方式",
+          "all": "全部",
+          "any": "任一"
+        }
+      }
     },
     "tags": {
       "title": "标签",
@@ -590,9 +747,12 @@
       "save": "保存",
       "retrieve": "检索",
       "retrieveMetadata": "检索元数据",
+      "retrieveMetadataDisabled": "刷新元数据需要 PDF 附件",
       "retrievingMetadata": "检索中...",
       "edit": "编辑",
       "editMetadata": "编辑元数据",
+      "favorite": "加入收藏",
+      "unfavorite": "取消收藏",
       "cancelEdit": "取消编辑",
       "closePanel": "关闭面板",
       "cancel": "取消"
@@ -670,10 +830,33 @@
         "highlight": "高亮",
         "ink": "手写"
       },
-      "searchPlaceholder": "搜索文字批注内容...",
+      "searchPlaceholder": "搜索批注和高亮摘录...",
       "results": "显示 {visible}/{total}",
+      "sortLabel": "排序",
+      "viewLabel": "视图",
+      "groupCount": "{count} 条批注",
+      "collapseAll": "全部折叠",
+      "expandAll": "全部展开",
       "export": "导出 Markdown",
       "exportFallbackFileName": "批注",
+      "edit": "编辑批注",
+      "saveEdit": "保存批注",
+      "delete": "删除批注",
+      "sortModes": {
+        "pageAsc": "页码升序",
+        "pageDesc": "页码降序",
+        "type": "按类型"
+      },
+      "viewModes": {
+        "flat": "平铺",
+        "grouped": "按页分组"
+      },
+      "stats": {
+        "pages": "页数",
+        "text": "文字",
+        "highlight": "高亮",
+        "ink": "手写"
+      },
       "items": {
         "text": "文字批注",
         "highlight": "高亮 #{index}",
@@ -682,6 +865,9 @@
       "previews": {
         "highlight": "自由高亮笔迹",
         "ink": "自由手写笔迹"
+      },
+      "sources": {
+        "excerpt": "文本摘录"
       },
       "jump": "跳转",
       "jumpToPage": "打开页码",

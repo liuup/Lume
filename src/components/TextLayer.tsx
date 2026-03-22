@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import type { SearchRect } from "../types";
 
 export interface TextNode {
   text: string;
@@ -25,6 +26,7 @@ export interface TextLayerSelectionSnapshot {
   selectedText: string;
   x: number;
   y: number;
+  selection: SearchRect;
 }
 
 export interface TextLayerSelectionController {
@@ -163,11 +165,16 @@ export function TextLayer({
 
   const getSelectionRect = () => {
     const selection = window.getSelection();
+    const layerElement = layerRef.current;
     if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
       return null;
     }
 
     if (!isSelectionInsideLayer()) {
+      return null;
+    }
+
+    if (!layerElement) {
       return null;
     }
 
@@ -177,10 +184,22 @@ export function TextLayer({
       return null;
     }
 
+    const layerRect = layerElement.getBoundingClientRect();
+    const left = Math.max(0, rect.left - layerRect.left);
+    const top = Math.max(0, rect.top - layerRect.top);
+    const right = Math.min(layerRect.width, rect.right - layerRect.left);
+    const bottom = Math.min(layerRect.height, rect.bottom - layerRect.top);
+
     return {
       selectedText: normalizeSelectedText(extractSelectedTextFromLayer() || selection.toString()),
       x: rect.left + rect.width / 2,
       y: rect.bottom + 10,
+      selection: {
+        x: left / scale,
+        y: top / scale,
+        width: Math.max(0, right - left) / scale,
+        height: Math.max(0, bottom - top) / scale,
+      },
     };
   };
 

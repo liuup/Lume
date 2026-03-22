@@ -1,8 +1,9 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { RenderTask } from "pdfjs-dist/types/src/pdf";
-import { AiTranslationResult, PageDimension, PdfSearchMatch, ToolType } from "../types";
-import { AnnotationLayer } from "./AnnotationLayer";
+import { BookOpenText, Bookmark, FileText, Images } from "lucide-react";
+import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist/types/src/pdf";
+import { AiTranslationResult, AnnotationFocusTarget, PageBookmark, PageDimension, PdfSearchMatch, SearchRect, ToolType } from "../types";
+import { AnnotationHistoryController, AnnotationHistoryState, AnnotationLayer } from "./AnnotationLayer";
 import { TextLayer, TextLayerSelectionController, TextLayerSelectionSnapshot } from "./TextLayer";
 import { registerPdfCacheCleanup } from "./pdfCacheRegistry";
 import { clearPdfDocumentCache, loadPdfDocument, loadPdfPage, warmPdfPage } from "./pdfDocumentRuntime";
@@ -20,10 +21,27 @@ interface PdfViewerProps {
   currentPage: number;
   searchMatches: PdfSearchMatch[];
   activeSearchIndex: number;
+  isNavigationOpen: boolean;
+  navigationMode: PdfNavigationMode;
+  onNavigationModeChange?: (mode: PdfNavigationMode) => void;
+  onNavigateToPage?: (page: number) => void;
+  bookmarks: PageBookmark[];
+  onToggleBookmarkPage?: (page: number) => void;
+  annotationsRefreshKey?: number;
+  annotationHistoryCommand?: AnnotationHistoryCommand | null;
+  annotationFocusTarget?: AnnotationFocusTarget | null;
+  scrollContainerRef?: RefObject<HTMLDivElement | null>;
+  onAnnotationHistoryStateChange?: (state: AnnotationHistoryState) => void;
   onDimensionResolved?: (tabId: string, pageIndex: number, dimension: PageDimension) => void;
   onCurrentPageChange?: (page: number) => void;
   onAnnotationsSaved?: (pdfPath: string) => void;
 }
+
+type PdfNavigationMode = "outline" | "thumbnails" | "bookmarks";
+type AnnotationHistoryCommand = {
+  type: "undo" | "redo";
+  nonce: number;
+};
 
 type RenderSource = "prefetch" | "visible" | "refine";
 type RenderProfile = "preview" | "full";
@@ -48,6 +66,12 @@ interface TranslationPopupState {
   result: AiTranslationResult | null;
   isLoading: boolean;
   error: string | null;
+}
+
+interface ResolvedOutlineItem {
+  title: string;
+  page: number | null;
+  items: ResolvedOutlineItem[];
 }
 
 const DEFAULT_PERF_PROFILE: PerfProfile = {
@@ -162,6 +186,38 @@ function clearPdfViewerCache(pdfPath: string) {
   clearPdfDocumentCache(pdfPath);
 }
 
+async function resolveOutlineDestinationPage(document: PDFDocumentProxy, destination: string | Array<any> | null) {
+  if (!destination) {
+    return null;
+  }
+
+  try {
+    const resolved = typeof destination === "string"
+      ? await document.getDestination(destination)
+      : destination;
+
+    if (!resolved || resolved.length === 0 || !resolved[0]) {
+      return null;
+    }
+
+    return (await document.getPageIndex(resolved[0])) + 1;
+  } catch (error) {
+    console.error("Failed to resolve outline destination", error);
+    return null;
+  }
+}
+
+async function resolveOutlineItems(
+  document: PDFDocumentProxy,
+  items: Array<{ title: string; dest: string | Array<any> | null; items: Array<any> }>,
+): Promise<ResolvedOutlineItem[]> {
+  return Promise.all(items.map(async (item) => ({
+    title: item.title?.trim() || "Untitled section",
+    page: await resolveOutlineDestinationPage(document, item.dest),
+    items: await resolveOutlineItems(document, item.items ?? []),
+  })));
+}
+
 export function PdfViewer({
   tabId,
   pdfPath,
@@ -173,6 +229,17 @@ export function PdfViewer({
   currentPage,
   searchMatches,
   activeSearchIndex,
+  isNavigationOpen,
+  navigationMode,
+  onNavigationModeChange,
+  onNavigateToPage,
+  bookmarks,
+  onToggleBookmarkPage,
+  annotationsRefreshKey = 0,
+  annotationHistoryCommand,
+  annotationFocusTarget,
+  scrollContainerRef,
+  onAnnotationHistoryStateChange,
   onDimensionResolved,
   onCurrentPageChange,
   onAnnotationsSaved,
@@ -183,9 +250,14 @@ export function PdfViewer({
   const visiblePageRatiosRef = useRef<Map<number, number>>(new Map());
   const lastReportedPageRef = useRef(currentPage);
   const selectionControllersRef = useRef<Map<number, TextLayerSelectionController>>(new Map());
+  const annotationControllersRef = useRef<Map<number, AnnotationHistoryController>>(new Map());
   const activeSelectionPageRef = useRef<number | null>(null);
+  const lastAnnotationCommandRef = useRef<number>(0);
   const translationRequestIdRef = useRef(0);
   const [translationPopup, setTranslationPopup] = useState<TranslationPopupState | null>(null);
+  const [outlineItems, setOutlineItems] = useState<ResolvedOutlineItem[]>([]);
+  const [isOutlineLoading, setIsOutlineLoading] = useState(false);
+  const [activeFocusNonce, setActiveFocusNonce] = useState<number | null>(null);
 
   useEffect(() => {
     void loadPdfDocument(pdfPath).catch((error) => {
@@ -205,8 +277,51 @@ export function PdfViewer({
 
   useEffect(() => {
     selectionControllersRef.current.clear();
+    annotationControllersRef.current.clear();
     activeSelectionPageRef.current = null;
+    lastAnnotationCommandRef.current = 0;
     setTranslationPopup(null);
+    setOutlineItems([]);
+    onAnnotationHistoryStateChange?.({ canUndo: false, canRedo: false });
+  }, [pdfPath]);
+
+  useEffect(() => {
+    let isMounted = true;
+    setIsOutlineLoading(true);
+    setOutlineItems([]);
+
+    void loadPdfDocument(pdfPath)
+      .then(async (document) => {
+        const outline = await document.getOutline();
+        if (!isMounted) {
+          return;
+        }
+
+        if (!outline || outline.length === 0) {
+          setOutlineItems([]);
+          return;
+        }
+
+        const resolvedItems = await resolveOutlineItems(document, outline as Array<{ title: string; dest: string | Array<any> | null; items: Array<any> }>);
+        if (isMounted) {
+          setOutlineItems(resolvedItems);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load PDF outline", error);
+        if (isMounted) {
+          setOutlineItems([]);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsOutlineLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, [pdfPath]);
 
   const searchMatchesByPage = useMemo(() => {
@@ -243,6 +358,40 @@ export function PdfViewer({
   useEffect(() => {
     lastReportedPageRef.current = currentPage;
   }, [currentPage]);
+
+  useEffect(() => {
+    if (!annotationFocusTarget || !scrollContainerRef?.current) {
+      return;
+    }
+
+    const targetPageIndex = Math.max(0, annotationFocusTarget.page - 1);
+    const nextScrollTop = Math.max(
+      0,
+      (pageOffsets.offsets[targetPageIndex] ?? 0) + (annotationFocusTarget.y * scale) - (scrollContainerRef.current.clientHeight * 0.28),
+    );
+
+    const frameId = window.requestAnimationFrame(() => {
+      scrollContainerRef.current?.scrollTo({
+        top: nextScrollTop,
+        behavior: "smooth",
+      });
+      setActiveFocusNonce(annotationFocusTarget.nonce);
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [annotationFocusTarget, pageOffsets.offsets, scale, scrollContainerRef]);
+
+  useEffect(() => {
+    if (activeFocusNonce === null) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setActiveFocusNonce((current) => (current === activeFocusNonce ? null : current));
+    }, 1800);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [activeFocusNonce]);
 
   const handlePageVisibilityChange = useCallback((page: number, ratio: number) => {
     const nextRatios = visiblePageRatiosRef.current;
@@ -339,6 +488,52 @@ export function PdfViewer({
     }
   }, [hideTranslationPopup]);
 
+  const emitActiveAnnotationHistoryState = useCallback((pageIndexOverride?: number) => {
+    const targetPageIndex = typeof pageIndexOverride === "number"
+      ? pageIndexOverride
+      : Math.max(0, currentPage - 1);
+    const controller = annotationControllersRef.current.get(targetPageIndex);
+    onAnnotationHistoryStateChange?.(controller?.getHistoryState() ?? { canUndo: false, canRedo: false });
+  }, [currentPage, onAnnotationHistoryStateChange]);
+
+  const registerAnnotationHistoryController = useCallback((pageIndex: number, controller: AnnotationHistoryController | null) => {
+    if (controller) {
+      annotationControllersRef.current.set(pageIndex, controller);
+    } else {
+      annotationControllersRef.current.delete(pageIndex);
+    }
+
+    emitActiveAnnotationHistoryState(pageIndex === Math.max(0, currentPage - 1) ? pageIndex : undefined);
+  }, [currentPage, emitActiveAnnotationHistoryState]);
+
+  const handleAnnotationHistoryStateChange = useCallback((pageIndex: number, state: AnnotationHistoryState) => {
+    if (pageIndex === Math.max(0, currentPage - 1)) {
+      onAnnotationHistoryStateChange?.(state);
+    }
+  }, [currentPage, onAnnotationHistoryStateChange]);
+
+  useEffect(() => {
+    emitActiveAnnotationHistoryState();
+  }, [currentPage, emitActiveAnnotationHistoryState]);
+
+  useEffect(() => {
+    if (!annotationHistoryCommand || annotationHistoryCommand.nonce === lastAnnotationCommandRef.current) {
+      return;
+    }
+
+    lastAnnotationCommandRef.current = annotationHistoryCommand.nonce;
+    const controller = annotationControllersRef.current.get(Math.max(0, currentPage - 1));
+    if (!controller) {
+      return;
+    }
+
+    if (annotationHistoryCommand.type === "undo") {
+      controller.undo();
+    } else {
+      controller.redo();
+    }
+  }, [annotationHistoryCommand, currentPage]);
+
   const handleSelectionRequest = useCallback(async (pageIndex: number, snapshot: TextLayerSelectionSnapshot) => {
     const selectedText = snapshot.selectedText.trim();
     if (!selectedText) {
@@ -346,6 +541,30 @@ export function PdfViewer({
     }
 
     activeSelectionPageRef.current = pageIndex;
+
+    if (activeTool === "highlight") {
+      try {
+        const rects = await invoke<SearchRect[]>("get_text_rects", {
+          path: pdfPath,
+          pageIndex,
+          selection: {
+            left: snapshot.selection.x,
+            top: snapshot.selection.y,
+            right: snapshot.selection.x + snapshot.selection.width,
+            bottom: snapshot.selection.y + snapshot.selection.height,
+          },
+        });
+
+        annotationControllersRef.current.get(pageIndex)?.addTextHighlightRects(rects);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        hideTranslationPopup();
+      } catch (error) {
+        console.error("Failed to create text highlight", error);
+      }
+      return;
+    }
+
     const translateEngine = (settings.aiTranslateEngine || "google").trim().toLowerCase();
     const aiIsConfigured = translateEngine !== "llm"
       || Boolean(settings.aiApiKey.trim() && settings.aiCompletionUrl.trim() && settings.aiModel.trim());
@@ -416,6 +635,9 @@ export function PdfViewer({
     settings.aiModel,
     settings.aiTranslateEngine,
     settings.aiTranslateTargetLanguage,
+    activeTool,
+    hideTranslationPopup,
+    pdfPath,
     t,
   ]);
 
@@ -540,53 +762,126 @@ export function PdfViewer({
   }
 
   return (
-    <div className="relative min-w-full" style={{ height: pageOffsets.totalHeight }}>
-        {mountedPageIndices.map((pageIndex) => (
-        <MemoPageRender
-          key={`${pdfPath}::page-${pageIndex}`}
-          tabId={tabId}
-          pdfPath={pdfPath}
-          pageIndex={pageIndex}
-          dimension={pageDimensions[pageIndex]}
-          scale={scale}
-          isColorInverted={isColorInverted}
-          activeTool={activeTool}
-          shouldPrefetch={prefetchPages.has(pageIndex)}
-          shouldLoadText={textLoadPages.has(pageIndex)}
-          pageSearchMatches={searchMatchesByPage.get(pageIndex) ?? []}
-          activeSearchIndex={activeSearchIndex}
-          topOffset={pageOffsets.offsets[pageIndex] ?? 0}
-          onDimensionResolved={onDimensionResolved}
-          onSelectionRequest={handleSelectionRequest}
-          registerSelectionController={registerSelectionController}
-          onVisibilityRatioChange={handlePageVisibilityChange}
-          onAnnotationsSaved={onAnnotationsSaved}
-        />
-      ))}
-      {translationPopup && (
-        <div
-          className="fixed z-[70] w-[min(360px,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-[0_18px_45px_-18px_rgba(0,0,0,0.28)] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/95"
-          style={{
-            left: translationPopup.x,
-            top: translationPopup.y,
-          }}
-          onMouseDown={(event) => event.stopPropagation()}
-        >
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-300">
-            {t("textLayer.translation.title", { language: settings.aiTranslateTargetLanguage || "zh-CN" })}
+    <div className="flex min-h-full min-w-full items-start gap-4 px-4 pb-6 pt-4">
+      {isNavigationOpen && (
+        <aside className="sticky top-4 z-20 h-[calc(100vh-9rem)] w-64 shrink-0 overflow-hidden rounded-2xl border border-zinc-200 bg-white/95 shadow-[0_18px_45px_-18px_rgba(0,0,0,0.18)] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/95">
+          <div className="flex items-center gap-1 border-b border-zinc-200 p-2 dark:border-zinc-800">
+            <button
+              type="button"
+              onClick={() => onNavigationModeChange?.("outline")}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition-colors ${
+                navigationMode === "outline"
+                  ? "bg-indigo-600 text-white dark:bg-indigo-700"
+                  : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+              }`}
+            >
+              <BookOpenText size={14} />
+              {t("pdfViewer.navigation.outline")}
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigationModeChange?.("thumbnails")}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition-colors ${
+                navigationMode === "thumbnails"
+                  ? "bg-indigo-600 text-white dark:bg-indigo-700"
+                  : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+              }`}
+            >
+              <Images size={14} />
+              {t("pdfViewer.navigation.pages")}
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigationModeChange?.("bookmarks")}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition-colors ${
+                navigationMode === "bookmarks"
+                  ? "bg-indigo-600 text-white dark:bg-indigo-700"
+                  : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+              }`}
+            >
+              <Bookmark size={14} className={navigationMode === "bookmarks" ? "fill-current" : undefined} />
+              {t("pdfViewer.navigation.bookmarks")}
+            </button>
           </div>
-          <div className="mt-1 text-xs leading-relaxed text-zinc-500 line-clamp-3 dark:text-zinc-400">
-            {translationPopup.selectedText}
+          <div className="h-[calc(100%-57px)] overflow-y-auto p-3">
+            {navigationMode === "outline" ? (
+              <OutlinePanel
+                items={outlineItems}
+                isLoading={isOutlineLoading}
+                currentPage={currentPage}
+                onNavigateToPage={onNavigateToPage}
+              />
+            ) : navigationMode === "thumbnails" ? (
+              <ThumbnailPanel
+                pdfPath={pdfPath}
+                totalPages={totalPages}
+                currentPage={currentPage}
+                onNavigateToPage={onNavigateToPage}
+              />
+            ) : (
+              <BookmarkPanel
+                bookmarks={bookmarks}
+                currentPage={currentPage}
+                onNavigateToPage={onNavigateToPage}
+                onToggleBookmarkPage={onToggleBookmarkPage}
+              />
+            )}
           </div>
-          <div className="mt-2 text-sm leading-relaxed text-zinc-700 whitespace-pre-wrap dark:text-zinc-200">
-            {translationPopup.isLoading
-              ? t("textLayer.translation.loading")
-              : translationPopup.error
-                ? translationPopup.error
-                : translationPopup.result?.translation}
-          </div>
-        </div>
+        </aside>
       )}
+      <div className="relative min-w-0 flex-1" style={{ height: pageOffsets.totalHeight }}>
+          {mountedPageIndices.map((pageIndex) => (
+          <MemoPageRender
+            key={`${pdfPath}::page-${pageIndex}`}
+            tabId={tabId}
+            pdfPath={pdfPath}
+            pageIndex={pageIndex}
+            dimension={pageDimensions[pageIndex]}
+            scale={scale}
+            isColorInverted={isColorInverted}
+            activeTool={activeTool}
+            shouldPrefetch={prefetchPages.has(pageIndex)}
+            shouldLoadText={textLoadPages.has(pageIndex)}
+            pageSearchMatches={searchMatchesByPage.get(pageIndex) ?? []}
+            activeSearchIndex={activeSearchIndex}
+            topOffset={pageOffsets.offsets[pageIndex] ?? 0}
+            onDimensionResolved={onDimensionResolved}
+            onSelectionRequest={handleSelectionRequest}
+            registerSelectionController={registerSelectionController}
+            registerHistoryController={registerAnnotationHistoryController}
+            annotationsRefreshKey={annotationsRefreshKey}
+            focusTarget={annotationFocusTarget && annotationFocusTarget.page === pageIndex + 1 ? annotationFocusTarget : null}
+            isFocusActive={activeFocusNonce === annotationFocusTarget?.nonce}
+            onAnnotationHistoryStateChange={handleAnnotationHistoryStateChange}
+            onVisibilityRatioChange={handlePageVisibilityChange}
+            onAnnotationsSaved={onAnnotationsSaved}
+          />
+        ))}
+        {translationPopup && (
+          <div
+            className="fixed z-[70] w-[min(360px,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-zinc-200 bg-white/95 p-3 shadow-[0_18px_45px_-18px_rgba(0,0,0,0.28)] backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-950/95"
+            style={{
+              left: translationPopup.x,
+              top: translationPopup.y,
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-300">
+              {t("textLayer.translation.title", { language: settings.aiTranslateTargetLanguage || "zh-CN" })}
+            </div>
+            <div className="mt-1 text-xs leading-relaxed text-zinc-500 line-clamp-3 dark:text-zinc-400">
+              {translationPopup.selectedText}
+            </div>
+            <div className="mt-2 text-sm leading-relaxed text-zinc-700 whitespace-pre-wrap dark:text-zinc-200">
+              {translationPopup.isLoading
+                ? t("textLayer.translation.loading")
+                : translationPopup.error
+                  ? translationPopup.error
+                  : translationPopup.result?.translation}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -607,6 +902,11 @@ interface PageRenderProps {
   onDimensionResolved?: (tabId: string, pageIndex: number, dimension: PageDimension) => void;
   onSelectionRequest?: (pageIndex: number, snapshot: TextLayerSelectionSnapshot) => void;
   registerSelectionController?: (pageIndex: number, controller: TextLayerSelectionController | null) => void;
+  registerHistoryController?: (pageIndex: number, controller: AnnotationHistoryController | null) => void;
+  annotationsRefreshKey?: number;
+  focusTarget?: AnnotationFocusTarget | null;
+  isFocusActive?: boolean;
+  onAnnotationHistoryStateChange?: (pageIndex: number, state: AnnotationHistoryState) => void;
   onVisibilityRatioChange?: (page: number, ratio: number) => void;
   onAnnotationsSaved?: (pdfPath: string) => void;
 }
@@ -627,6 +927,11 @@ function PageRender({
   onDimensionResolved,
   onSelectionRequest,
   registerSelectionController,
+  registerHistoryController,
+  annotationsRefreshKey = 0,
+  focusTarget,
+  isFocusActive = false,
+  onAnnotationHistoryStateChange,
   onVisibilityRatioChange,
   onAnnotationsSaved,
 }: PageRenderProps) {
@@ -894,6 +1199,19 @@ function PageRender({
           </div>
         )}
 
+        {focusTarget && isFocusActive ? (
+          <div
+            className="pointer-events-none absolute rounded-lg border-2 border-indigo-500/80 bg-indigo-300/18 shadow-[0_0_0_8px_rgba(99,102,241,0.08)] animate-pulse"
+            style={{
+              left: focusTarget.x * scale,
+              top: focusTarget.y * scale,
+              width: Math.max(24, focusTarget.width * scale),
+              height: Math.max(18, focusTarget.height * scale),
+              zIndex: 6,
+            }}
+          />
+        ) : null}
+
         {shouldMountTextLayer && (
           <TextLayer
             pdfPath={pdfPath}
@@ -912,12 +1230,15 @@ function PageRender({
           <AnnotationLayer
             pdfPath={pdfPath}
             pageIndex={pageIndex}
+            refreshKey={annotationsRefreshKey}
             width={width}
             height={height}
             scale={scale}
             isColorInverted={isColorInverted}
             activeTool={activeTool}
             onAnnotationsSaved={onAnnotationsSaved}
+            registerHistoryController={registerHistoryController}
+            onHistoryStateChange={onAnnotationHistoryStateChange}
           />
         )}
       </div>
@@ -926,3 +1247,370 @@ function PageRender({
 }
 
 const MemoPageRender = memo(PageRender);
+
+interface OutlinePanelProps {
+  items: ResolvedOutlineItem[];
+  isLoading: boolean;
+  currentPage: number;
+  onNavigateToPage?: (page: number) => void;
+}
+
+function OutlinePanel({
+  items,
+  isLoading,
+  currentPage,
+  onNavigateToPage,
+}: OutlinePanelProps) {
+  const { t } = useI18n();
+
+  if (isLoading) {
+    return (
+      <div className="space-y-2">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <div
+            key={`outline-skeleton-${index}`}
+            className="h-9 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-900"
+          />
+        ))}
+      </div>
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="flex min-h-40 flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-200 px-4 text-center dark:border-zinc-800">
+        <FileText size={18} className="text-zinc-400 dark:text-zinc-500" />
+        <p className="mt-3 text-sm font-medium text-zinc-600 dark:text-zinc-300">
+          {t("pdfViewer.navigation.outlineEmpty")}
+        </p>
+        <p className="mt-1 text-xs leading-relaxed text-zinc-400 dark:text-zinc-500">
+          {t("pdfViewer.navigation.outlineHint")}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      {items.map((item, index) => (
+        <OutlineTreeItem
+          key={`${item.title}-${item.page ?? "none"}-${index}`}
+          item={item}
+          depth={0}
+          currentPage={currentPage}
+          onNavigateToPage={onNavigateToPage}
+        />
+      ))}
+    </div>
+  );
+}
+
+interface OutlineTreeItemProps {
+  item: ResolvedOutlineItem;
+  depth: number;
+  currentPage: number;
+  onNavigateToPage?: (page: number) => void;
+}
+
+function OutlineTreeItem({
+  item,
+  depth,
+  currentPage,
+  onNavigateToPage,
+}: OutlineTreeItemProps) {
+  const isActive = typeof item.page === "number" && item.page === currentPage;
+  const isAncestorActive = typeof item.page === "number"
+    ? item.page <= currentPage && item.items.some((child) => containsCurrentPage(child, currentPage))
+    : item.items.some((child) => containsCurrentPage(child, currentPage));
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => {
+          if (item.page) {
+            onNavigateToPage?.(item.page);
+          }
+        }}
+        disabled={!item.page}
+        className={`flex w-full items-start gap-2 rounded-xl px-3 py-2 text-left transition-colors ${
+          isActive
+            ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-200"
+            : isAncestorActive
+              ? "bg-zinc-100 text-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+              : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 disabled:cursor-default disabled:opacity-60 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+        }`}
+        style={{ paddingLeft: `${12 + (depth * 14)}px` }}
+      >
+        <span className="min-w-0 flex-1 text-xs font-medium leading-relaxed">{item.title}</span>
+        {item.page && (
+          <span className="shrink-0 rounded-md bg-white/70 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-400 dark:bg-zinc-950/70 dark:text-zinc-500">
+            {item.page}
+          </span>
+        )}
+      </button>
+      {item.items.length > 0 && (
+        <div className="mt-1 space-y-1">
+          {item.items.map((child, index) => (
+            <OutlineTreeItem
+              key={`${child.title}-${child.page ?? "none"}-${index}`}
+              item={child}
+              depth={depth + 1}
+              currentPage={currentPage}
+              onNavigateToPage={onNavigateToPage}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function containsCurrentPage(item: ResolvedOutlineItem, currentPage: number): boolean {
+  if (item.page === currentPage) {
+    return true;
+  }
+
+  return item.items.some((child) => containsCurrentPage(child, currentPage));
+}
+
+interface ThumbnailPanelProps {
+  pdfPath: string;
+  totalPages: number;
+  currentPage: number;
+  onNavigateToPage?: (page: number) => void;
+}
+
+function ThumbnailPanel({
+  pdfPath,
+  totalPages,
+  currentPage,
+  onNavigateToPage,
+}: ThumbnailPanelProps) {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: totalPages }, (_, pageIndex) => (
+        <ThumbnailPreview
+          key={`${pdfPath}-thumbnail-${pageIndex}`}
+          pdfPath={pdfPath}
+          pageIndex={pageIndex}
+          isActive={currentPage === pageIndex + 1}
+          onClick={() => onNavigateToPage?.(pageIndex + 1)}
+        />
+      ))}
+    </div>
+  );
+}
+
+interface ThumbnailPreviewProps {
+  pdfPath: string;
+  pageIndex: number;
+  isActive: boolean;
+  onClick: () => void;
+}
+
+function ThumbnailPreview({
+  pdfPath,
+  pageIndex,
+  isActive,
+  onClick,
+}: ThumbnailPreviewProps) {
+  const { t } = useI18n();
+  const containerRef = useRef<HTMLButtonElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const renderTaskRef = useRef<RenderTask | null>(null);
+  const [isVisible, setIsVisible] = useState(pageIndex < 6);
+  const [hasRendered, setHasRendered] = useState(false);
+  const [thumbnailHeight, setThumbnailHeight] = useState(192);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry?.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "240px 0px 240px 0px", threshold: 0.01 }
+    );
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible) {
+      return;
+    }
+
+    let isMounted = true;
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    void loadPdfPage(pdfPath, pageIndex)
+      .then((page) => {
+        const baseViewport = page.getViewport({ scale: 1 });
+        const previewWidth = 176;
+        const previewScale = previewWidth / Math.max(baseViewport.width, 1);
+        const viewport = page.getViewport({ scale: previewScale });
+        const context = canvas.getContext("2d", { alpha: false });
+        if (!context) {
+          return;
+        }
+
+        setThumbnailHeight(Math.max(120, Math.round(viewport.height)));
+
+        canvas.width = Math.max(1, Math.round(viewport.width));
+        canvas.height = Math.max(1, Math.round(viewport.height));
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+
+        renderTaskRef.current?.cancel();
+        const renderTask = page.render({
+          canvas,
+          canvasContext: context,
+          viewport,
+        });
+        renderTaskRef.current = renderTask;
+
+        return renderTask.promise.then(() => {
+          if (!isMounted) {
+            return;
+          }
+          setHasRendered(true);
+        });
+      })
+      .catch((error) => {
+        if (!isRenderCancelled(error)) {
+          console.error(`Failed to render thumbnail for page ${pageIndex + 1}`, error);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+      renderTaskRef.current?.cancel();
+    };
+  }, [isVisible, pageIndex, pdfPath]);
+
+  return (
+    <button
+      ref={containerRef}
+      type="button"
+      onClick={onClick}
+      className={`group flex w-full flex-col rounded-2xl border p-2 text-left transition-all ${
+        isActive
+          ? "border-indigo-300 bg-indigo-50 shadow-[0_12px_28px_-18px_rgba(79,70,229,0.55)] dark:border-indigo-800 dark:bg-indigo-950/50"
+          : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
+      }`}
+    >
+      <div className="mb-2 flex items-center justify-between px-1">
+        <span className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${
+          isActive
+            ? "text-indigo-600 dark:text-indigo-300"
+            : "text-zinc-400 dark:text-zinc-500"
+        }`}>
+          {t("pdfViewer.pageLabel", { page: pageIndex + 1 })}
+        </span>
+      </div>
+      <div
+        className="relative overflow-hidden rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900"
+        style={{ minHeight: thumbnailHeight }}
+      >
+        {!hasRendered && (
+          <div className="absolute inset-0 animate-pulse bg-gradient-to-br from-zinc-100 to-zinc-200 dark:from-zinc-900 dark:to-zinc-800" />
+        )}
+        <canvas
+          ref={canvasRef}
+          aria-label={t("pdfViewer.pageAlt", { page: pageIndex + 1 })}
+          className={`relative mx-auto block max-w-full transition-opacity ${hasRendered ? "opacity-100" : "opacity-0"}`}
+        />
+      </div>
+    </button>
+  );
+}
+
+interface BookmarkPanelProps {
+  bookmarks: PageBookmark[];
+  currentPage: number;
+  onNavigateToPage?: (page: number) => void;
+  onToggleBookmarkPage?: (page: number) => void;
+}
+
+function BookmarkPanel({
+  bookmarks,
+  currentPage,
+  onNavigateToPage,
+  onToggleBookmarkPage,
+}: BookmarkPanelProps) {
+  const { t } = useI18n();
+
+  if (bookmarks.length === 0) {
+    return (
+      <div className="flex min-h-40 flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-200 px-4 text-center dark:border-zinc-800">
+        <Bookmark size={18} className="text-zinc-400 dark:text-zinc-500" />
+        <p className="mt-3 text-sm font-medium text-zinc-600 dark:text-zinc-300">
+          {t("pdfViewer.navigation.bookmarksEmpty")}
+        </p>
+        <p className="mt-1 text-xs leading-relaxed text-zinc-400 dark:text-zinc-500">
+          {t("pdfViewer.navigation.bookmarksHint")}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {bookmarks.map((bookmark) => {
+        const isActive = bookmark.page === currentPage;
+        return (
+          <div
+            key={`${bookmark.page}-${bookmark.createdAt}`}
+            className={`flex items-center gap-2 rounded-2xl border p-2 ${
+              isActive
+                ? "border-indigo-200 bg-indigo-50 dark:border-indigo-900/70 dark:bg-indigo-950/30"
+                : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950"
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => onNavigateToPage?.(bookmark.page)}
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2 py-2 text-left transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-900"
+            >
+              <div className={`rounded-lg p-1 ${
+                isActive
+                  ? "bg-indigo-100 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-300"
+                  : "bg-amber-50 text-amber-600 dark:bg-amber-950/30 dark:text-amber-300"
+              }`}>
+                <Bookmark size={13} className="fill-current" />
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-medium text-zinc-700 dark:text-zinc-200">
+                  {t("pdfViewer.pageLabel", { page: bookmark.page })}
+                </div>
+                <div className="truncate text-[11px] text-zinc-400 dark:text-zinc-500">
+                  {new Date(bookmark.createdAt).toLocaleString()}
+                </div>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => onToggleBookmarkPage?.(bookmark.page)}
+              className="rounded-lg p-2 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-rose-500 dark:text-zinc-500 dark:hover:bg-zinc-900 dark:hover:text-rose-300"
+              title={t("toolbar.bookmarks.remove")}
+            >
+              <Bookmark size={13} />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

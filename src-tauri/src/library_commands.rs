@@ -1,5 +1,6 @@
 use crate::metadata_fetch::{
-    enrich_metadata_with_remote_providers, refresh_item_metadata_in_db, strip_invalid_metadata_url,
+    enrich_metadata_with_remote_providers, normalize_arxiv_id, normalize_doi,
+    refresh_item_metadata_in_db, strip_invalid_metadata_url,
 };
 /// Module: src-tauri/src/library_commands.rs
 /// Purpose: Encapsulates all general file/directory manipulation commands.
@@ -13,6 +14,7 @@ use crate::pdf_handlers::{extract_document_text_from_path, extract_pdf_metadata}
 
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -28,12 +30,57 @@ struct LibraryItemMetadataUpdatedPayload {
     item_id: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdentifierImportResult {
+    item: LibraryItem,
+    created: bool,
+    matched_by: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReferenceImportResult {
+    items: Vec<LibraryItem>,
+    created_count: usize,
+    existing_count: usize,
+    source_format: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeDuplicateItemsResult {
+    item: LibraryItem,
+    survivor_item_id: String,
+    merged_item_ids: Vec<String>,
+}
+
 #[derive(Clone)]
 struct DigestCandidate {
     page: u16,
     text: String,
     category: &'static str,
     reason: &'static str,
+}
+
+#[derive(Default)]
+struct ParsedReferenceItem {
+    item_type: String,
+    title: String,
+    authors: String,
+    year: String,
+    abstract_text: String,
+    doi: String,
+    arxiv_id: String,
+    publication: String,
+    volume: String,
+    issue: String,
+    pages: String,
+    publisher: String,
+    isbn: String,
+    url: String,
+    language: String,
+    tags: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -206,6 +253,22 @@ fn file_timestamp_string(path: &Path) -> Option<String> {
 
 fn fallback_item_timestamp(path: &Path) -> String {
     file_timestamp_string(path).unwrap_or_else(now_unix_timestamp_string)
+}
+
+fn has_meaningful_metadata(meta: &ParsedPdfMetadata) -> bool {
+    [
+        meta.title.as_deref(),
+        meta.authors.as_deref(),
+        meta.year.as_deref(),
+        meta.r#abstract.as_deref(),
+        meta.doi.as_deref(),
+        meta.arxiv_id.as_deref(),
+        meta.publication.as_deref(),
+        meta.url.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| !value.trim().is_empty())
 }
 
 pub fn is_path_within(base: &Path, candidate: &Path) -> bool {
@@ -474,6 +537,740 @@ fn build_library_item_from_parsed_metadata(path: &Path, parsed: ParsedPdfMetadat
     }
 }
 
+fn build_remote_library_item(
+    folder_path: &str,
+    original_identifier: &str,
+    parsed: ParsedPdfMetadata,
+) -> LibraryItem {
+    let normalized_doi = parsed.doi.as_deref().and_then(normalize_doi);
+    let normalized_arxiv = parsed.arxiv_id.as_deref().and_then(normalize_arxiv_id);
+    let identifier = normalized_doi
+        .clone()
+        .map(|value| format!("doi:{}", value))
+        .or_else(|| normalized_arxiv.clone().map(|value| format!("arxiv:{}", value)))
+        .unwrap_or_else(|| {
+            format!(
+                "remote:{}:{}",
+                now_unix_timestamp_string(),
+                sanitize_file_name(original_identifier)
+            )
+        });
+
+    let title = parsed
+        .title
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| original_identifier.trim().to_string());
+    let authors = parsed
+        .authors
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "—".to_string());
+    let year = parsed
+        .year
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "—".to_string());
+    let timestamp = now_unix_timestamp_string();
+
+    LibraryItem {
+        id: identifier,
+        item_type: "Journal Article".to_string(),
+        title,
+        authors,
+        year,
+        r#abstract: parsed.r#abstract.unwrap_or_default(),
+        doi: normalized_doi.unwrap_or_default(),
+        arxiv_id: normalized_arxiv.unwrap_or_default(),
+        publication: parsed.publication.unwrap_or_default(),
+        volume: parsed.volume.unwrap_or_default(),
+        issue: parsed.issue.unwrap_or_default(),
+        pages: parsed.pages.unwrap_or_default(),
+        publisher: parsed.publisher.unwrap_or_default(),
+        isbn: parsed.isbn.unwrap_or_default(),
+        url: parsed.url.unwrap_or_default(),
+        language: parsed.language.unwrap_or_default(),
+        date_added: timestamp.clone(),
+        date_modified: timestamp,
+        folder_path: folder_path.to_string(),
+        tags: Vec::new(),
+        attachments: Vec::new(),
+    }
+}
+
+fn normalize_reference_tags(tags: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+
+    for tag in tags {
+        let trimmed = tag.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let key = trimmed.to_lowercase();
+        if seen.insert(key) {
+            normalized.push(trimmed.to_string());
+        }
+    }
+
+    normalized
+}
+
+fn replace_item_tags_in_db(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+    tags: &[String],
+) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM item_tags WHERE item_id = ?1",
+        rusqlite::params![item_id],
+    )
+    .map_err(|error| format!("Failed to clear item tags: {}", error))?;
+
+    for tag in tags {
+        let trimmed = tag.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        conn.execute(
+            "INSERT OR IGNORE INTO item_tags (item_id, tag) VALUES (?1, ?2)",
+            rusqlite::params![item_id, trimmed],
+        )
+        .map_err(|error| format!("Failed to insert item tag: {}", error))?;
+        ensure_tag_color_for_tag(conn, trimmed)?;
+    }
+
+    Ok(())
+}
+
+fn split_reference_keywords(raw: &str) -> Vec<String> {
+    raw.split(|ch| matches!(ch, ';' | ',' | '\n'))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn normalize_reference_whitespace(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn strip_wrapping_delimiters(raw: &str) -> String {
+    let mut value = raw.trim().to_string();
+
+    loop {
+        let trimmed = value.trim();
+        let next = if trimmed.starts_with('{') && trimmed.ends_with('}') && trimmed.len() >= 2 {
+            Some(trimmed[1..trimmed.len() - 1].to_string())
+        } else if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+            Some(trimmed[1..trimmed.len() - 1].to_string())
+        } else {
+            None
+        };
+
+        let Some(candidate) = next else {
+            return normalize_reference_whitespace(trimmed);
+        };
+
+        value = candidate;
+    }
+}
+
+fn split_top_level_csv(raw: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut brace_depth = 0i32;
+    let mut paren_depth = 0i32;
+    let mut in_quotes = false;
+    let mut escaped = false;
+
+    for ch in raw.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+
+        if ch == '\\' {
+            current.push(ch);
+            escaped = true;
+            continue;
+        }
+
+        if ch == '"' {
+            in_quotes = !in_quotes;
+            current.push(ch);
+            continue;
+        }
+
+        if !in_quotes {
+            match ch {
+                '{' => brace_depth += 1,
+                '}' => brace_depth -= 1,
+                '(' => paren_depth += 1,
+                ')' => paren_depth -= 1,
+                ',' if brace_depth == 0 && paren_depth == 0 => {
+                    let trimmed = current.trim();
+                    if !trimmed.is_empty() {
+                        parts.push(trimmed.to_string());
+                    }
+                    current.clear();
+                    continue;
+                }
+                _ => {}
+            }
+        }
+
+        current.push(ch);
+    }
+
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        parts.push(trimmed.to_string());
+    }
+
+    parts
+}
+
+fn map_bibtex_item_type(entry_type: &str) -> String {
+    match entry_type.trim().to_lowercase().as_str() {
+        "book" => "Book".to_string(),
+        "inproceedings" | "conference" | "proceedings" => "Conference Paper".to_string(),
+        "phdthesis" | "mastersthesis" => "Thesis".to_string(),
+        "techreport" => "Report".to_string(),
+        _ => "Journal Article".to_string(),
+    }
+}
+
+fn parse_bibtex_references(content: &str) -> Result<Vec<ParsedReferenceItem>, String> {
+    let chars = content.chars().collect::<Vec<_>>();
+    let mut index = 0usize;
+    let mut items = Vec::new();
+
+    while index < chars.len() {
+        if chars[index] != '@' {
+            index += 1;
+            continue;
+        }
+
+        index += 1;
+        let entry_type_start = index;
+        while index < chars.len() && chars[index].is_ascii_alphabetic() {
+            index += 1;
+        }
+
+        let entry_type = chars[entry_type_start..index]
+            .iter()
+            .collect::<String>()
+            .trim()
+            .to_string();
+        while index < chars.len() && chars[index].is_whitespace() {
+            index += 1;
+        }
+
+        if index >= chars.len() || !matches!(chars[index], '{' | '(') {
+            return Err("Invalid BibTeX entry".to_string());
+        }
+
+        let opening = chars[index];
+        let closing = if opening == '{' { '}' } else { ')' };
+        let body_start = index + 1;
+        let mut brace_depth = if opening == '{' { 1i32 } else { 0i32 };
+        let mut paren_depth = if opening == '(' { 1i32 } else { 0i32 };
+        let mut in_quotes = false;
+        let mut escaped = false;
+        index += 1;
+
+        while index < chars.len() {
+            let ch = chars[index];
+            if escaped {
+                escaped = false;
+                index += 1;
+                continue;
+            }
+
+            if ch == '\\' {
+                escaped = true;
+                index += 1;
+                continue;
+            }
+
+            if ch == '"' {
+                in_quotes = !in_quotes;
+                index += 1;
+                continue;
+            }
+
+            if !in_quotes {
+                if ch == '{' {
+                    brace_depth += 1;
+                } else if ch == '}' {
+                    brace_depth -= 1;
+                    if opening == '{' && brace_depth == 0 {
+                        break;
+                    }
+                } else if ch == '(' {
+                    paren_depth += 1;
+                } else if ch == ')' {
+                    paren_depth -= 1;
+                    if opening == '(' && paren_depth == 0 {
+                        break;
+                    }
+                }
+            }
+
+            index += 1;
+        }
+
+        if index >= chars.len() || chars[index] != closing {
+            return Err("Unterminated BibTeX entry".to_string());
+        }
+
+        let body = chars[body_start..index].iter().collect::<String>();
+        index += 1;
+
+        let parts = split_top_level_csv(&body);
+        if parts.len() < 2 {
+            continue;
+        }
+
+        let mut item = ParsedReferenceItem {
+            item_type: map_bibtex_item_type(&entry_type),
+            ..ParsedReferenceItem::default()
+        };
+
+        for field in parts.iter().skip(1) {
+            let Some((name, raw_value)) = field.split_once('=') else {
+                continue;
+            };
+            let key = name.trim().to_lowercase();
+            let value = strip_wrapping_delimiters(raw_value);
+
+            match key.as_str() {
+                "title" => item.title = value,
+                "author" => item.authors = value.replace(" and ", ", "),
+                "year" => item.year = value.chars().take(4).collect(),
+                "abstract" => item.abstract_text = value,
+                "doi" => item.doi = value,
+                "journal" | "booktitle" => item.publication = value,
+                "volume" => item.volume = value,
+                "number" => item.issue = value,
+                "pages" => item.pages = value.replace("--", "-"),
+                "publisher" => item.publisher = value,
+                "isbn" => item.isbn = value,
+                "url" => item.url = value,
+                "language" => item.language = value,
+                "keywords" => item.tags.extend(split_reference_keywords(&value)),
+                "eprint" | "arxiv" => {
+                    if item.arxiv_id.is_empty() {
+                        item.arxiv_id = value;
+                    }
+                }
+                "eprinttype" | "archiveprefix" => {}
+                _ => {}
+            }
+        }
+
+        item.tags = normalize_reference_tags(item.tags);
+        if !item.title.trim().is_empty() {
+            items.push(item);
+        }
+    }
+
+    if items.is_empty() {
+        return Err("No BibTeX references were found".to_string());
+    }
+
+    Ok(items)
+}
+
+fn map_ris_item_type(value: &str) -> String {
+    match value.trim().to_uppercase().as_str() {
+        "BOOK" | "EBOOK" => "Book".to_string(),
+        "THES" => "Thesis".to_string(),
+        "RPRT" | "REPORT" => "Report".to_string(),
+        "CONF" | "CPAPER" | "CHAP" => "Conference Paper".to_string(),
+        _ => "Journal Article".to_string(),
+    }
+}
+
+fn parse_ris_references(content: &str) -> Result<Vec<ParsedReferenceItem>, String> {
+    let mut items = Vec::new();
+    let mut current = ParsedReferenceItem::default();
+    let mut authors = Vec::new();
+    let mut keywords = Vec::new();
+    let mut start_page = String::new();
+    let mut end_page = String::new();
+    let mut last_tag: Option<String> = None;
+
+    let finalize_entry = |items: &mut Vec<ParsedReferenceItem>,
+                          current: &mut ParsedReferenceItem,
+                          authors: &mut Vec<String>,
+                          keywords: &mut Vec<String>,
+                          start_page: &mut String,
+                          end_page: &mut String| {
+        if current.title.trim().is_empty() {
+            *current = ParsedReferenceItem::default();
+            authors.clear();
+            keywords.clear();
+            start_page.clear();
+            end_page.clear();
+            return;
+        }
+
+        current.authors = authors.join(", ");
+        current.tags = normalize_reference_tags(std::mem::take(keywords));
+        current.pages = if !start_page.is_empty() && !end_page.is_empty() {
+            format!("{}-{}", start_page.trim(), end_page.trim())
+        } else if !start_page.is_empty() {
+            start_page.trim().to_string()
+        } else {
+            current.pages.trim().to_string()
+        };
+        items.push(std::mem::take(current));
+        authors.clear();
+        start_page.clear();
+        end_page.clear();
+    };
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim_end();
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let trimmed_start = raw_line.trim_start();
+        if raw_line.starts_with(' ') || raw_line.starts_with('\t') {
+            if let Some(tag) = &last_tag {
+                let extra = normalize_reference_whitespace(trimmed_start);
+                if extra.is_empty() {
+                    continue;
+                }
+
+                match tag.as_str() {
+                    "AB" | "N2" => {
+                        current.abstract_text = format!("{} {}", current.abstract_text, extra)
+                            .trim()
+                            .to_string();
+                    }
+                    "TI" | "T1" => {
+                        current.title = format!("{} {}", current.title, extra).trim().to_string();
+                    }
+                    "JO" | "JF" | "T2" => {
+                        current.publication =
+                            format!("{} {}", current.publication, extra).trim().to_string();
+                    }
+                    "KW" => keywords.push(extra),
+                    _ => {}
+                }
+            }
+            continue;
+        }
+
+        let Some((tag, raw_value)) = line.split_once(" - ") else {
+            continue;
+        };
+        let key = tag.trim().to_uppercase();
+        let value = normalize_reference_whitespace(raw_value);
+        last_tag = Some(key.clone());
+
+        match key.as_str() {
+            "TY" => current.item_type = map_ris_item_type(&value),
+            "TI" | "T1" if current.title.is_empty() => current.title = value,
+            "AU" | "A1" => authors.push(value),
+            "PY" | "Y1" | "DA" if current.year.is_empty() => {
+                current.year = value.chars().filter(|ch| ch.is_ascii_digit()).take(4).collect();
+            }
+            "JO" | "JF" | "T2" if current.publication.is_empty() => current.publication = value,
+            "VL" => current.volume = value,
+            "IS" => current.issue = value,
+            "SP" => start_page = value,
+            "EP" => end_page = value,
+            "PB" => current.publisher = value,
+            "DO" => current.doi = value,
+            "UR" | "L1" => current.url = value,
+            "AB" | "N2" => current.abstract_text = value,
+            "KW" => keywords.push(value),
+            "LA" => current.language = value,
+            "SN" => current.isbn = value,
+            "M1" => current.arxiv_id = value,
+            "ER" => finalize_entry(
+                &mut items,
+                &mut current,
+                &mut authors,
+                &mut keywords,
+                &mut start_page,
+                &mut end_page,
+            ),
+            _ => {}
+        }
+    }
+
+    finalize_entry(
+        &mut items,
+        &mut current,
+        &mut authors,
+        &mut keywords,
+        &mut start_page,
+        &mut end_page,
+    );
+
+    if items.is_empty() {
+        return Err("No RIS references were found".to_string());
+    }
+
+    Ok(items)
+}
+
+fn json_value_to_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(inner) => {
+            let trimmed = inner.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        serde_json::Value::Bool(boolean) => Some(boolean.to_string()),
+        serde_json::Value::Array(values) => values.iter().find_map(json_value_to_string),
+        _ => None,
+    }
+}
+
+fn extract_csljson_year(value: &serde_json::Value) -> String {
+    if let Some(date_parts) = value.get("date-parts").and_then(|entry| entry.as_array()) {
+        for part in date_parts {
+            if let Some(year) = part
+                .as_array()
+                .and_then(|values| values.first())
+                .and_then(json_value_to_string)
+            {
+                let digits = year.chars().filter(|ch| ch.is_ascii_digit()).take(4).collect::<String>();
+                if !digits.is_empty() {
+                    return digits;
+                }
+            }
+        }
+    }
+
+    json_value_to_string(value)
+        .map(|raw| raw.chars().filter(|ch| ch.is_ascii_digit()).take(4).collect())
+        .unwrap_or_default()
+}
+
+fn parse_csljson_author_list(value: &serde_json::Value) -> String {
+    let Some(authors) = value.as_array() else {
+        return String::new();
+    };
+
+    authors
+        .iter()
+        .filter_map(|entry| {
+            if let Some(literal) = entry.get("literal").and_then(json_value_to_string) {
+                return Some(literal);
+            }
+
+            let family = entry.get("family").and_then(json_value_to_string).unwrap_or_default();
+            let given = entry.get("given").and_then(json_value_to_string).unwrap_or_default();
+            let full_name = [family, given]
+                .into_iter()
+                .filter(|value| !value.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if full_name.trim().is_empty() {
+                None
+            } else {
+                Some(full_name)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn map_csljson_item_type(value: &str) -> String {
+    match value.trim().to_lowercase().as_str() {
+        "book" => "Book".to_string(),
+        "chapter" | "paper-conference" => "Conference Paper".to_string(),
+        "thesis" => "Thesis".to_string(),
+        "report" => "Report".to_string(),
+        _ => "Journal Article".to_string(),
+    }
+}
+
+fn infer_arxiv_id_from_text(value: &str) -> String {
+    normalize_arxiv_id(value).unwrap_or_default()
+}
+
+fn parse_csljson_references(content: &str) -> Result<Vec<ParsedReferenceItem>, String> {
+    let parsed: serde_json::Value =
+        serde_json::from_str(content).map_err(|error| format!("Invalid CSL JSON: {}", error))?;
+    let entries = if let Some(array) = parsed.as_array() {
+        array.iter().collect::<Vec<_>>()
+    } else if parsed.is_object() {
+        vec![&parsed]
+    } else {
+        return Err("CSL JSON must be an object or array".to_string());
+    };
+
+    let mut items = Vec::new();
+
+    for entry in entries {
+        let mut item = ParsedReferenceItem {
+            item_type: entry
+                .get("type")
+                .and_then(json_value_to_string)
+                .map(|value| map_csljson_item_type(&value))
+                .unwrap_or_else(|| "Journal Article".to_string()),
+            title: entry.get("title").and_then(json_value_to_string).unwrap_or_default(),
+            authors: entry
+                .get("author")
+                .map(parse_csljson_author_list)
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_default(),
+            year: entry
+                .get("issued")
+                .map(extract_csljson_year)
+                .or_else(|| entry.get("created").map(extract_csljson_year))
+                .unwrap_or_default(),
+            abstract_text: entry.get("abstract").and_then(json_value_to_string).unwrap_or_default(),
+            doi: entry.get("DOI").and_then(json_value_to_string).unwrap_or_default(),
+            arxiv_id: String::new(),
+            publication: entry
+                .get("container-title")
+                .and_then(json_value_to_string)
+                .unwrap_or_default(),
+            volume: entry.get("volume").and_then(json_value_to_string).unwrap_or_default(),
+            issue: entry.get("issue").and_then(json_value_to_string).unwrap_or_default(),
+            pages: entry.get("page").and_then(json_value_to_string).unwrap_or_default(),
+            publisher: entry.get("publisher").and_then(json_value_to_string).unwrap_or_default(),
+            isbn: entry.get("ISBN").and_then(json_value_to_string).unwrap_or_default(),
+            url: entry.get("URL").and_then(json_value_to_string).unwrap_or_default(),
+            language: entry.get("language").and_then(json_value_to_string).unwrap_or_default(),
+            tags: entry
+                .get("keyword")
+                .and_then(json_value_to_string)
+                .map(|value| split_reference_keywords(&value))
+                .unwrap_or_default(),
+        };
+
+        if item.title.trim().is_empty() {
+            continue;
+        }
+
+        if !item.url.is_empty() {
+            item.arxiv_id = infer_arxiv_id_from_text(&item.url);
+        }
+        if item.arxiv_id.is_empty() {
+            item.arxiv_id = entry
+                .get("id")
+                .and_then(json_value_to_string)
+                .map(|value| infer_arxiv_id_from_text(&value))
+                .unwrap_or_default();
+        }
+
+        item.tags = normalize_reference_tags(item.tags);
+        items.push(item);
+    }
+
+    if items.is_empty() {
+        return Err("No CSL JSON references were found".to_string());
+    }
+
+    Ok(items)
+}
+
+fn detect_reference_import_format(path: &Path, content: &str) -> Result<&'static str, String> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_lowercase());
+
+    match extension.as_deref() {
+        Some("bib") | Some("bibtex") => Ok("bibtex"),
+        Some("ris") => Ok("ris"),
+        Some("json") => Ok("csljson"),
+        _ => {
+            let trimmed = content.trim_start();
+            if trimmed.starts_with('@') {
+                Ok("bibtex")
+            } else if trimmed.starts_with("TY  -") {
+                Ok("ris")
+            } else if trimmed.starts_with('{') || trimmed.starts_with('[') {
+                Ok("csljson")
+            } else {
+                Err("Unsupported reference file format".to_string())
+            }
+        }
+    }
+}
+
+fn build_reference_library_item(
+    folder_path: &str,
+    seed_label: &str,
+    parsed: ParsedReferenceItem,
+    sequence: usize,
+) -> LibraryItem {
+    let normalized_doi = normalize_doi(&parsed.doi);
+    let normalized_arxiv = normalize_arxiv_id(&parsed.arxiv_id)
+        .or_else(|| normalize_arxiv_id(&parsed.url));
+    let timestamp = now_unix_timestamp_string();
+    let identifier = normalized_doi
+        .clone()
+        .map(|value| format!("doi:{}", value))
+        .or_else(|| normalized_arxiv.clone().map(|value| format!("arxiv:{}", value)))
+        .unwrap_or_else(|| {
+            format!(
+                "ref:{}:{}:{}",
+                timestamp,
+                sequence,
+                sanitize_file_name(seed_label)
+            )
+        });
+
+    LibraryItem {
+        id: identifier,
+        item_type: if parsed.item_type.trim().is_empty() {
+            "Journal Article".to_string()
+        } else {
+            parsed.item_type
+        },
+        title: if parsed.title.trim().is_empty() {
+            seed_label.trim().to_string()
+        } else {
+            parsed.title
+        },
+        authors: if parsed.authors.trim().is_empty() {
+            "—".to_string()
+        } else {
+            parsed.authors
+        },
+        year: if parsed.year.trim().is_empty() {
+            "—".to_string()
+        } else {
+            parsed.year
+        },
+        r#abstract: parsed.abstract_text,
+        doi: normalized_doi.unwrap_or_default(),
+        arxiv_id: normalized_arxiv.unwrap_or_default(),
+        publication: parsed.publication,
+        volume: parsed.volume,
+        issue: parsed.issue,
+        pages: parsed.pages,
+        publisher: parsed.publisher,
+        isbn: parsed.isbn,
+        url: parsed.url,
+        language: parsed.language,
+        date_added: timestamp.clone(),
+        date_modified: timestamp,
+        folder_path: folder_path.to_string(),
+        tags: normalize_reference_tags(parsed.tags),
+        attachments: Vec::new(),
+    }
+}
+
 fn spawn_import_metadata_refresh(
     app: tauri::AppHandle,
     db: std::sync::Arc<Mutex<rusqlite::Connection>>,
@@ -615,6 +1412,112 @@ pub fn fetch_all_items_from_db(conn: &rusqlite::Connection) -> rusqlite::Result<
     }
 
     Ok(items)
+}
+
+fn fetch_items_for_folder_from_db(
+    conn: &rusqlite::Connection,
+    folder_path: &str,
+) -> rusqlite::Result<Vec<LibraryItem>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, item_type, title, authors, year, abstract, doi, arxiv_id, publication, volume, issue, pages, publisher, isbn, url, language, date_added, date_modified, folder_path
+         FROM items
+         WHERE COALESCE(is_trashed, 0) = 0 AND folder_path = ?1
+         ORDER BY LOWER(title) ASC, LOWER(id) ASC",
+    )?;
+
+    let rows = stmt.query_map(rusqlite::params![folder_path], |row| {
+        Ok(LibraryItem {
+            id: row.get(0)?,
+            item_type: row.get(1)?,
+            title: row.get(2)?,
+            authors: row.get(3)?,
+            year: row.get(4)?,
+            r#abstract: row.get(5)?,
+            doi: row.get(6)?,
+            arxiv_id: row.get(7)?,
+            publication: row.get(8)?,
+            volume: row.get(9)?,
+            issue: row.get(10)?,
+            pages: row.get(11)?,
+            publisher: row.get(12)?,
+            isbn: row.get(13)?,
+            url: row.get(14)?,
+            language: row.get(15)?,
+            date_added: row.get(16)?,
+            date_modified: row.get(17)?,
+            folder_path: row.get(18)?,
+            tags: Vec::new(),
+            attachments: Vec::new(),
+        })
+    })?;
+
+    let mut items = Vec::new();
+    for row in rows {
+        let mut item = row?;
+        item.tags = fetch_item_tags(conn, &item.id);
+
+        let mut att_stmt = conn.prepare(
+            "SELECT id, item_id, name, path, attachment_type FROM attachments WHERE item_id = ?1",
+        )?;
+        let att_iter = att_stmt.query_map(rusqlite::params![&item.id], |row| {
+            Ok(crate::models::LibraryAttachment {
+                id: row.get(0)?,
+                item_id: row.get(1)?,
+                name: row.get(2)?,
+                path: row.get(3)?,
+                attachment_type: row.get(4)?,
+            })
+        })?;
+
+        item.attachments = att_iter.filter_map(|result| result.ok()).collect();
+        items.push(item);
+    }
+
+    Ok(items)
+}
+
+fn fetch_existing_item_by_identifier(
+    conn: &rusqlite::Connection,
+    doi: Option<&str>,
+    arxiv_id: Option<&str>,
+) -> Result<Option<(LibraryItem, String)>, String> {
+    if let Some(value) = doi {
+        if let Some(item_id) = conn
+            .query_row(
+                "SELECT id FROM items WHERE COALESCE(is_trashed, 0) = 0 AND LOWER(doi) = ?1 LIMIT 1",
+                rusqlite::params![value.to_lowercase()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| format!("Failed to search DOI duplicates: {}", e))?
+        {
+            if let Some(item) = fetch_item_from_db(conn, &item_id)
+                .map_err(|e| format!("Failed to load duplicate item: {}", e))?
+            {
+                return Ok(Some((item, "doi".to_string())));
+            }
+        }
+    }
+
+    if let Some(value) = arxiv_id {
+        if let Some(item_id) = conn
+            .query_row(
+                "SELECT id FROM items WHERE COALESCE(is_trashed, 0) = 0 AND LOWER(arxiv_id) = ?1 LIMIT 1",
+                rusqlite::params![value.to_lowercase()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(|e| format!("Failed to search arXiv duplicates: {}", e))?
+        {
+            if let Some(item) = fetch_item_from_db(conn, &item_id)
+                .map_err(|e| format!("Failed to load duplicate item: {}", e))?
+            {
+                return Ok(Some((item, "arxiv".to_string())));
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 pub fn sync_item_to_db(conn: &rusqlite::Connection, item: &LibraryItem) -> rusqlite::Result<()> {
@@ -796,6 +1699,55 @@ fn delete_trashed_item_records(conn: &rusqlite::Connection) -> rusqlite::Result<
     Ok(())
 }
 
+fn has_pdf_attachment(item: &LibraryItem) -> bool {
+    item.attachments
+        .iter()
+        .any(|attachment| attachment.attachment_type.eq_ignore_ascii_case("pdf"))
+}
+
+fn meaningful_duplicate_field<'a>(values: impl IntoIterator<Item = &'a str>) -> String {
+    values
+        .into_iter()
+        .map(str::trim)
+        .find(|value| !value.is_empty() && *value != "—")
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn fetch_latest_note_content(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+) -> rusqlite::Result<Option<String>> {
+    conn.query_row(
+        "SELECT content FROM notes WHERE item_id = ?1 ORDER BY updated_at DESC LIMIT 1",
+        rusqlite::params![item_id],
+        |row| row.get(0),
+    )
+    .optional()
+}
+
+fn combine_merged_note_sections(sections: &[(String, String)]) -> String {
+    if sections.is_empty() {
+        return String::new();
+    }
+
+    if sections.len() == 1 {
+        return sections[0].1.clone();
+    }
+
+    sections
+        .iter()
+        .map(|(label, content)| {
+            if label.trim().is_empty() {
+                content.trim().to_string()
+            } else {
+                format!("### {}\n\n{}", label.trim(), content.trim())
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n")
+}
+
 pub fn build_library_tree(
     path: &Path,
     is_root: bool,
@@ -825,7 +1777,7 @@ pub fn build_library_tree(
         .map(|child| build_library_tree(&child, false, conn))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let items = pdf_paths
+    let mut items = pdf_paths
         .into_iter()
         .map(|pdf| {
             let id = pdf.to_string_lossy().to_string();
@@ -852,6 +1804,19 @@ pub fn build_library_tree(
         })
         .collect::<Vec<_>>();
 
+    let path_str = path.to_string_lossy().to_string();
+    let known_ids = items
+        .iter()
+        .map(|item| item.id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    let extra_items = fetch_items_for_folder_from_db(conn, &path_str)
+        .map_err(|e| format!("Failed to load folder items from database: {}", e))?;
+    items.extend(
+        extra_items
+            .into_iter()
+            .filter(|item| !known_ids.contains(&item.id)),
+    );
+
     let name = if is_root {
         "My Library".to_string()
     } else {
@@ -860,8 +1825,6 @@ pub fn build_library_tree(
             .unwrap_or("Untitled Folder")
             .to_string()
     };
-    let path_str = path.to_string_lossy().to_string();
-
     Ok(crate::models::LibraryFolderNode {
         id: path_str.clone(),
         name,
@@ -879,6 +1842,140 @@ pub fn load_library_tree(
     let root = library_root_dir(&app)?;
     let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
     Ok(vec![build_library_tree(&root, true, &conn)?])
+}
+
+#[tauri::command]
+pub fn import_identifier_to_folder(
+    identifier: String,
+    folder_path: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<IdentifierImportResult, String> {
+    let trimmed = identifier.trim();
+    if trimmed.is_empty() {
+        return Err("Identifier cannot be empty".to_string());
+    }
+
+    let normalized_doi = normalize_doi(trimmed);
+    let normalized_arxiv = normalize_arxiv_id(trimmed);
+    if normalized_doi.is_none() && normalized_arxiv.is_none() {
+        return Err("Identifier must be a DOI or arXiv ID".to_string());
+    }
+
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    if let Some((item, matched_by)) = fetch_existing_item_by_identifier(
+        &conn,
+        normalized_doi.as_deref(),
+        normalized_arxiv.as_deref(),
+    )? {
+        return Ok(IdentifierImportResult {
+            item,
+            created: false,
+            matched_by,
+        });
+    }
+
+    let mut seed = ParsedPdfMetadata::default();
+    seed.doi = normalized_doi;
+    seed.arxiv_id = normalized_arxiv;
+
+    let mut parsed = enrich_metadata_with_remote_providers(&seed).meta;
+    strip_invalid_metadata_url(&mut parsed)
+        .map_err(|error| format!("Failed to validate imported metadata URL: {}", error))?;
+
+    if !has_meaningful_metadata(&parsed) {
+        return Err("No metadata could be resolved for this identifier".to_string());
+    }
+
+    let item = build_remote_library_item(&folder_path, trimmed, parsed);
+    sync_item_to_db(&conn, &item)
+        .map_err(|e| format!("Failed to save imported identifier item: {}", e))?;
+    let saved_item = fetch_item_from_db(&conn, &item.id)
+        .map_err(|e| format!("Failed to reload imported item: {}", e))?
+        .unwrap_or(item);
+
+    Ok(IdentifierImportResult {
+        item: saved_item,
+        created: true,
+        matched_by: "none".to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn import_reference_file_to_folder(
+    file_path: String,
+    folder_path: String,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<ReferenceImportResult, String> {
+    let source = PathBuf::from(&file_path);
+    if !source.exists() {
+        return Err("Selected reference file does not exist".to_string());
+    }
+    if !source.is_file() {
+        return Err("Selected reference import target must be a file".to_string());
+    }
+
+    let content =
+        fs::read_to_string(&source).map_err(|error| format!("Failed to read reference file: {}", error))?;
+    let source_format = detect_reference_import_format(&source, &content)?;
+    let parsed_items = match source_format {
+        "bibtex" => parse_bibtex_references(&content)?,
+        "ris" => parse_ris_references(&content)?,
+        "csljson" => parse_csljson_references(&content)?,
+        _ => return Err("Unsupported reference file format".to_string()),
+    };
+
+    let source_label = source
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("reference-import");
+
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    let mut items = Vec::new();
+    let mut created_count = 0usize;
+    let mut existing_count = 0usize;
+
+    for (index, parsed_item) in parsed_items.into_iter().enumerate() {
+        let normalized_doi = normalize_doi(&parsed_item.doi);
+        let normalized_arxiv = normalize_arxiv_id(&parsed_item.arxiv_id)
+            .or_else(|| normalize_arxiv_id(&parsed_item.url));
+
+        if let Some((mut existing_item, _matched_by)) = fetch_existing_item_by_identifier(
+            &conn,
+            normalized_doi.as_deref(),
+            normalized_arxiv.as_deref(),
+        )? {
+            existing_item.tags = fetch_item_tags(&conn, &existing_item.id);
+            items.push(existing_item);
+            existing_count += 1;
+            continue;
+        }
+
+        let seed_label = if parsed_item.title.trim().is_empty() {
+            format!("{}-{}", source_label, index + 1)
+        } else {
+            parsed_item.title.clone()
+        };
+        let item = build_reference_library_item(&folder_path, &seed_label, parsed_item, index + 1);
+        sync_item_to_db(&conn, &item)
+            .map_err(|error| format!("Failed to save imported reference item: {}", error))?;
+        replace_item_tags_in_db(&conn, &item.id, &item.tags)
+            .map_err(|error| format!("Failed to save imported reference tags: {}", error))?;
+
+        let mut saved_item = fetch_item_from_db(&conn, &item.id)
+            .map_err(|error| format!("Failed to reload imported reference item: {}", error))?
+            .unwrap_or(item);
+        saved_item.tags = fetch_item_tags(&conn, &saved_item.id);
+        items.push(saved_item);
+        created_count += 1;
+    }
+
+    Ok(ReferenceImportResult {
+        items,
+        created_count,
+        existing_count,
+        source_format: source_format.to_string(),
+    })
 }
 
 #[tauri::command]
@@ -1253,7 +2350,19 @@ pub fn rename_library_pdf(
 ) -> Result<String, String> {
     let source = PathBuf::from(&path);
     if !source.exists() {
-        return Err("PDF does not exist".to_string());
+        let sanitized_name = sanitize_file_name(&new_name);
+        if sanitized_name.is_empty() {
+            return Err("Item name cannot be empty".to_string());
+        }
+
+        let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+        conn.execute(
+            "UPDATE items SET title = ?1, date_modified = datetime('now') WHERE id = ?2",
+            rusqlite::params![sanitized_name, path],
+        )
+        .map_err(|e| format!("Failed to rename metadata-only item: {}", e))?;
+
+        return Ok(path);
     }
 
     if !source.is_file() || !is_pdf_file(&source) {
@@ -1312,7 +2421,13 @@ pub fn move_library_pdf(
 ) -> Result<String, String> {
     let source = PathBuf::from(&path);
     if !source.exists() {
-        return Err("PDF does not exist".to_string());
+        let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+        conn.execute(
+            "UPDATE items SET folder_path = ?1, date_modified = datetime('now') WHERE id = ?2",
+            rusqlite::params![target_folder_path, path],
+        )
+        .map_err(|e| format!("Failed to move metadata-only item: {}", e))?;
+        return Ok(path);
     }
 
     if !source.is_file() || !is_pdf_file(&source) {
@@ -1360,6 +2475,250 @@ pub fn move_library_pdf(
     }
 
     Ok(target_path_str)
+}
+
+#[tauri::command]
+pub fn merge_duplicate_items(
+    primary_item_id: String,
+    duplicate_item_ids: Vec<String>,
+    state: tauri::State<'_, crate::models::AppState>,
+) -> Result<MergeDuplicateItemsResult, String> {
+    let normalized_ids = duplicate_item_ids
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .fold(Vec::new(), |mut items, value| {
+            if !items.contains(&value) {
+                items.push(value);
+            }
+            items
+        });
+
+    if normalized_ids.len() < 2 {
+        return Err("At least two items are required to merge duplicates".to_string());
+    }
+
+    let preferred_id = primary_item_id.trim().to_string();
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+
+    let mut items = Vec::new();
+    for item_id in &normalized_ids {
+        let mut item = fetch_item_from_db(&conn, item_id)
+            .map_err(|e| format!("Failed to load duplicate item: {}", e))?
+            .ok_or_else(|| format!("Duplicate item not found: {}", item_id))?;
+        item.tags = fetch_item_tags(&conn, &item.id);
+        items.push(item);
+    }
+
+    let survivor_index = items
+        .iter()
+        .position(|item| item.id == preferred_id && has_pdf_attachment(item))
+        .or_else(|| items.iter().position(has_pdf_attachment))
+        .or_else(|| items.iter().position(|item| item.id == preferred_id))
+        .unwrap_or(0);
+
+    let survivor_id = items[survivor_index].id.clone();
+    let merged_item_ids = items
+        .iter()
+        .filter(|item| item.id != survivor_id)
+        .map(|item| item.id.clone())
+        .collect::<Vec<_>>();
+
+    let mut merge_order = Vec::with_capacity(items.len());
+    merge_order.push(items[survivor_index].clone());
+    for (index, item) in items.iter().enumerate() {
+        if index != survivor_index {
+            merge_order.push(item.clone());
+        }
+    }
+
+    let merged_tags = {
+        let mut seen = HashSet::new();
+        let mut tags = Vec::new();
+        for item in &merge_order {
+            for tag in &item.tags {
+                let trimmed = tag.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                let normalized = trimmed.to_lowercase();
+                if seen.insert(normalized) {
+                    tags.push(trimmed.to_string());
+                }
+            }
+        }
+        tags
+    };
+
+    let merged_note = {
+        let mut seen = HashSet::new();
+        let mut sections = Vec::new();
+        for item in &merge_order {
+            let Some(content) = fetch_latest_note_content(&conn, &item.id)
+                .map_err(|e| format!("Failed to load item note: {}", e))? else {
+                continue;
+            };
+            let trimmed_content = content.trim();
+            if trimmed_content.is_empty() {
+                continue;
+            }
+
+            if !seen.insert(trimmed_content.to_string()) {
+                continue;
+            }
+
+            let label = if item.title.trim().is_empty() {
+                item.id.clone()
+            } else {
+                item.title.trim().to_string()
+            };
+            sections.push((label, trimmed_content.to_string()));
+        }
+        combine_merged_note_sections(&sections)
+    };
+
+    let merged_item = {
+        let survivor = &merge_order[0];
+        let mut item = survivor.clone();
+        item.title = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.title.as_str()));
+        item.authors = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.authors.as_str()));
+        item.year = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.year.as_str()));
+        item.r#abstract = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.r#abstract.as_str()));
+        item.doi = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.doi.as_str()));
+        item.arxiv_id = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.arxiv_id.as_str()));
+        item.publication = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.publication.as_str()));
+        item.volume = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.volume.as_str()));
+        item.issue = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.issue.as_str()));
+        item.pages = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.pages.as_str()));
+        item.publisher = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.publisher.as_str()));
+        item.isbn = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.isbn.as_str()));
+        item.url = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.url.as_str()));
+        item.language = meaningful_duplicate_field(merge_order.iter().map(|entry| entry.language.as_str()));
+        item.tags = merged_tags.clone();
+        item
+    };
+
+    conn.execute(
+        "UPDATE items SET
+            title = ?1,
+            authors = ?2,
+            year = ?3,
+            abstract = ?4,
+            doi = ?5,
+            arxiv_id = ?6,
+            publication = ?7,
+            volume = ?8,
+            issue = ?9,
+            pages = ?10,
+            publisher = ?11,
+            isbn = ?12,
+            url = ?13,
+            language = ?14,
+            date_modified = datetime('now')
+         WHERE id = ?15",
+        rusqlite::params![
+            merged_item.title,
+            merged_item.authors,
+            merged_item.year,
+            merged_item.r#abstract,
+            merged_item.doi,
+            merged_item.arxiv_id,
+            merged_item.publication,
+            merged_item.volume,
+            merged_item.issue,
+            merged_item.pages,
+            merged_item.publisher,
+            merged_item.isbn,
+            merged_item.url,
+            merged_item.language,
+            survivor_id,
+        ],
+    )
+    .map_err(|e| format!("Failed to update merged item: {}", e))?;
+
+    conn.execute(
+        "DELETE FROM item_tags WHERE item_id = ?1",
+        rusqlite::params![&survivor_id],
+    )
+    .map_err(|e| format!("Failed to reset merged tags: {}", e))?;
+    for tag in &merged_tags {
+        conn.execute(
+            "INSERT OR IGNORE INTO item_tags (item_id, tag) VALUES (?1, ?2)",
+            rusqlite::params![&survivor_id, tag],
+        )
+        .map_err(|e| format!("Failed to save merged tag: {}", e))?;
+        ensure_tag_color_for_tag(&conn, tag)?;
+    }
+
+    let mut attachment_keys = HashSet::new();
+    let mut next_attachment_index = 0usize;
+    for attachment in &merge_order[0].attachments {
+        attachment_keys.insert(format!(
+            "{}::{}",
+            attachment.attachment_type.to_lowercase(),
+            attachment.path.to_lowercase()
+        ));
+        next_attachment_index += 1;
+    }
+
+    for item in merge_order.iter().skip(1) {
+        for attachment in &item.attachments {
+            let attachment_key = format!(
+                "{}::{}",
+                attachment.attachment_type.to_lowercase(),
+                attachment.path.to_lowercase()
+            );
+            if !attachment_keys.insert(attachment_key) {
+                continue;
+            }
+
+            let attachment_id = format!("att-{}-{}", survivor_id, next_attachment_index);
+            next_attachment_index += 1;
+            conn.execute(
+                "INSERT INTO attachments (id, item_id, name, path, attachment_type) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![
+                    attachment_id,
+                    &survivor_id,
+                    attachment.name,
+                    attachment.path,
+                    attachment.attachment_type,
+                ],
+            )
+            .map_err(|e| format!("Failed to merge attachments: {}", e))?;
+        }
+    }
+
+    if !merged_note.is_empty() {
+        upsert_item_note(survivor_id.clone(), merged_note, state.clone())
+            .map_err(|e| format!("Failed to save merged note: {}", e))?;
+    }
+
+    for item_id in &merged_item_ids {
+        delete_item_records(&conn, item_id)
+            .map_err(|e| format!("Failed to delete merged duplicate: {}", e))?;
+    }
+
+    drop(conn);
+
+    {
+        let mut docs = state.documents.lock().map_err(|_| "Failed to lock document cache")?;
+        for item_id in &merged_item_ids {
+            docs.remove(item_id);
+        }
+    }
+
+    let conn = state.db.lock().map_err(|_| "Failed to lock database")?;
+    let mut item = fetch_item_from_db(&conn, &survivor_id)
+        .map_err(|e| format!("Failed to load merged item: {}", e))?
+        .ok_or("Merged item could not be reloaded")?;
+    item.tags = fetch_item_tags(&conn, &survivor_id);
+
+    Ok(MergeDuplicateItemsResult {
+        item,
+        survivor_item_id: survivor_id,
+        merged_item_ids,
+    })
 }
 
 #[tauri::command]
@@ -3760,7 +5119,8 @@ pub fn save_setting(
 mod tests {
     use super::{
         build_ai_annotation_digest, build_library_item, delete_item_records,
-        delete_trashed_item_records, normalize_bing_web_language_code, parse_bing_web_auth_state,
+        delete_trashed_item_records, normalize_bing_web_language_code, parse_bibtex_references,
+        parse_bing_web_auth_state, parse_csljson_references, parse_ris_references,
         render_annotations_markdown, sync_item_to_db,
     };
     use crate::db::{ensure_schema, init_db_at_path};
@@ -3959,6 +5319,74 @@ mod tests {
             .coverage_note
             .contains("No saved text annotations were found"));
         assert!(digest.overview.contains("no text annotations"));
+    }
+
+    #[test]
+    fn parse_bibtex_references_extracts_core_fields() {
+        let content = r#"
+@article{attention2017,
+  title = {Attention Is All You Need},
+  author = {Ashish Vaswani and Noam Shazeer},
+  year = {2017},
+  journal = {NeurIPS},
+  doi = {10.48550/arXiv.1706.03762},
+  keywords = {transformer; attention}
+}
+"#;
+
+        let items = parse_bibtex_references(content).expect("bibtex should parse");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, "Attention Is All You Need");
+        assert_eq!(items[0].authors, "Ashish Vaswani, Noam Shazeer");
+        assert_eq!(items[0].publication, "NeurIPS");
+        assert_eq!(items[0].tags, vec!["transformer", "attention"]);
+    }
+
+    #[test]
+    fn parse_ris_references_extracts_core_fields() {
+        let content = "\
+TY  - JOUR\n\
+TI  - Attention Is All You Need\n\
+AU  - Vaswani, Ashish\n\
+AU  - Shazeer, Noam\n\
+PY  - 2017/06/12\n\
+JO  - NeurIPS\n\
+DO  - 10.48550/arXiv.1706.03762\n\
+KW  - transformer\n\
+KW  - attention\n\
+ER  -\n";
+
+        let items = parse_ris_references(content).expect("ris should parse");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].year, "2017");
+        assert_eq!(items[0].publication, "NeurIPS");
+        assert_eq!(items[0].tags, vec!["transformer", "attention"]);
+    }
+
+    #[test]
+    fn parse_csljson_references_extracts_core_fields() {
+        let content = r#"
+[
+  {
+    "type": "article-journal",
+    "title": "Attention Is All You Need",
+    "author": [
+      { "family": "Vaswani", "given": "Ashish" },
+      { "family": "Shazeer", "given": "Noam" }
+    ],
+    "issued": { "date-parts": [[2017, 6, 12]] },
+    "container-title": "NeurIPS",
+    "DOI": "10.48550/arXiv.1706.03762",
+    "keyword": "transformer, attention"
+  }
+]
+"#;
+
+        let items = parse_csljson_references(content).expect("csljson should parse");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].year, "2017");
+        assert_eq!(items[0].publication, "NeurIPS");
+        assert_eq!(items[0].tags, vec!["transformer", "attention"]);
     }
 
     #[test]

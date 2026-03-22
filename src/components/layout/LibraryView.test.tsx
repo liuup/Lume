@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { LibraryView } from "./LibraryView";
-import type { FolderNode, LibraryItem } from "../../types";
+import type { DuplicateGroup, FolderNode, LibraryItem } from "../../types";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -98,5 +98,101 @@ describe("LibraryView", () => {
 
     expect(screen.getByRole("button", { name: /^title$/i })).toBeInTheDocument();
     expect(screen.getByText("Attention Is All You Need")).toBeInTheDocument();
+  });
+
+  it("renders duplicate groups and triggers merge", async () => {
+    const onMergeDuplicateGroup = vi.fn(async () => undefined);
+    const duplicateGroups: DuplicateGroup[] = [
+      {
+        id: "dup-1",
+        reason: "metadata",
+        matchValue: "attention is all you need | vaswani | 2017",
+        items: [
+          item,
+          {
+            ...item,
+            id: "paper-2",
+            attachments: [],
+          },
+        ],
+      },
+    ];
+
+    render(
+      <LibraryView
+        folderTree={folderTree}
+        trashItems={[]}
+        isTrashView={false}
+        isDuplicatesView
+        duplicateGroups={duplicateGroups}
+        selectedFolderId="__duplicates__"
+        selectedItemId={null}
+        onSelectItem={() => undefined}
+        onOpenItem={() => undefined}
+        onAddItem={() => undefined}
+        onMergeDuplicateGroup={onMergeDuplicateGroup}
+        onDeleteItem={() => undefined}
+        onRestoreItem={() => undefined}
+        onEmptyTrash={() => undefined}
+        onRenameItem={() => undefined}
+        onUpdateItemTags={() => undefined}
+        onItemPointerDown={() => undefined}
+        tagFilter={null}
+        onClearTagFilter={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /merge group/i }));
+
+    await waitFor(() => {
+      expect(onMergeDuplicateGroup).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByText(/metadata only/i)).toBeInTheDocument();
+  });
+
+  it("splits batch DOI/arXiv imports into multiple requests", async () => {
+    const onAddIdentifier = vi.fn(async () => ({
+      item,
+      created: true,
+      matchedBy: "none",
+    }));
+
+    render(
+      <LibraryView
+        folderTree={folderTree}
+        trashItems={[]}
+        isTrashView={false}
+        selectedFolderId="root"
+        selectedItemId={null}
+        onSelectItem={() => undefined}
+        onOpenItem={() => undefined}
+        onAddItem={() => undefined}
+        onAddIdentifier={onAddIdentifier}
+        onDeleteItem={() => undefined}
+        onRestoreItem={() => undefined}
+        onEmptyTrash={() => undefined}
+        onRenameItem={() => undefined}
+        onUpdateItemTags={() => undefined}
+        onItemPointerDown={() => undefined}
+        tagFilter={null}
+        onClearTagFilter={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /add doi \/ arxiv/i }));
+
+    fireEvent.change(screen.getByPlaceholderText(/10\.48550\/arxiv\.1706\.03762/i), {
+      target: {
+        value: "10.48550/arXiv.1706.03762\n1706.03762",
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^import$/i }));
+
+    await waitFor(() => {
+      expect(onAddIdentifier).toHaveBeenCalledTimes(2);
+    });
+    expect(onAddIdentifier).toHaveBeenNthCalledWith(1, "10.48550/arXiv.1706.03762", { silent: true });
+    expect(onAddIdentifier).toHaveBeenNthCalledWith(2, "1706.03762", { silent: true });
   });
 });

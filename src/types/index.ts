@@ -54,6 +54,14 @@ export interface LibraryItem {
   attachments: Attachment[];
 }
 
+export interface RecentDocument {
+  itemId: string;
+  title: string;
+  subtitle: string;
+  lastPage: number;
+  lastOpenedAt: string;
+}
+
 export interface MetadataFetchStep {
   stage: string;
   provider: string;
@@ -79,6 +87,19 @@ export interface RetrieveMetadataResult {
   report: MetadataFetchReport;
 }
 
+export interface IdentifierImportResult {
+  item: LibraryItem;
+  created: boolean;
+  matchedBy: string;
+}
+
+export interface ReferenceImportResult {
+  items: LibraryItem[];
+  createdCount: number;
+  existingCount: number;
+  sourceFormat: string;
+}
+
 export interface FolderNode {
   id: string;
   name: string;
@@ -96,6 +117,32 @@ export const DEFAULT_FOLDER: FolderNode = {
 };
 
 export const TRASH_FOLDER_ID = "__trash__";
+export const FAVORITES_FOLDER_ID = "__favorites__";
+export const DUPLICATES_FOLDER_ID = "__duplicates__";
+export const SMART_COLLECTION_PREFIX = "__smart__:";
+
+export type DuplicateMatchReason = "doi" | "arxiv" | "metadata";
+
+export interface DuplicateGroup {
+  id: string;
+  reason: DuplicateMatchReason;
+  matchValue: string;
+  items: LibraryItem[];
+}
+
+export type SmartCollectionMatchMode = "all" | "any";
+
+export interface SmartCollection {
+  id: string;
+  name: string;
+  query: string;
+  year: string;
+  tags: string[];
+  favoritesOnly: boolean;
+  matchMode: SmartCollectionMatchMode;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface OpenTab {
   id: string;
@@ -140,6 +187,11 @@ export interface SavedPdfAnnotationsDocument {
   pages: Record<string, SavedPdfPageAnnotations>;
 }
 
+export interface PageBookmark {
+  page: number;
+  createdAt: string;
+}
+
 export interface AiDigestEntry {
   page: number;
   text: string;
@@ -166,6 +218,18 @@ export interface AiAnnotationDigest {
   stats: AiAnnotationDigestStats;
   sections: AiDigestSection[];
   markdown: string;
+}
+
+export interface AnnotationFocusTarget {
+  id: string;
+  page: number;
+  type: "text" | "highlight" | "ink";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text?: string;
+  nonce: number;
 }
 
 export interface AiPaperSummary {
