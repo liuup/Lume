@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Copy, FilePenLine, Folder, FolderOpen, FolderPlus, Hash, History, Orbit, Plus, Settings, Star, Trash2 } from "lucide-react";
-import { DuplicateGroup, FAVORITES_FOLDER_ID, FolderNode, LibraryItem, RecentDocument, SmartCollection, SmartCollectionMatchMode, TagInfo, TRASH_FOLDER_ID } from "../../types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Copy, FilePenLine, Folder, FolderOpen, FolderPlus, Hash, History, Orbit, Plus, Settings, Star, Trash2 } from "lucide-react";
+import { DuplicateGroup, FAVORITES_FOLDER_ID, FolderNode, LibraryItem, RecentDocument, SmartCollection, SmartCollectionDraft, SmartCollectionMatchMode, TagInfo, TRASH_FOLDER_ID } from "../../types";
 import { useI18n } from "../../hooks/useI18n";
 
 // ── Preset tag palette ──────────────────────────────────────────────────────
@@ -32,17 +32,22 @@ interface FolderSidebarProps {
   onFolderHover: (folderId: string | null) => void;
   recentDocuments: RecentDocument[];
   onOpenRecentDocument: (itemId: string) => void;
+  onRemoveRecentDocument: (itemId: string) => void;
+  onClearRecentDocuments: () => void;
   favoriteDocuments: LibraryItem[];
   onOpenFavoriteDocument: (itemId: string) => void;
+  onRemoveFavoriteDocument: (itemId: string) => void;
   duplicateGroups: DuplicateGroup[];
   isDuplicatesSelected: boolean;
   onSelectDuplicates: () => void;
   smartCollections: SmartCollection[];
   selectedSmartCollectionId: string | null;
   onSelectSmartCollection: (collectionId: string) => void;
-  onCreateSmartCollection: (collection: Omit<SmartCollection, "id" | "createdAt" | "updatedAt">) => void;
-  onUpdateSmartCollection: (collectionId: string, collection: Omit<SmartCollection, "id" | "createdAt" | "updatedAt">) => void;
+  onCreateSmartCollection: (collection: SmartCollectionDraft) => void;
+  onUpdateSmartCollection: (collectionId: string, collection: SmartCollectionDraft) => void;
   onDeleteSmartCollection: (collectionId: string) => void;
+  onMoveSmartCollection: (collectionId: string, direction: "up" | "down") => void;
+  getSmartCollectionPreviewItems: (collection: SmartCollectionDraft | null | undefined) => LibraryItem[];
   // ── tag system ────────
   allTags: TagInfo[];
   selectedTagFilter: string | null;
@@ -67,8 +72,11 @@ export function FolderSidebar({
   onFolderHover,
   recentDocuments,
   onOpenRecentDocument,
+  onRemoveRecentDocument,
+  onClearRecentDocuments,
   favoriteDocuments,
   onOpenFavoriteDocument,
+  onRemoveFavoriteDocument,
   duplicateGroups,
   isDuplicatesSelected,
   onSelectDuplicates,
@@ -78,6 +86,8 @@ export function FolderSidebar({
   onCreateSmartCollection,
   onUpdateSmartCollection,
   onDeleteSmartCollection,
+  onMoveSmartCollection,
+  getSmartCollectionPreviewItems,
   allTags,
   selectedTagFilter,
   onSelectTag,
@@ -116,6 +126,8 @@ export function FolderSidebar({
     x: number;
     y: number;
   } | null>(null);
+  const [isTagsCollapsed, setIsTagsCollapsed] = useState(false);
+  const [tagSearchQuery, setTagSearchQuery] = useState("");
 
   const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
@@ -305,6 +317,41 @@ export function FolderSidebar({
     || smartCollectionTagsList.length > 0
     || smartCollectionFavoritesOnly
   );
+  const smartCollectionCounts = useMemo(
+    () => Object.fromEntries(
+      smartCollections.map((collection) => [collection.id, getSmartCollectionPreviewItems(collection).length]),
+    ),
+    [getSmartCollectionPreviewItems, smartCollections],
+  );
+
+  const smartCollectionDraft: SmartCollectionDraft = useMemo(() => ({
+    name: smartCollectionName.trim(),
+    query: smartCollectionQuery.trim(),
+    year: smartCollectionYear.trim(),
+    tags: smartCollectionTagsList,
+    favoritesOnly: smartCollectionFavoritesOnly,
+    matchMode: smartCollectionMatchMode,
+  }), [
+    smartCollectionFavoritesOnly,
+    smartCollectionMatchMode,
+    smartCollectionName,
+    smartCollectionQuery,
+    smartCollectionTagsList,
+    smartCollectionYear,
+  ]);
+  const smartCollectionPreviewItems = useMemo(
+    () => hasSmartCollectionRule ? getSmartCollectionPreviewItems(smartCollectionDraft) : [],
+    [getSmartCollectionPreviewItems, hasSmartCollectionRule, smartCollectionDraft],
+  );
+  const smartCollectionPreviewTitles = smartCollectionPreviewItems.slice(0, 3);
+  const filteredTags = useMemo(() => {
+    const normalizedQuery = tagSearchQuery.trim().toLowerCase();
+    if (!normalizedQuery) {
+      return allTags;
+    }
+
+    return allTags.filter((tagInfo) => tagInfo.tag.toLowerCase().includes(normalizedQuery));
+  }, [allTags, tagSearchQuery]);
 
   const smartCollectionSummary = (collection: SmartCollection) => {
     const parts: string[] = [];
@@ -340,6 +387,7 @@ export function FolderSidebar({
     }
 
     const payload = {
+      ...smartCollectionDraft,
       name: trimmedName,
       query: trimmedQuery,
       year: trimmedYear,
@@ -506,27 +554,39 @@ export function FolderSidebar({
               ) : (
                 <div className="space-y-1.5">
                   {favoriteDocuments.map((item) => (
-                    <button
+                    <div
                       key={item.id}
-                      type="button"
-                      onClick={() => onOpenFavoriteDocument(item.id)}
-                      className="flex w-full items-start gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-left transition-colors hover:border-amber-200 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-amber-900/70 dark:hover:bg-zinc-900"
-                      title={item.title || item.attachments?.[0]?.name || item.id}
+                      className="group flex items-start gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 transition-colors hover:border-amber-200 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-amber-900/70 dark:hover:bg-zinc-900"
                     >
-                      <div className="mt-0.5 rounded-lg bg-amber-50 p-1 text-amber-600 dark:bg-amber-950/30 dark:text-amber-300">
-                        <Star size={12} className="fill-current" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-xs font-medium text-zinc-700 dark:text-zinc-200">
-                          {item.title || item.attachments?.[0]?.name || item.id}
+                      <button
+                        type="button"
+                        onClick={() => onOpenFavoriteDocument(item.id)}
+                        className="flex min-w-0 flex-1 items-start gap-2 text-left"
+                        title={item.title || item.attachments?.[0]?.name || item.id}
+                      >
+                        <div className="mt-0.5 rounded-lg bg-amber-50 p-1 text-amber-600 dark:bg-amber-950/30 dark:text-amber-300">
+                          <Star size={12} className="fill-current" />
                         </div>
-                        <div className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-zinc-400">
-                          {item.authors && item.authors !== "—"
-                            ? item.authors
-                            : item.publication || item.folder_path || t("folderSidebar.favorites.open")}
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-medium text-zinc-700 dark:text-zinc-200">
+                            {item.title || item.attachments?.[0]?.name || item.id}
+                          </div>
+                          <div className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+                            {item.authors && item.authors !== "—"
+                              ? item.authors
+                              : item.publication || item.folder_path || t("folderSidebar.favorites.open")}
+                          </div>
                         </div>
-                      </div>
-                    </button>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRemoveFavoriteDocument(item.id)}
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-zinc-400 opacity-0 transition-colors transition-opacity group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 dark:text-zinc-500 dark:hover:bg-red-950/30 dark:hover:text-red-300"
+                        title={t("folderSidebar.favorites.remove")}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   ))}
                 </div>
               )}
@@ -624,6 +684,9 @@ export function FolderSidebar({
                 <div className="space-y-1.5">
                   {smartCollections.map((collection) => {
                     const isActive = selectedSmartCollectionId === collection.id;
+                    const collectionIndex = smartCollections.findIndex((entry) => entry.id === collection.id);
+                    const canMoveUp = collectionIndex > 0;
+                    const canMoveDown = collectionIndex < smartCollections.length - 1;
                     return (
                       <div
                         key={collection.id}
@@ -659,7 +722,43 @@ export function FolderSidebar({
                             </div>
                           </div>
                         </button>
-                        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                        <div className="flex shrink-0 items-center gap-1">
+                          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                            isActive
+                              ? "border-cyan-200 bg-cyan-100 text-cyan-700 dark:border-cyan-900/70 dark:bg-cyan-900/50 dark:text-cyan-200"
+                              : "border-zinc-200 bg-zinc-100 text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
+                          }`}>
+                            {t(
+                              "folderSidebar.smartCollections.count",
+                              { count: smartCollectionCounts[collection.id] ?? 0 },
+                              String(smartCollectionCounts[collection.id] ?? 0),
+                            )}
+                          </span>
+                          <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                          <button
+                            type="button"
+                            disabled={!canMoveUp}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onMoveSmartCollection(collection.id, "up");
+                            }}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-cyan-600 disabled:cursor-not-allowed disabled:opacity-35 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-cyan-300"
+                            title={t("folderSidebar.smartCollections.moveUp")}
+                          >
+                            <ArrowUp size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={!canMoveDown}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onMoveSmartCollection(collection.id, "down");
+                            }}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-cyan-600 disabled:cursor-not-allowed disabled:opacity-35 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-cyan-300"
+                            title={t("folderSidebar.smartCollections.moveDown")}
+                          >
+                            <ArrowDown size={13} />
+                          </button>
                           <button
                             type="button"
                             onClick={(event) => {
@@ -682,6 +781,7 @@ export function FolderSidebar({
                           >
                             <Trash2 size={13} />
                           </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -698,33 +798,55 @@ export function FolderSidebar({
                   <History size={11} />
                   {t("folderSidebar.recents.title")}
                 </div>
-                <span className="text-[10px] text-zinc-400 font-medium">{recentDocuments.length}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-zinc-400 font-medium">{recentDocuments.length}</span>
+                  <button
+                    type="button"
+                    onClick={onClearRecentDocuments}
+                    className="text-[10px] font-medium uppercase tracking-wider text-zinc-400 transition-colors hover:text-red-600 dark:hover:text-red-300"
+                    title={t("folderSidebar.recents.clear")}
+                  >
+                    {t("folderSidebar.recents.clear")}
+                  </button>
+                </div>
               </div>
               <div className="max-h-44 overflow-y-auto px-3 pb-3">
                 <div className="space-y-1.5">
                   {recentDocuments.map((entry) => (
-                    <button
+                    <div
                       key={entry.itemId}
-                      type="button"
-                      onClick={() => onOpenRecentDocument(entry.itemId)}
-                      className="flex w-full items-start gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-left transition-colors hover:border-indigo-200 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-indigo-900/70 dark:hover:bg-zinc-900"
-                      title={entry.title}
+                      className="group flex items-start gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 transition-colors hover:border-indigo-200 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-indigo-900/70 dark:hover:bg-zinc-900"
                     >
-                      <div className="mt-0.5 rounded-lg bg-zinc-100 p-1 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
-                        <History size={12} />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-xs font-medium text-zinc-700 dark:text-zinc-200">
-                          {entry.title}
+                      <button
+                        type="button"
+                        onClick={() => onOpenRecentDocument(entry.itemId)}
+                        className="flex min-w-0 flex-1 items-start gap-2 text-left"
+                        title={entry.title}
+                      >
+                        <div className="mt-0.5 rounded-lg bg-zinc-100 p-1 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+                          <History size={12} />
                         </div>
-                        <div className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-zinc-400">
-                          {entry.subtitle || t("folderSidebar.recents.resumeAt", { page: entry.lastPage })}
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs font-medium text-zinc-700 dark:text-zinc-200">
+                            {entry.title}
+                          </div>
+                          <div className="mt-0.5 truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+                            {entry.subtitle || t("folderSidebar.recents.resumeAt", { page: entry.lastPage })}
+                          </div>
+                          <div className="mt-1 text-[10px] font-medium uppercase tracking-wide text-indigo-600 dark:text-indigo-300">
+                            {t("folderSidebar.recents.resumeAt", { page: entry.lastPage })}
+                          </div>
                         </div>
-                        <div className="mt-1 text-[10px] font-medium uppercase tracking-wide text-indigo-600 dark:text-indigo-300">
-                          {t("folderSidebar.recents.resumeAt", { page: entry.lastPage })}
-                        </div>
-                      </div>
-                    </button>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRemoveRecentDocument(entry.itemId)}
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-zinc-400 opacity-0 transition-colors transition-opacity group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 dark:text-zinc-500 dark:hover:bg-red-950/30 dark:hover:text-red-300"
+                        title={t("folderSidebar.recents.remove")}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -740,44 +862,78 @@ export function FolderSidebar({
                   <Hash size={11} />
                   {t("folderSidebar.tags.title")}
                 </div>
-                <span className="text-[10px] text-zinc-400 font-medium">{allTags.length}</span>
-              </div>
-              {/* Tag pills */}
-              <div className="max-h-40 overflow-y-auto px-3 pb-3">
-                <div className="flex flex-wrap gap-1.5">
-                {allTags.map(tagInfo => {
-                  const isActive = selectedTagFilter === tagInfo.tag;
-                  const dotColor = tagInfo.color || DEFAULT_TAG_COLOR;
-                  return (
-                    <button
-                      type="button"
-                      key={tagInfo.tag}
-                      className={[
-                        'group inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
-                        isActive
-                          ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900/70 dark:bg-indigo-950/40 dark:text-indigo-200'
-                          : 'border-zinc-200 bg-white text-zinc-600 hover:border-indigo-200 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:border-indigo-900/70 dark:hover:bg-zinc-900',
-                      ].join(' ')}
-                      onClick={() => onSelectTag(tagInfo.tag)}
-                      onContextMenu={e => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setTagColorMenu({ tag: tagInfo.tag, currentColor: dotColor, x: e.clientX, y: e.clientY });
-                      }}
-                      title={tagInfo.count === 1
-                        ? t("folderSidebar.tags.tooltip.one", { tag: tagInfo.tag, count: tagInfo.count })
-                        : t("folderSidebar.tags.tooltip.other", { tag: tagInfo.tag, count: tagInfo.count })}
-                    >
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full transition-transform group-hover:scale-110"
-                        style={{ backgroundColor: dotColor }}
-                      />
-                      <span className="truncate">{tagInfo.tag}</span>
-                    </button>
-                  );
-                })}
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-zinc-400 font-medium">{allTags.length}</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsTagsCollapsed((current) => !current)}
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-full text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-900 dark:hover:text-zinc-200"
+                    title={isTagsCollapsed ? t("folderSidebar.tags.expand") : t("folderSidebar.tags.collapse")}
+                  >
+                    <ChevronRight
+                      size={12}
+                      className={`transition-transform ${isTagsCollapsed ? "" : "rotate-90"}`}
+                    />
+                  </button>
                 </div>
               </div>
+              {!isTagsCollapsed && (
+                <>
+                  <div className="px-3 pb-2">
+                    <div className="flex items-center rounded-xl border border-zinc-200 bg-white px-3 focus-within:border-indigo-300 focus-within:ring-2 focus-within:ring-indigo-400/15 dark:border-zinc-800 dark:bg-zinc-950 dark:focus-within:border-indigo-800">
+                      <input
+                        type="text"
+                        value={tagSearchQuery}
+                        onChange={(event) => setTagSearchQuery(event.target.value)}
+                        placeholder={t("folderSidebar.tags.searchPlaceholder")}
+                        className="w-full bg-transparent py-2 text-xs text-zinc-700 outline-none dark:text-zinc-200 dark:placeholder:text-zinc-500"
+                      />
+                    </div>
+                  </div>
+                  {/* Tag pills */}
+                  <div className="max-h-40 overflow-y-auto px-3 pb-3">
+                    {filteredTags.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-zinc-200 bg-white px-3 py-3 text-xs text-zinc-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-500">
+                        {t("folderSidebar.tags.emptySearch")}
+                      </div>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5">
+                      {filteredTags.map(tagInfo => {
+                        const isActive = selectedTagFilter === tagInfo.tag;
+                        const dotColor = tagInfo.color || DEFAULT_TAG_COLOR;
+                        return (
+                          <button
+                            type="button"
+                            key={tagInfo.tag}
+                            className={[
+                              'group inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors',
+                              isActive
+                                ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900/70 dark:bg-indigo-950/40 dark:text-indigo-200'
+                                : 'border-zinc-200 bg-white text-zinc-600 hover:border-indigo-200 hover:bg-zinc-100 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:border-indigo-900/70 dark:hover:bg-zinc-900',
+                            ].join(' ')}
+                            onClick={() => onSelectTag(tagInfo.tag)}
+                            onContextMenu={e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setTagColorMenu({ tag: tagInfo.tag, currentColor: dotColor, x: e.clientX, y: e.clientY });
+                            }}
+                            title={tagInfo.count === 1
+                              ? t("folderSidebar.tags.tooltip.one", { tag: tagInfo.tag, count: tagInfo.count })
+                              : t("folderSidebar.tags.tooltip.other", { tag: tagInfo.tag, count: tagInfo.count })}
+                          >
+                            <span
+                              className="h-2 w-2 shrink-0 rounded-full transition-transform group-hover:scale-110"
+                              style={{ backgroundColor: dotColor }}
+                            />
+                            <span className="truncate">{tagInfo.tag}</span>
+                          </button>
+                        );
+                      })}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </>
@@ -1076,6 +1232,48 @@ export function FolderSidebar({
                 <p className="text-xs text-amber-600 dark:text-amber-300">
                   {t("folderSidebar.smartCollections.dialog.ruleRequired")}
                 </p>
+              )}
+
+              {hasSmartCollectionRule && (
+                <div className="rounded-xl border border-cyan-100 bg-cyan-50 px-4 py-3 dark:border-cyan-900/70 dark:bg-cyan-950/20">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-cyan-700 dark:text-cyan-200">
+                      {t("folderSidebar.smartCollections.dialog.preview.title", undefined, "Live Preview")}
+                    </div>
+                    <div className="text-xs font-medium text-cyan-700 dark:text-cyan-200">
+                      {t(
+                        "folderSidebar.smartCollections.dialog.preview.matches",
+                        { count: smartCollectionPreviewItems.length },
+                        `${smartCollectionPreviewItems.length} matches`,
+                      )}
+                    </div>
+                  </div>
+                  {smartCollectionPreviewItems.length === 0 ? (
+                    <p className="mt-2 text-xs text-cyan-700/80 dark:text-cyan-200/80">
+                      {t("folderSidebar.smartCollections.dialog.preview.empty", undefined, "No papers currently match these rules.")}
+                    </p>
+                  ) : (
+                    <div className="mt-2 space-y-1.5">
+                      {smartCollectionPreviewTitles.map((item) => (
+                        <div
+                          key={item.id}
+                          className="truncate rounded-lg border border-cyan-100 bg-white/80 px-3 py-2 text-xs text-zinc-700 dark:border-cyan-900/50 dark:bg-zinc-950/70 dark:text-zinc-200"
+                        >
+                          {item.title || item.attachments?.[0]?.name || item.id}
+                        </div>
+                      ))}
+                      {smartCollectionPreviewItems.length > smartCollectionPreviewTitles.length ? (
+                        <div className="text-[11px] text-cyan-700/80 dark:text-cyan-200/80">
+                          {t(
+                            "folderSidebar.smartCollections.dialog.preview.more",
+                            { count: smartCollectionPreviewItems.length - smartCollectionPreviewTitles.length },
+                            `${smartCollectionPreviewItems.length - smartCollectionPreviewTitles.length} more`,
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
               )}
 
               <div className="flex justify-end gap-2">

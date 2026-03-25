@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   clampColumnWidth,
+  DEFAULT_SORT_PREFERENCES,
   formatDateLabel,
   getResponsiveColumns,
   getVisibleColumns,
   normalizeColumnVisibility,
   normalizeColumnWidths,
+  normalizeSortPreferences,
 } from "./libraryViewUtils";
 
 describe("libraryViewUtils", () => {
@@ -26,6 +28,15 @@ describe("libraryViewUtils", () => {
     expect(getResponsiveColumns(880)).toEqual(["title", "authors", "year"]);
     expect(getResponsiveColumns(1040)).toEqual(["title", "authors", "year", "publication"]);
     expect(getResponsiveColumns(1280)).toEqual(["title", "authors", "year", "publication", "dateAdded"]);
+  });
+
+  it("normalizes persisted sort preferences", () => {
+    expect(normalizeSortPreferences({ column: "year", direction: "asc" })).toEqual({
+      column: "year",
+      direction: "asc",
+    });
+    expect(normalizeSortPreferences({ column: "unknown", direction: "sideways" })).toEqual(DEFAULT_SORT_PREFERENCES);
+    expect(normalizeSortPreferences(null)).toEqual(DEFAULT_SORT_PREFERENCES);
   });
 
   it("formats numeric timestamps and keeps invalid values readable", () => {

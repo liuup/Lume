@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LibraryView } from "./LibraryView";
 import type { DuplicateGroup, FolderNode, LibraryItem } from "../../types";
+import { SORT_PREFERENCES_STORAGE_KEY } from "./libraryViewUtils";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -50,15 +51,77 @@ const item: LibraryItem = {
   }],
 };
 
+const secondItem: LibraryItem = {
+  ...item,
+  id: "paper-2",
+  title: "Scaling Laws for Neural Language Models",
+  authors: "Kaplan, McCandlish",
+  year: "2020",
+  publication: "arXiv",
+  date_added: "1720000000",
+  attachments: [{
+    id: "att-2",
+    item_id: "paper-2",
+    name: "Scaling Laws for Neural Language Models",
+    path: "/tmp/scaling-laws.pdf",
+    attachment_type: "PDF",
+  }],
+};
+
 const folderTree: FolderNode[] = [{
   id: "root",
   name: "My Library",
   path: "root",
   children: [],
-  items: [item],
+  items: [item, secondItem],
 }];
 
+const originalLocalStorage = window.localStorage;
+
+function installLocalStorageMock(initialEntries: Record<string, string> = {}) {
+  const store = new Map(Object.entries(initialEntries));
+  const getItem = vi.fn((key: string) => store.get(key) ?? null);
+  const setItem = vi.fn((key: string, value: string) => {
+    store.set(key, value);
+  });
+  const removeItem = vi.fn((key: string) => {
+    store.delete(key);
+  });
+  const clear = vi.fn(() => {
+    store.clear();
+  });
+
+  const storage = {
+    get length() {
+      return store.size;
+    },
+    clear,
+    getItem,
+    key: vi.fn((index: number) => Array.from(store.keys())[index] ?? null),
+    removeItem,
+    setItem,
+  } satisfies Storage;
+
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: storage,
+  });
+
+  return { storage, getItem, setItem, store };
+}
+
 describe("LibraryView", () => {
+  beforeEach(() => {
+    installLocalStorageMock();
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: originalLocalStorage,
+    });
+  });
+
   it("shows a header context menu and keeps title visible", async () => {
     render(
       <LibraryView
@@ -97,6 +160,38 @@ describe("LibraryView", () => {
     });
 
     expect(screen.getByRole("button", { name: /^title$/i })).toBeInTheDocument();
+    expect(screen.getByText("Attention Is All You Need")).toBeInTheDocument();
+  });
+
+  it("renders even when localStorage is unavailable for writes", () => {
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: vi.fn(() => null),
+      },
+    });
+
+    render(
+      <LibraryView
+        folderTree={folderTree}
+        trashItems={[]}
+        isTrashView={false}
+        selectedFolderId="root"
+        selectedItemId={null}
+        onSelectItem={() => undefined}
+        onOpenItem={() => undefined}
+        onAddItem={() => undefined}
+        onDeleteItem={() => undefined}
+        onRestoreItem={() => undefined}
+        onEmptyTrash={() => undefined}
+        onRenameItem={() => undefined}
+        onUpdateItemTags={() => undefined}
+        onItemPointerDown={() => undefined}
+        tagFilter={null}
+        onClearTagFilter={() => undefined}
+      />
+    );
+
     expect(screen.getByText("Attention Is All You Need")).toBeInTheDocument();
   });
 
@@ -194,5 +289,45 @@ describe("LibraryView", () => {
     });
     expect(onAddIdentifier).toHaveBeenNthCalledWith(1, "10.48550/arXiv.1706.03762", { silent: true });
     expect(onAddIdentifier).toHaveBeenNthCalledWith(2, "1706.03762", { silent: true });
+  });
+
+  it("restores persisted sort preferences and updates them when toggled", () => {
+    const { setItem } = installLocalStorageMock({
+      [SORT_PREFERENCES_STORAGE_KEY]: JSON.stringify({ column: "year", direction: "asc" }),
+    });
+
+    const { container } = render(
+      <LibraryView
+        folderTree={folderTree}
+        trashItems={[]}
+        isTrashView={false}
+        selectedFolderId="root"
+        selectedItemId={null}
+        onSelectItem={() => undefined}
+        onOpenItem={() => undefined}
+        onAddItem={() => undefined}
+        onDeleteItem={() => undefined}
+        onRestoreItem={() => undefined}
+        onEmptyTrash={() => undefined}
+        onRenameItem={() => undefined}
+        onUpdateItemTags={() => undefined}
+        onItemPointerDown={() => undefined}
+        tagFilter={null}
+        onClearTagFilter={() => undefined}
+      />
+    );
+
+    const titleNodes = Array.from(container.querySelectorAll(".library-item-title"));
+    expect(titleNodes.map((node) => node.textContent)).toEqual([
+      "Attention Is All You Need",
+      "Scaling Laws for Neural Language Models",
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^year$/i }));
+
+    expect(setItem).toHaveBeenCalledWith(
+      SORT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({ column: "year", direction: "desc" }),
+    );
   });
 });

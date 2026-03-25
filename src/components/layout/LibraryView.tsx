@@ -13,11 +13,14 @@ import {
   COLUMN_WIDTH_STORAGE_KEY,
   DEFAULT_COLUMN_VISIBILITY,
   DEFAULT_COLUMN_WIDTHS,
+  DEFAULT_SORT_PREFERENCES,
   formatDateLabel,
   getResponsiveColumns,
   getVisibleColumns,
   normalizeColumnVisibility,
   normalizeColumnWidths,
+  normalizeSortPreferences,
+  SORT_PREFERENCES_STORAGE_KEY,
   type ColumnVisibilityMap,
   type ColumnWidthMap,
   type SortColumn,
@@ -48,6 +51,49 @@ function parseIdentifierBatchInput(raw: string): string[] {
       .map((value) => value.trim())
       .filter(Boolean),
   ));
+}
+
+function getSafeLocalStorage() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const storage = window.localStorage;
+    if (!storage || typeof storage.getItem !== "function" || typeof storage.setItem !== "function") {
+      return null;
+    }
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredJson<T>(key: string, normalize: (value: unknown) => T, fallback: T) {
+  const storage = getSafeLocalStorage();
+  if (!storage) {
+    return fallback;
+  }
+
+  try {
+    const raw = storage.getItem(key);
+    return raw ? normalize(JSON.parse(raw)) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredJson(key: string, value: unknown) {
+  const storage = getSafeLocalStorage();
+  if (!storage) {
+    return;
+  }
+
+  try {
+    storage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage write failures so the library view still renders in restricted environments.
+  }
 }
 
 interface LibraryViewProps {
@@ -119,32 +165,26 @@ export function LibraryView({
   // Search state
   const [query, setQuery]             = useState("");
   const [yearFilter, setYearFilter]   = useState("");
-  const [sortColumn, setSortColumn] = useState<SortColumn>("dateAdded");
-  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => {
-    if (typeof window === "undefined") {
-      return DEFAULT_COLUMN_WIDTHS;
-    }
-
-    try {
-      const raw = window.localStorage.getItem(COLUMN_WIDTH_STORAGE_KEY);
-      return raw ? normalizeColumnWidths(JSON.parse(raw)) : DEFAULT_COLUMN_WIDTHS;
-    } catch {
-      return DEFAULT_COLUMN_WIDTHS;
-    }
-  });
-  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityMap>(() => {
-    if (typeof window === "undefined") {
-      return DEFAULT_COLUMN_VISIBILITY;
-    }
-
-    try {
-      const raw = window.localStorage.getItem(COLUMN_VISIBILITY_STORAGE_KEY);
-      return raw ? normalizeColumnVisibility(JSON.parse(raw)) : DEFAULT_COLUMN_VISIBILITY;
-    } catch {
-      return DEFAULT_COLUMN_VISIBILITY;
-    }
-  });
+  const [sortColumn, setSortColumn] = useState<SortColumn>(() => readStoredJson(
+    SORT_PREFERENCES_STORAGE_KEY,
+    (value) => normalizeSortPreferences(value).column,
+    DEFAULT_SORT_PREFERENCES.column,
+  ));
+  const [sortDirection, setSortDirection] = useState<SortDirection>(() => readStoredJson(
+    SORT_PREFERENCES_STORAGE_KEY,
+    (value) => normalizeSortPreferences(value).direction,
+    DEFAULT_SORT_PREFERENCES.direction,
+  ));
+  const [columnWidths, setColumnWidths] = useState<ColumnWidthMap>(() => readStoredJson(
+    COLUMN_WIDTH_STORAGE_KEY,
+    normalizeColumnWidths,
+    DEFAULT_COLUMN_WIDTHS,
+  ));
+  const [columnVisibility, setColumnVisibility] = useState<ColumnVisibilityMap>(() => readStoredJson(
+    COLUMN_VISIBILITY_STORAGE_KEY,
+    normalizeColumnVisibility,
+    DEFAULT_COLUMN_VISIBILITY,
+  ));
   const [globalResults, setGlobalResults] = useState<LibraryItem[]>([]);
   const [isSearching, setIsSearching]     = useState(false);
 
@@ -248,17 +288,22 @@ export function LibraryView({
   }, [query, yearFilter, tagFilter]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(COLUMN_WIDTH_STORAGE_KEY, JSON.stringify(columnWidths));
+    writeStoredJson(COLUMN_WIDTH_STORAGE_KEY, columnWidths);
   }, [columnWidths]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(
+    writeStoredJson(
       COLUMN_VISIBILITY_STORAGE_KEY,
-      JSON.stringify({ ...columnVisibility, title: true })
+      { ...columnVisibility, title: true },
     );
   }, [columnVisibility]);
+
+  useEffect(() => {
+    writeStoredJson(SORT_PREFERENCES_STORAGE_KEY, {
+      column: sortColumn,
+      direction: sortDirection,
+    });
+  }, [sortColumn, sortDirection]);
 
   useEffect(() => {
     return () => {

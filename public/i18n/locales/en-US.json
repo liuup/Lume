@@ -580,12 +580,15 @@
     },
     "recents": {
       "title": "Recent",
-      "resumeAt": "Resume at page {page}"
+      "resumeAt": "Resume at page {page}",
+      "remove": "Remove from recent",
+      "clear": "Clear all"
     },
     "favorites": {
       "title": "Favorites",
       "empty": "No favorite papers yet.",
-      "open": "Open paper"
+      "open": "Open paper",
+      "remove": "Remove from favorites"
     },
     "duplicates": {
       "title": "Duplicates",
@@ -600,6 +603,9 @@
       "create": "Create smart collection",
       "edit": "Edit smart collection",
       "delete": "Delete smart collection",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "count": "{count}",
       "emptyRules": "No filters configured",
       "summary": {
         "year": "Year",
@@ -622,6 +628,12 @@
         "cancel": "Cancel",
         "create": "Create",
         "save": "Save",
+        "preview": {
+          "title": "Live Preview",
+          "matches": "{count} matches",
+          "empty": "No papers currently match these rules.",
+          "more": "{count} more"
+        },
         "matchMode": {
           "label": "Match",
           "all": "All",
@@ -631,6 +643,10 @@
     },
     "tags": {
       "title": "Tags",
+      "collapse": "Hide tags",
+      "expand": "Show tags",
+      "searchPlaceholder": "Filter tags",
+      "emptySearch": "No tags match this filter.",
       "activeFilter": "Active tag filter: #{tag}",
       "tooltip": {
         "one": "{tag} — {count} paper (right-click to change color)",

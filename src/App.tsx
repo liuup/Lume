@@ -93,6 +93,8 @@ function App() {
     importIdentifier,
     handleOpenItem,
     handleOpenRecentDocument,
+    removeRecentDocument,
+    clearRecentDocuments,
     mergeDuplicateGroup,
     handleCloseTab,
     handlePageJump,
@@ -103,10 +105,12 @@ function App() {
     getPageBookmarks,
     isPageBookmarked,
     togglePageBookmark,
+    getSmartCollectionPreviewItems,
     getSmartCollectionItems,
     createSmartCollection,
     updateSmartCollection,
     deleteSmartCollection,
+    moveSmartCollection,
     handleAddFolder,
     handleDeleteItem,
     handleRenameItem,
@@ -1034,9 +1038,14 @@ function App() {
               onOpenRecentDocument={(itemId) => {
                 void handleOpenRecentDocument(itemId);
               }}
+              onRemoveRecentDocument={removeRecentDocument}
+              onClearRecentDocuments={clearRecentDocuments}
               favoriteDocuments={favoriteDocuments}
               onOpenFavoriteDocument={(itemId) => {
                 void handleOpenRecentDocument(itemId);
+              }}
+              onRemoveFavoriteDocument={(itemId) => {
+                toggleFavoriteItem(itemId);
               }}
               duplicateGroups={duplicateGroups}
               isDuplicatesSelected={isDuplicatesSelected}
@@ -1057,6 +1066,8 @@ function App() {
               }}
               onUpdateSmartCollection={updateSmartCollection}
               onDeleteSmartCollection={deleteSmartCollection}
+              onMoveSmartCollection={moveSmartCollection}
+              getSmartCollectionPreviewItems={getSmartCollectionPreviewItems}
               allTags={allTags}
               selectedTagFilter={selectedTagFilter}
               onSelectTag={t => setSelectedTagFilter(prev => prev === t ? null : t)}

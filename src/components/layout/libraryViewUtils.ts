@@ -4,15 +4,24 @@ export type SortColumn = "title" | "authors" | "year" | "publication" | "dateAdd
 export type SortDirection = "asc" | "desc";
 export type ColumnWidthMap = Record<SortColumn, number>;
 export type ColumnVisibilityMap = Record<SortColumn, boolean>;
+export type SortPreferences = {
+  column: SortColumn;
+  direction: SortDirection;
+};
 
 export const COLUMN_WIDTH_STORAGE_KEY = "lume.library.column-widths";
 export const COLUMN_VISIBILITY_STORAGE_KEY = "lume.library.column-visibility";
+export const SORT_PREFERENCES_STORAGE_KEY = "lume.library.sort-preferences";
 export const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   title: 260,
   authors: 150,
   year: 72,
   publication: 170,
   dateAdded: 116,
+};
+export const DEFAULT_SORT_PREFERENCES: SortPreferences = {
+  column: "dateAdded",
+  direction: "desc",
 };
 export const MIN_COLUMN_WIDTHS: ColumnWidthMap = {
   title: 180,
@@ -106,6 +115,30 @@ export function normalizeColumnVisibility(value: unknown): ColumnVisibilityMap {
 
   next.title = true;
   return next;
+}
+
+export function normalizeSortColumn(value: unknown): SortColumn {
+  return typeof value === "string" && COLUMN_ORDER.includes(value as SortColumn)
+    ? value as SortColumn
+    : DEFAULT_SORT_PREFERENCES.column;
+}
+
+export function normalizeSortDirection(value: unknown): SortDirection {
+  return value === "asc" || value === "desc"
+    ? value
+    : DEFAULT_SORT_PREFERENCES.direction;
+}
+
+export function normalizeSortPreferences(value: unknown): SortPreferences {
+  if (!value || typeof value !== "object") {
+    return { ...DEFAULT_SORT_PREFERENCES };
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return {
+    column: normalizeSortColumn(candidate.column),
+    direction: normalizeSortDirection(candidate.direction),
+  };
 }
 
 export function getResponsiveColumns(listViewportWidth: number): SortColumn[] {

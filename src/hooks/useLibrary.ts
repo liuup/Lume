@@ -30,6 +30,7 @@ import {
   ReferenceImportResult,
   SMART_COLLECTION_PREFIX,
   SmartCollection,
+  SmartCollectionDraft,
   SmartCollectionMatchMode,
   DEFAULT_FOLDER,
   TRASH_FOLDER_ID,
@@ -249,6 +250,20 @@ function parseSmartCollections(value: string | undefined) {
   }
 }
 
+function moveListItem<T>(items: T[], fromIndex: number, toIndex: number) {
+  if (fromIndex < 0 || fromIndex >= items.length || toIndex < 0 || toIndex >= items.length || fromIndex === toIndex) {
+    return items;
+  }
+
+  const next = [...items];
+  const [moved] = next.splice(fromIndex, 1);
+  if (moved === undefined) {
+    return items;
+  }
+  next.splice(toIndex, 0, moved);
+  return next;
+}
+
 function parseSmartCollectionFolderId(folderId: string) {
   return folderId.startsWith(SMART_COLLECTION_PREFIX)
     ? folderId.slice(SMART_COLLECTION_PREFIX.length)
@@ -437,7 +452,7 @@ export function useLibrary() {
     });
   }, [libraryItems]);
 
-  const matchesSmartCollection = useCallback((item: LibraryItem, collection: SmartCollection) => {
+  const matchesSmartCollection = useCallback((item: LibraryItem, collection: SmartCollectionDraft) => {
     const checks: boolean[] = [];
     const searchText = buildSmartCollectionSearchText(item);
 
@@ -472,14 +487,18 @@ export function useLibrary() {
       : checks.every(Boolean);
   }, [favoriteItemIds]);
 
-  const getSmartCollectionItems = useCallback((collectionId: string) => {
-    const collection = smartCollections.find((entry) => entry.id === collectionId);
+  const getSmartCollectionPreviewItems = useCallback((collection: SmartCollectionDraft | null | undefined) => {
     if (!collection) {
       return [] as LibraryItem[];
     }
 
     return libraryItems.filter((item) => matchesSmartCollection(item, collection));
-  }, [libraryItems, matchesSmartCollection, smartCollections]);
+  }, [libraryItems, matchesSmartCollection]);
+
+  const getSmartCollectionItems = useCallback((collectionId: string) => {
+    const collection = smartCollections.find((entry) => entry.id === collectionId);
+    return getSmartCollectionPreviewItems(collection);
+  }, [getSmartCollectionPreviewItems, smartCollections]);
 
   // Sync background Rust PDF context when switching tabs.
   // Keep the Rust-side document loaded for commands that still depend on backend PDF context.
@@ -625,6 +644,10 @@ export function useLibrary() {
     persistRecentDocuments((previous) => previous.filter((entry) => entry.itemId !== itemId));
   }, [persistRecentDocuments]);
 
+  const clearRecentDocuments = useCallback(() => {
+    persistRecentDocuments(() => []);
+  }, [persistRecentDocuments]);
+
   const replaceRecentDocument = useCallback((previousItemId: string, item: LibraryItem, page?: number) => {
     persistRecentDocuments((previous) => {
       const existing = previous.find((entry) => entry.itemId === previousItemId || entry.itemId === item.id);
@@ -719,8 +742,7 @@ export function useLibrary() {
     setSmartCollections((previous) => {
       const next = updater(previous)
         .map((entry) => normalizeSmartCollection(entry))
-        .filter((entry): entry is SmartCollection => Boolean(entry))
-        .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: "base" }));
+        .filter((entry): entry is SmartCollection => Boolean(entry));
 
       void invoke("save_setting", {
         key: SMART_COLLECTIONS_KEY,
@@ -765,6 +787,18 @@ export function useLibrary() {
         ? DEFAULT_FOLDER.id
         : previous
     ));
+  }, [persistSmartCollections]);
+
+  const moveSmartCollection = useCallback((collectionId: string, direction: "up" | "down") => {
+    persistSmartCollections((previous) => {
+      const currentIndex = previous.findIndex((entry) => entry.id === collectionId);
+      if (currentIndex === -1) {
+        return previous;
+      }
+
+      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+      return moveListItem(previous, currentIndex, targetIndex);
+    });
   }, [persistSmartCollections]);
 
   const togglePageBookmark = useCallback((itemId: string, page: number) => {
@@ -1815,6 +1849,8 @@ export function useLibrary() {
     importReferenceFiles,
     handleOpenItem,
     handleOpenRecentDocument,
+    removeRecentDocument,
+    clearRecentDocuments,
     mergeDuplicateGroup,
     handleCloseTab,
     handlePageJump,
@@ -1825,10 +1861,12 @@ export function useLibrary() {
     getPageBookmarks,
     isPageBookmarked,
     togglePageBookmark,
+    getSmartCollectionPreviewItems,
     getSmartCollectionItems,
     createSmartCollection,
     updateSmartCollection,
     deleteSmartCollection,
+    moveSmartCollection,
     handleAddFolder,
     handleDeleteItem,
     handleRenameItem,

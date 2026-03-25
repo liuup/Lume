@@ -144,6 +144,8 @@ export interface SmartCollection {
   updatedAt: string;
 }
 
+export type SmartCollectionDraft = Omit<SmartCollection, "id" | "createdAt" | "updatedAt">;
+
 export interface OpenTab {
   id: string;
   item: LibraryItem;
