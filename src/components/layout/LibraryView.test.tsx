@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import { LibraryView } from "./LibraryView";
 import type { DuplicateGroup, FolderNode, LibraryItem } from "../../types";
 import { SORT_PREFERENCES_STORAGE_KEY } from "./libraryViewUtils";
@@ -14,6 +15,13 @@ vi.mock("../../hooks/useI18n", () => ({
       const parts = _key.split(".");
       return fallback ?? parts[parts.length - 1] ?? _key;
     },
+  }),
+}));
+
+vi.mock("../../hooks/useFeedback", () => ({
+  useFeedback: () => ({
+    success: vi.fn(),
+    error: vi.fn(),
   }),
 }));
 
@@ -68,6 +76,46 @@ const secondItem: LibraryItem = {
   }],
 };
 
+const needsMetadataItem: LibraryItem = {
+  ...item,
+  id: "paper-3",
+  title: "Incomplete Entry",
+  authors: "",
+  year: "",
+  publication: "",
+  doi: "",
+  arxiv_id: "",
+  url: "",
+  date_added: "1730000000",
+  attachments: [{
+    id: "att-3",
+    item_id: "paper-3",
+    name: "incomplete-entry.pdf",
+    path: "/tmp/incomplete-entry.pdf",
+    attachment_type: "PDF",
+  }],
+};
+
+const missingYearItem: LibraryItem = {
+  ...item,
+  id: "paper-4",
+  title: "Missing Year Entry",
+  authors: "Doe, Jane",
+  year: "",
+  publication: "ICML",
+  doi: "10.1000/example",
+  arxiv_id: "",
+  url: "",
+  date_added: "1740000000",
+  attachments: [{
+    id: "att-4",
+    item_id: "paper-4",
+    name: "missing-year-entry.pdf",
+    path: "/tmp/missing-year-entry.pdf",
+    attachment_type: "PDF",
+  }],
+};
+
 const folderTree: FolderNode[] = [{
   id: "root",
   name: "My Library",
@@ -113,6 +161,7 @@ function installLocalStorageMock(initialEntries: Record<string, string> = {}) {
 describe("LibraryView", () => {
   beforeEach(() => {
     installLocalStorageMock();
+    vi.mocked(invoke).mockReset();
   });
 
   afterEach(() => {
@@ -289,6 +338,95 @@ describe("LibraryView", () => {
     });
     expect(onAddIdentifier).toHaveBeenNthCalledWith(1, "10.48550/arXiv.1706.03762", { silent: true });
     expect(onAddIdentifier).toHaveBeenNthCalledWith(2, "1706.03762", { silent: true });
+  });
+
+  it("filters the list down to items that need metadata review", async () => {
+    const folderTreeWithIncomplete: FolderNode[] = [{
+      ...folderTree[0],
+      items: [item, needsMetadataItem],
+    }];
+
+    render(
+      <LibraryView
+        folderTree={folderTreeWithIncomplete}
+        trashItems={[]}
+        isTrashView={false}
+        selectedFolderId="root"
+        selectedItemId={null}
+        onSelectItem={() => undefined}
+        onOpenItem={() => undefined}
+        onAddItem={() => undefined}
+        onDeleteItem={() => undefined}
+        onRestoreItem={() => undefined}
+        onEmptyTrash={() => undefined}
+        onRenameItem={() => undefined}
+        onUpdateItemTags={() => undefined}
+        onItemPointerDown={() => undefined}
+        tagFilter={null}
+        onClearTagFilter={() => undefined}
+      />
+    );
+
+    expect(screen.getByText("3 missing")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /needs metadata/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Incomplete Entry")).toBeInTheDocument();
+      expect(screen.queryByText("Attention Is All You Need")).not.toBeInTheDocument();
+    });
+  });
+
+  it("refreshes metadata for visible items that need review", async () => {
+    const onLibraryUpdated = vi.fn(async () => undefined);
+    vi.mocked(invoke).mockResolvedValue({ item, report: null } as never);
+
+    const folderTreeWithIncomplete: FolderNode[] = [{
+      ...folderTree[0],
+      items: [item, secondItem, needsMetadataItem, missingYearItem],
+    }];
+
+    render(
+      <LibraryView
+        folderTree={folderTreeWithIncomplete}
+        trashItems={[]}
+        isTrashView={false}
+        selectedFolderId="root"
+        selectedItemId={null}
+        onSelectItem={() => undefined}
+        onOpenItem={() => undefined}
+        onAddItem={() => undefined}
+        onDeleteItem={() => undefined}
+        onRestoreItem={() => undefined}
+        onEmptyTrash={() => undefined}
+        onRenameItem={() => undefined}
+        onUpdateItemTags={() => undefined}
+        onLibraryUpdated={onLibraryUpdated}
+        onItemPointerDown={() => undefined}
+        tagFilter={null}
+        onClearTagFilter={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /needs metadata/i }));
+    const metadataFilterGroup = screen.getByText("All Gaps").parentElement?.parentElement;
+    expect(metadataFilterGroup).not.toBeNull();
+    const yearFilterButton = within(metadataFilterGroup as HTMLElement)
+      .getAllByRole("button")
+      .find((button) => button.textContent?.toLowerCase().includes("year"));
+    expect(yearFilterButton).toBeDefined();
+    fireEvent.click(yearFilterButton as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: /refresh 2/i }));
+
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("retrieve_item_metadata", { itemId: "paper-3" });
+      expect(invoke).toHaveBeenCalledWith("retrieve_item_metadata", { itemId: "paper-4" });
+      expect(invoke).toHaveBeenCalledTimes(2);
+      expect(screen.getByText("Incomplete Entry")).toBeInTheDocument();
+      expect(screen.getByText("Missing Year Entry")).toBeInTheDocument();
+      expect(screen.queryByText("Attention Is All You Need")).not.toBeInTheDocument();
+      expect(onLibraryUpdated).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("restores persisted sort preferences and updates them when toggled", () => {

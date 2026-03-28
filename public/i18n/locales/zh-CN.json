@@ -127,6 +127,20 @@
           "description": "无法导入所选的 BibTeX、RIS 或 CSL JSON 文件。"
         }
       },
+      "metadataBatch": {
+        "success": {
+          "title": "元数据已批量补全",
+          "description": "已完成 {count} 个条目的元数据补全。"
+        },
+        "partial": {
+          "title": "批量补全已完成",
+          "description": "成功 {succeeded} 个，失败 {failed} 个。"
+        },
+        "error": {
+          "title": "批量补全失败",
+          "description": "当前视图中的条目元数据未能成功补全。"
+        }
+      },
       "tags": {
         "loadError": {
           "title": "加载标签失败",
@@ -488,8 +502,30 @@
       "noItems": "此文件夹中没有条目",
       "noDuplicates": "没有发现重复分组",
       "noSmartCollectionItems": "{name} 中还没有匹配的条目",
+      "noMetadataReviewItems": "当前视图里没有待补元数据的条目",
       "noFavorites": "还没有收藏的文献",
       "hint": "使用上方的“添加文献条目”按钮添加论文。"
+    },
+    "metadataHealth": {
+      "filters": {
+        "all": "全部条目",
+        "needsReview": "待补元数据"
+      },
+      "badge": "缺 {count} 项",
+      "tooltip": "待补字段：{fields}",
+      "emptyHint": "可以切换文件夹，或返回查看全部条目。",
+      "refresh": {
+        "action": "补全 {count} 条",
+        "progress": "补全中 {completed} / {total}",
+        "title": "为当前视图中的待补条目重新拉取元数据"
+      },
+      "fields": {
+        "all": "全部缺口",
+        "title": "标题",
+        "authors": "作者",
+        "year": "年份",
+        "source": "出版信息 / DOI"
+      }
     },
     "context": {
       "rename": "重命名条目",

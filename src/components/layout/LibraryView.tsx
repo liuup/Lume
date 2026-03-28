@@ -6,6 +6,7 @@ import { ExportModal } from "./ExportModal";
 import { preloadPdfDocument } from "../pdfDocumentRuntime";
 import { preloadPdfCoreRuntime } from "../pdfRuntime";
 import { useI18n } from "../../hooks/useI18n";
+import { useFeedback } from "../../hooks/useFeedback";
 import {
   clampColumnWidth,
   COLUMN_ORDER,
@@ -15,6 +16,8 @@ import {
   DEFAULT_COLUMN_WIDTHS,
   DEFAULT_SORT_PREFERENCES,
   formatDateLabel,
+  getMetadataHealth,
+  METADATA_HEALTH_FIELDS,
   getResponsiveColumns,
   getVisibleColumns,
   normalizeColumnVisibility,
@@ -23,9 +26,13 @@ import {
   SORT_PREFERENCES_STORAGE_KEY,
   type ColumnVisibilityMap,
   type ColumnWidthMap,
+  type MetadataHealthField,
   type SortColumn,
   type SortDirection,
 } from "./libraryViewUtils";
+
+type MetadataFilterMode = "all" | "needsReview";
+type MetadataFieldFilter = "all" | MetadataHealthField;
 
 // ─── Highlight utility ──────────────────────────────────────────────────────
 
@@ -123,6 +130,7 @@ interface LibraryViewProps {
   onEmptyTrash: () => Promise<void> | void;
   onRenameItem: (item: LibraryItem, nextName: string) => Promise<void> | void;
   onUpdateItemTags: (item: LibraryItem, tags: string[]) => Promise<void> | void;
+  onLibraryUpdated?: () => Promise<void> | void;
   onItemPointerDown: (item: LibraryItem, event: React.MouseEvent<HTMLDivElement>) => void;
   isFavoriteItem?: (itemId: string) => boolean;
   onToggleFavorite?: (item: LibraryItem) => void;
@@ -155,6 +163,7 @@ export function LibraryView({
   onEmptyTrash,
   onRenameItem,
   onUpdateItemTags,
+  onLibraryUpdated = async () => undefined,
   onItemPointerDown,
   isFavoriteItem = () => false,
   onToggleFavorite = () => {},
@@ -162,9 +171,12 @@ export function LibraryView({
   onClearTagFilter,
 }: LibraryViewProps) {
   const { t } = useI18n();
+  const feedback = useFeedback();
   // Search state
   const [query, setQuery]             = useState("");
   const [yearFilter, setYearFilter]   = useState("");
+  const [metadataFilter, setMetadataFilter] = useState<MetadataFilterMode>("all");
+  const [metadataFieldFilter, setMetadataFieldFilter] = useState<MetadataFieldFilter>("all");
   const [sortColumn, setSortColumn] = useState<SortColumn>(() => readStoredJson(
     SORT_PREFERENCES_STORAGE_KEY,
     (value) => normalizeSortPreferences(value).column,
@@ -196,6 +208,11 @@ export function LibraryView({
   const [showIdentifierImport, setShowIdentifierImport] = useState(false);
   const [identifierValue, setIdentifierValue] = useState("");
   const [isImportingIdentifier, setIsImportingIdentifier] = useState(false);
+  const [isRefreshingMetadataBatch, setIsRefreshingMetadataBatch] = useState(false);
+  const [metadataBatchProgress, setMetadataBatchProgress] = useState<{
+    completed: number;
+    total: number;
+  } | null>(null);
   const [identifierImportProgress, setIdentifierImportProgress] = useState<{
     total: number;
     completed: number;
@@ -251,6 +268,19 @@ export function LibraryView({
   // ── Global search via Tauri backend ─────────────────────────────────────
 
   const isGlobalSearch = !isTrashView && !isFavoritesView && !isDuplicatesView && !isSmartCollectionView && (query.trim().length > 0 || yearFilter.trim().length > 0 || !!tagFilter);
+  const supportsMetadataFilter = !isTrashView && !isDuplicatesView;
+
+  useEffect(() => {
+    if (!supportsMetadataFilter && metadataFilter !== "all") {
+      setMetadataFilter("all");
+    }
+  }, [metadataFilter, supportsMetadataFilter]);
+
+  useEffect(() => {
+    if (metadataFilter !== "needsReview" && metadataFieldFilter !== "all") {
+      setMetadataFieldFilter("all");
+    }
+  }, [metadataFieldFilter, metadataFilter]);
 
   const runGlobalSearch = useCallback(
     (q: string, year: string, sidebarTag: string | null) => {
@@ -542,7 +572,7 @@ export function LibraryView({
     return duplicateGroups.filter((group) => group.items.some((item) => matchesLocalFilters(item)));
   }, [duplicateGroups, isDuplicatesView, matchesLocalFilters]);
 
-  const displayItems = useMemo(() => {
+  const filteredItems = useMemo(() => {
     const sourceItems = isDuplicatesView
       ? Array.from(new Map(
         visibleDuplicateGroups.flatMap((group) => group.items).map((item) => [item.id, item]),
@@ -550,12 +580,49 @@ export function LibraryView({
       : isGlobalSearch
         ? globalResults
         : folderItems;
-    const items = [...sourceItems].filter((item) => {
+
+    return [...sourceItems].filter((item) => {
       if (isGlobalSearch) {
         return true;
       }
       return matchesLocalFilters(item);
     });
+  }, [folderItems, globalResults, isDuplicatesView, isGlobalSearch, matchesLocalFilters, visibleDuplicateGroups]);
+
+  const metadataReviewCount = useMemo(
+    () => filteredItems.filter((item) => getMetadataHealth(item).status === "needsReview").length,
+    [filteredItems],
+  );
+  const metadataReviewItems = useMemo(
+    () => filteredItems.filter((item) => getMetadataHealth(item).status === "needsReview"),
+    [filteredItems],
+  );
+  const metadataFieldCounts = useMemo(
+    () => Object.fromEntries(
+      METADATA_HEALTH_FIELDS.map((field) => [
+        field,
+        metadataReviewItems.filter((item) => getMetadataHealth(item).missingFields.includes(field)).length,
+      ]),
+    ) as Record<MetadataHealthField, number>,
+    [metadataReviewItems],
+  );
+  const activeMetadataReviewItems = useMemo(() => {
+    if (metadataFilter !== "needsReview") {
+      return metadataReviewItems;
+    }
+
+    if (metadataFieldFilter === "all") {
+      return metadataReviewItems;
+    }
+
+    return metadataReviewItems.filter((item) => getMetadataHealth(item).missingFields.includes(metadataFieldFilter));
+  }, [metadataFieldFilter, metadataFilter, metadataReviewItems]);
+
+  const displayItems = useMemo(() => {
+    const items = metadataFilter === "needsReview"
+      ? [...activeMetadataReviewItems]
+      : [...filteredItems];
+
     const getTimestamp = (value: string) => {
       const numeric = Number(value);
       if (!Number.isNaN(numeric) && numeric > 0) {
@@ -602,7 +669,7 @@ export function LibraryView({
     });
 
     return items;
-  }, [folderItems, globalResults, isDuplicatesView, isGlobalSearch, matchesLocalFilters, sortColumn, sortDirection, visibleDuplicateGroups]);
+  }, [activeMetadataReviewItems, filteredItems, metadataFilter, sortColumn, sortDirection]);
 
   const folderLabel = isTrashView
     ? t("folderSidebar.labels.trash")
@@ -741,6 +808,65 @@ export function LibraryView({
     }
   };
 
+  const handleRefreshMetadataBatch = async () => {
+    if (activeMetadataReviewItems.length === 0 || isRefreshingMetadataBatch) {
+      return;
+    }
+
+    let succeeded = 0;
+    let failed = 0;
+
+    setIsRefreshingMetadataBatch(true);
+    setMetadataBatchProgress({
+      completed: 0,
+      total: activeMetadataReviewItems.length,
+    });
+
+    try {
+      for (const [index, item] of activeMetadataReviewItems.entries()) {
+        try {
+          await invoke("retrieve_item_metadata", { itemId: item.id });
+          succeeded += 1;
+        } catch (error) {
+          failed += 1;
+          console.error(`Failed to refresh metadata for ${item.id}`, error);
+        } finally {
+          setMetadataBatchProgress({
+            completed: index + 1,
+            total: activeMetadataReviewItems.length,
+          });
+        }
+      }
+
+      await onLibraryUpdated();
+
+      if (succeeded > 0 && failed === 0) {
+        feedback.success({
+          title: t("feedback.library.metadataBatch.success.title"),
+          description: t("feedback.library.metadataBatch.success.description", {
+            count: succeeded,
+          }),
+        });
+      } else if (succeeded > 0) {
+        feedback.success({
+          title: t("feedback.library.metadataBatch.partial.title"),
+          description: t("feedback.library.metadataBatch.partial.description", {
+            succeeded,
+            failed,
+          }),
+        });
+      } else {
+        feedback.error({
+          title: t("feedback.library.metadataBatch.error.title"),
+          description: t("feedback.library.metadataBatch.error.description"),
+        });
+      }
+    } finally {
+      setIsRefreshingMetadataBatch(false);
+      setMetadataBatchProgress(null);
+    }
+  };
+
   return (
     <div className="flex-1 min-w-0 flex flex-col h-full bg-white dark:bg-zinc-950 relative">
 
@@ -839,6 +965,113 @@ export function LibraryView({
             </div>
           )}
 
+          {supportsMetadataFilter && (
+            <div className="ml-1 inline-flex items-center gap-1 rounded-xl border border-zinc-200 bg-white p-1 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+              <button
+                type="button"
+                aria-pressed={metadataFilter === "all"}
+                onClick={() => {
+                  setMetadataFilter("all");
+                  setMetadataFieldFilter("all");
+                }}
+                className={`inline-flex items-center gap-2 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                  metadataFilter === "all"
+                    ? "bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200"
+                    : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-200"
+                }`}
+              >
+                <span>{t("libraryView.metadataHealth.filters.all", undefined, "All Items")}</span>
+                <span className="rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500 dark:bg-zinc-900 dark:text-zinc-400">
+                  {filteredItems.length}
+                </span>
+              </button>
+              <button
+                type="button"
+                aria-pressed={metadataFilter === "needsReview"}
+                onClick={() => setMetadataFilter("needsReview")}
+                className={`inline-flex items-center gap-2 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                  metadataFilter === "needsReview"
+                    ? "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+                    : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-200"
+                }`}
+              >
+                <span>{t("libraryView.metadataHealth.filters.needsReview", undefined, "Needs Metadata")}</span>
+                <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/60 dark:text-amber-200">
+                  {metadataReviewCount}
+                </span>
+              </button>
+            </div>
+          )}
+
+          {supportsMetadataFilter && metadataFilter === "needsReview" && metadataReviewCount > 0 && (
+            <div className="ml-1 inline-flex items-center gap-1 rounded-xl border border-amber-200 bg-amber-50/70 p-1 dark:border-amber-900/50 dark:bg-amber-950/20">
+              <button
+                type="button"
+                aria-pressed={metadataFieldFilter === "all"}
+                onClick={() => setMetadataFieldFilter("all")}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors ${
+                  metadataFieldFilter === "all"
+                    ? "bg-white text-amber-700 dark:bg-zinc-950 dark:text-amber-200"
+                    : "text-amber-700/80 hover:bg-white/70 dark:text-amber-200/80 dark:hover:bg-zinc-950/60"
+                }`}
+              >
+                <span>{t("libraryView.metadataHealth.fields.all", undefined, "All Gaps")}</span>
+                <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/60 dark:text-amber-200">
+                  {metadataReviewCount}
+                </span>
+              </button>
+              {METADATA_HEALTH_FIELDS.map((field) => {
+                const count = metadataFieldCounts[field];
+                if (count === 0) {
+                  return null;
+                }
+
+                return (
+                  <button
+                    key={field}
+                    type="button"
+                    aria-pressed={metadataFieldFilter === field}
+                    onClick={() => setMetadataFieldFilter(field)}
+                    className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] font-medium transition-colors ${
+                      metadataFieldFilter === field
+                        ? "bg-white text-amber-700 dark:bg-zinc-950 dark:text-amber-200"
+                        : "text-amber-700/80 hover:bg-white/70 dark:text-amber-200/80 dark:hover:bg-zinc-950/60"
+                    }`}
+                  >
+                    <span>{t(`libraryView.metadataHealth.fields.${field}`, undefined, field)}</span>
+                    <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/60 dark:text-amber-200">
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {supportsMetadataFilter && activeMetadataReviewItems.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                void handleRefreshMetadataBatch();
+              }}
+              disabled={isRefreshingMetadataBatch}
+              className="ml-1 inline-flex items-center gap-2 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-1.5 text-xs font-semibold text-cyan-700 transition-colors hover:bg-cyan-100 disabled:cursor-wait disabled:opacity-70 dark:border-cyan-900/60 dark:bg-cyan-950/30 dark:text-cyan-200 dark:hover:bg-cyan-950/40"
+              title={t("libraryView.metadataHealth.refresh.title", undefined, "Refresh metadata for items in this view")}
+            >
+              {isRefreshingMetadataBatch ? <Loader2 size={13} className="animate-spin" /> : <Orbit size={13} />}
+              <span>
+                {isRefreshingMetadataBatch && metadataBatchProgress
+                  ? t("libraryView.metadataHealth.refresh.progress", {
+                    completed: metadataBatchProgress.completed,
+                    total: metadataBatchProgress.total,
+                  }, `${metadataBatchProgress.completed}/${metadataBatchProgress.total}`)
+                  : t("libraryView.metadataHealth.refresh.action", {
+                    count: activeMetadataReviewItems.length,
+                  }, `Refresh ${activeMetadataReviewItems.length}`)}
+              </span>
+            </button>
+          )}
+
         </div>
       </div>
 
@@ -854,7 +1087,9 @@ export function LibraryView({
             ) : (
               <>
                 <p className="text-sm">
-                  {isDuplicatesView
+                  {metadataFilter === "needsReview" && supportsMetadataFilter
+                    ? t("libraryView.empty.noMetadataReviewItems", undefined, "No items need metadata review here")
+                    : isDuplicatesView
                     ? t("libraryView.empty.noDuplicates", undefined, "No duplicate groups found")
                     : isSmartCollectionView
                     ? t("libraryView.empty.noSmartCollectionItems", { name: smartCollectionName ?? t("folderSidebar.smartCollections.title") })
@@ -863,7 +1098,9 @@ export function LibraryView({
                       : t("libraryView.empty.noItems")}
                 </p>
                 <p className="text-xs text-zinc-400">
-                  {isDuplicatesView
+                  {metadataFilter === "needsReview" && supportsMetadataFilter
+                    ? t("libraryView.metadataHealth.emptyHint", undefined, "Try another folder or switch back to all items.")
+                    : isDuplicatesView
                     ? t("libraryView.duplicates.hint", undefined, "Duplicate groups are inferred from DOI, arXiv ID, and title/author/year matches.")
                     : t("libraryView.empty.hint")}
                 </p>
@@ -1450,6 +1687,17 @@ function LibraryItemRow({
   const displayYear = item.year || "—";
   const displayPublication = item.publication || item.publisher || "—";
   const displayDateAdded = formatDateLabel(item.date_added);
+  const metadataHealth = getMetadataHealth(item);
+  const missingMetadataLabels = metadataHealth.missingFields.map((field) => (
+    t(`libraryView.metadataHealth.fields.${field}`, undefined, field)
+  ));
+  const metadataBadgeTitle = metadataHealth.status === "needsReview"
+    ? t(
+      "libraryView.metadataHealth.tooltip",
+      { fields: missingMetadataLabels.join(", ") },
+      `Missing: ${missingMetadataLabels.join(", ")}`,
+    )
+    : "";
   const warmPdfRuntime = () => {
     void preloadPdfCoreRuntime();
     const pdfPath = item.attachments?.[0]?.path || item.id;
@@ -1483,6 +1731,18 @@ function LibraryItemRow({
             <h3 className="library-item-title flex-1 truncate text-[13px] font-semibold text-zinc-800 transition-colors group-hover:text-indigo-900 dark:text-zinc-100 dark:group-hover:text-indigo-200">
               {highlight ? highlightText(displayTitle, highlight) : displayTitle}
             </h3>
+            {metadataHealth.status === "needsReview" ? (
+              <span
+                className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+                title={metadataBadgeTitle}
+              >
+                {t(
+                  "libraryView.metadataHealth.badge",
+                  { count: metadataHealth.missingFieldCount },
+                  `${metadataHealth.missingFieldCount} missing`,
+                )}
+              </span>
+            ) : null}
             <button
               type="button"
               onClick={(event) => {

@@ -127,6 +127,20 @@
           "description": "The selected BibTeX, RIS, or CSL JSON file could not be imported."
         }
       },
+      "metadataBatch": {
+        "success": {
+          "title": "Metadata refreshed",
+          "description": "Refreshed metadata for {count} items."
+        },
+        "partial": {
+          "title": "Batch refresh completed",
+          "description": "{succeeded} succeeded, {failed} failed."
+        },
+        "error": {
+          "title": "Batch refresh failed",
+          "description": "Could not refresh metadata for items in this view."
+        }
+      },
       "tags": {
         "loadError": {
           "title": "Failed to load tags",
@@ -488,8 +502,30 @@
       "noItems": "No items in this folder",
       "noDuplicates": "No duplicate groups found",
       "noSmartCollectionItems": "No items match {name}",
+      "noMetadataReviewItems": "No items in this view need metadata review",
       "noFavorites": "No favorite papers yet",
       "hint": "Use the Add Library Item button above to add a paper."
+    },
+    "metadataHealth": {
+      "filters": {
+        "all": "All Items",
+        "needsReview": "Needs Metadata"
+      },
+      "badge": "{count} missing",
+      "tooltip": "Missing fields: {fields}",
+      "emptyHint": "Try another folder, or switch back to all items.",
+      "refresh": {
+        "action": "Refresh {count}",
+        "progress": "Refreshing {completed} / {total}",
+        "title": "Refresh metadata for items in the current view"
+      },
+      "fields": {
+        "all": "All Gaps",
+        "title": "Title",
+        "authors": "Authors",
+        "year": "Year",
+        "source": "Publication / DOI"
+      }
     },
     "context": {
       "rename": "Rename Item",

@@ -3,6 +3,7 @@ import {
   clampColumnWidth,
   DEFAULT_SORT_PREFERENCES,
   formatDateLabel,
+  getMetadataHealth,
   getResponsiveColumns,
   getVisibleColumns,
   normalizeColumnVisibility,
@@ -43,5 +44,32 @@ describe("libraryViewUtils", () => {
     expect(formatDateLabel("1710000000")).not.toBe("1710000000");
     expect(formatDateLabel("not-a-date")).toBe("not-a-date");
     expect(formatDateLabel("")).toBe("—");
+  });
+
+  it("marks items with missing core metadata for review", () => {
+    expect(getMetadataHealth({
+      title: "Attention Is All You Need",
+      authors: "Vaswani et al.",
+      year: "2017",
+      publication: "NeurIPS",
+    })).toEqual({
+      missingFields: [],
+      missingFieldCount: 0,
+      status: "complete",
+    });
+
+    expect(getMetadataHealth({
+      title: "Untitled import",
+      authors: "",
+      year: "",
+      publication: "",
+      doi: "",
+      arxiv_id: "",
+      url: "",
+    })).toEqual({
+      missingFields: ["authors", "year", "source"],
+      missingFieldCount: 3,
+      status: "needsReview",
+    });
   });
 });

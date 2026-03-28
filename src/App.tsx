@@ -1113,6 +1113,7 @@ function App() {
               onEmptyTrash={handleEmptyTrash}
               onRenameItem={handleRenameItem}
               onUpdateItemTags={handleUpdateItemTags}
+              onLibraryUpdated={handleItemUpdatedLocally}
               onItemPointerDown={handleItemPointerDown}
               isFavoriteItem={isFavoriteItem}
               onToggleFavorite={(item) => toggleFavoriteItem(item.id)}

@@ -4,14 +4,28 @@ export type SortColumn = "title" | "authors" | "year" | "publication" | "dateAdd
 export type SortDirection = "asc" | "desc";
 export type ColumnWidthMap = Record<SortColumn, number>;
 export type ColumnVisibilityMap = Record<SortColumn, boolean>;
+export type MetadataHealthField = "title" | "authors" | "year" | "source";
+export type MetadataHealthStatus = "complete" | "needsReview";
 export type SortPreferences = {
   column: SortColumn;
   direction: SortDirection;
 };
 
+type MetadataCandidate = {
+  title?: string;
+  authors?: string;
+  year?: string;
+  publication?: string;
+  publisher?: string;
+  doi?: string;
+  arxiv_id?: string;
+  url?: string;
+};
+
 export const COLUMN_WIDTH_STORAGE_KEY = "lume.library.column-widths";
 export const COLUMN_VISIBILITY_STORAGE_KEY = "lume.library.column-visibility";
 export const SORT_PREFERENCES_STORAGE_KEY = "lume.library.sort-preferences";
+export const METADATA_HEALTH_FIELDS: MetadataHealthField[] = ["title", "authors", "year", "source"];
 export const DEFAULT_COLUMN_WIDTHS: ColumnWidthMap = {
   title: 260,
   authors: 150,
@@ -166,4 +180,40 @@ export function getVisibleColumns(
   columnVisibility: ColumnVisibilityMap,
 ): SortColumn[] {
   return responsiveColumns.filter((column) => column === "title" || columnVisibility[column]);
+}
+
+function hasValue(value: string | undefined) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+export function getMetadataHealth(item: MetadataCandidate) {
+  const missingFields: MetadataHealthField[] = [];
+
+  if (!hasValue(item.title)) {
+    missingFields.push("title");
+  }
+
+  if (!hasValue(item.authors)) {
+    missingFields.push("authors");
+  }
+
+  if (!hasValue(item.year)) {
+    missingFields.push("year");
+  }
+
+  const hasSourceContext = hasValue(item.publication)
+    || hasValue(item.publisher)
+    || hasValue(item.doi)
+    || hasValue(item.arxiv_id)
+    || hasValue(item.url);
+
+  if (!hasSourceContext) {
+    missingFields.push("source");
+  }
+
+  return {
+    missingFields,
+    missingFieldCount: missingFields.length,
+    status: missingFields.length > 0 ? "needsReview" as MetadataHealthStatus : "complete" as MetadataHealthStatus,
+  };
 }
